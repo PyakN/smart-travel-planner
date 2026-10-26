@@ -78,13 +78,15 @@
 **Result:** −55% walking vs the selection order and −1% vs an LLM-made itinerary (13 → 0 crossings); never longer than the selection order (property-tested); optimizer ≤ 8 ms per trip.
 
 ## Phase 5. Planning API
-- [ ] `POST /plan`: request → LLM → candidates → optimizer → response
-- [ ] Response schema: days, ordered stops, geometry, distance, time
-- [ ] Timeouts, clear errors, step tracing (for debugging)
-- [ ] Persist the route to `routes` / `route_stops`
-- [ ] End-to-end integration tests (LLM mocked)
+- [x] `POST /plan`: request → LLM → candidates → optimizer → response (optional hotel start / round trip)
+- [x] Response schema: days, ordered stops with arrive/leave times, street-following geometry (OSRM route), distance, time
+- [x] Timeouts, clear errors (422 / 429 / 502 / 503 / 504), step timings in the response
+- [x] Persist the route to `routes` / `route_stops` + full response; `GET /plans/{id}`
+- [x] End-to-end integration tests (LLM mocked)
+- [ ] Transit for long legs: Belém is 7 km from the centre, so legs over ~2.5 km should become "take tram/metro" and not count against the walking budget (found in the live smoke test)
 
 **DoD:** a single request returns a ready, optimized route.
+**Result:** a live 2-day Lisbon request returns in ~3.6 s (LLM 2.4 s, optimization 0.6 s, geometry 0.6 s), with OSRM distances and zero crossings.
 
 ## Phase 6. Frontend
 - [ ] Next.js + TypeScript skeleton
