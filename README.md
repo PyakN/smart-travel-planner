@@ -11,13 +11,13 @@ Stack: FastAPI · PostgreSQL + PostGIS · Next.js + Leaflet. Roadmap: [PROJECT_P
 
 ```
 backend/    FastAPI app (Python 3.12+)
-frontend/   Next.js app (Phase 6)
+frontend/   Next.js app with a Leaflet map
 docs/       Notes and benchmarks
 ```
 
 ## Getting started
 
-Prerequisites: Docker, Python 3.12+.
+Prerequisites: Docker, Python 3.12+, Node.js 24+.
 
 ```bash
 # 1. Environment: copy the template and set a real password
@@ -36,10 +36,16 @@ pip install -e ".[dev]" pre-commit
 alembic upgrade head
 python -m app.ingest lisbon        # ~2k POIs from OpenStreetMap, ~1 min
 
-# 5. Git hooks (run from the repo root)
+# 5. Frontend
+cd ../frontend
+npm ci
+
+# 6. Git hooks (run from the repo root)
 cd ..
 pre-commit install
 ```
+
+Run it: start the API (`cd backend && uvicorn app.main:app --reload`) and the UI (`cd frontend && npm run dev`), then open http://localhost:3000. The UI proxies `/api/*` to the backend; see [frontend/README.md](frontend/README.md).
 
 The importer caches the raw Overpass response in `backend/data/raw/`. Re-runs use the cache and upsert by OSM id; pass `--refresh` to fetch fresh data.
 
