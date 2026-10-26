@@ -26,6 +26,9 @@ coverage/
 # Database data
 pgdata/
 
+# Local data dumps (e.g. cached Overpass responses)
+backend/data/
+
 # IDE / OS
 .idea/
 .vscode/
