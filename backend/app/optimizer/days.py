@@ -58,13 +58,30 @@ def balanced_kmeans(points: Sequence[LatLon], days: int) -> list[list[int]]:
 
 
 def split_sequence[T](
-    sequence: Sequence[T], days: int, day_cost: Callable[[Sequence[T]], float]
-) -> list[list[T]]:
-    """Cut an ordered sequence into `days` contiguous, balanced chunks with minimum total cost."""
+    sequence: Sequence[T],
+    days: int,
+    day_cost: Callable[[Sequence[T]], float],
+    min_size: int | None = None,
+    max_size: int | None = None,
+) -> list[list[T]] | None:
+    """Cut an ordered sequence into `days` contiguous chunks with minimum total cost.
+
+    Chunk sizes default to balanced (n // days .. ceil(n / days)). `day_cost` may return
+    `inf` for an infeasible chunk; returns None if no feasible split exists.
+    """
     n = len(sequence)
     if n <= days:
         return [[item] for item in sequence] + [[] for _ in range(days - n)]
     low, high = day_sizes(n, days)
+    low = low if min_size is None else max(1, min_size)
+    high = high if max_size is None else min(n, max_size)
+
+    chunk_costs: dict[tuple[int, int], float] = {}
+
+    def chunk_cost(j: int, i: int) -> float:
+        if (j, i) not in chunk_costs:
+            chunk_costs[(j, i)] = day_cost(sequence[j:i])
+        return chunk_costs[(j, i)]
 
     # best[d][i]: minimum cost of covering the first i items with d days.
     best = [[inf] * (n + 1) for _ in range(days + 1)]
@@ -76,9 +93,11 @@ def split_sequence[T](
                 j = i - size
                 if j < 0 or best[d - 1][j] == inf:
                     continue
-                cost = best[d - 1][j] + day_cost(sequence[j:i])
+                cost = best[d - 1][j] + chunk_cost(j, i)
                 if cost < best[d][i]:
                     best[d][i], cut[d][i] = cost, j
+    if best[days][n] == inf:
+        return None
 
     chunks: list[list[T]] = []
     i = n

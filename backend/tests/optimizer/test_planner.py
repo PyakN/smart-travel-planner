@@ -106,6 +106,34 @@ def test_days_follow_neighbourhoods() -> None:
     assert result.total_distance_m < naive_cost(shuffled, 3, None) / 3
 
 
+def dense_and_sparse() -> list[Stop]:
+    # 9 viewpoints within ~600 m of each other in Alfama, 3 spread out across the city.
+    dense = [
+        stop(i, 38.711 + 0.0007 * (i % 3), -9.131 + 0.0007 * (i // 3), "viewpoint")
+        for i in range(9)
+    ]
+    sparse = [
+        stop(9, 38.697, -9.206, "viewpoint"),
+        stop(10, 38.737, -9.150, "viewpoint"),
+        stop(11, 38.748, -9.170, "viewpoint"),
+    ]
+    return dense + sparse
+
+
+def test_days_are_balanced_by_time_not_by_count() -> None:
+    result = plan(dense_and_sparse(), days=2, pace="moderate")
+    sizes = sorted(len(d.visits) for d in result.days)
+    assert sizes != [6, 6]  # equal counts would make each day cross the city
+    assert all(d.total_min <= 8 * 60 for d in result.days)
+
+
+def test_rebalancing_respects_the_time_budget() -> None:
+    # Same geography, but museums: 9 x 90 min does not fit one day, so days stay balanced.
+    museums = [Stop(s.id, s.lat, s.lon, "museum", s.priority) for s in dense_and_sparse()]
+    result = plan(museums, days=2, pace="intense")  # 10 h budget
+    assert max(len(d.visits) for d in result.days) <= 6
+
+
 @pytest.mark.parametrize(
     "start",
     [None, ROSSIO, StartPoint(ROSSIO.lat, ROSSIO.lon, round_trip=True)],

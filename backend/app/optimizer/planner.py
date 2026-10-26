@@ -8,11 +8,12 @@ with the selection order, so the plan is never longer than the selection order i
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from math import ceil, inf
 
-from app.optimizer.days import balanced_kmeans, split_sequence
+from app.optimizer.days import balanced_kmeans, day_sizes, split_sequence
 from app.optimizer.distance import DistanceProvider, DistanceSource, Matrix
 from app.optimizer.geometry import LatLon, count_self_intersections
-from app.optimizer.tsp import order_stops, path_cost
+from app.optimizer.tsp import EPS, order_stops, path_cost
 from app.schemas.trip import Pace
 
 WALKING_M_PER_MIN = 4000 / 60  # 4 km/h: Lisbon is hilly
@@ -113,15 +114,36 @@ class _Problem:
         )
 
 
-def _split_strategies(problem: _Problem, days: int) -> dict[str, list[list[int]]]:
+def _split_by_time(
+    problem: _Problem, sequence: Sequence[int], days: int, budget_min: int
+) -> list[list[int]]:
+    """Contiguous days that each fit the time budget, sizes free down to half the average.
+
+    Dense areas can then fill a day while spread-out ones take fewer stops. Falls back
+    to equal-size days when no split fits the budget (trimming deals with it later).
+    """
+
+    def day_cost(chunk: Sequence[int]) -> float:
+        fits = _schedule(problem, chunk)[1] <= budget_min
+        return problem.cost(chunk) if fits else inf
+
+    min_size = ceil(day_sizes(len(sequence), days)[0] / 2)
+    split = split_sequence(sequence, days, day_cost, min_size=min_size, max_size=len(sequence))
+    if split is None:
+        split = split_sequence(sequence, days, problem.cost)
+    assert split is not None  # balanced split is always feasible
+    return split
+
+
+def _split_strategies(problem: _Problem, days: int, budget_min: int) -> dict[str, list[list[int]]]:
     n = len(problem.stops)
     by_priority = sorted(range(n), key=lambda i: problem.rank[i])
     whole_tour = order_stops(problem.matrix, range(n))
     points = [LatLon(s.lat, s.lon) for s in problem.stops]
     return {
         "kmeans": balanced_kmeans(points, days),
-        "route-first": split_sequence(whole_tour, days, problem.cost),
-        "selection-order": split_sequence(by_priority, days, problem.cost),
+        "route-first": _split_by_time(problem, whole_tour, days, budget_min),
+        "selection-order": _split_by_time(problem, by_priority, days, budget_min),
     }
 
 
@@ -151,6 +173,51 @@ def _fit_budget(
     return order, dropped
 
 
+def _cheapest_insertion(problem: _Problem, order: Sequence[int], stop: int) -> float:
+    base = problem.cost(order)
+    return min(
+        problem.cost([*order[:pos], stop, *order[pos:]]) - base for pos in range(len(order) + 1)
+    )
+
+
+def _rebalance(problem: _Problem, day_orders: list[list[int]], budget_min: int) -> list[list[int]]:
+    """Move stops between days while that shortens the total walk and every day fits.
+
+    The initial splits keep days equal in stop count; real days are limited by time, so a
+    dense neighbourhood can take more stops than a spread-out one.
+    """
+    days = [list(order) for order in day_orders]
+    duration = [_schedule(problem, order)[1] for order in days]
+    improved = True
+    while improved:
+        improved = False
+        for a in range(len(days)):
+            for stop in list(days[a]):
+                if len(days[a]) <= 1:
+                    break
+                without = [i for i in days[a] if i != stop]
+                gain = problem.cost(days[a]) - problem.cost(without)
+                for b in range(len(days)):
+                    # Cheap filter first, then re-solve both days and check exactly.
+                    if b == a or _cheapest_insertion(problem, days[b], stop) >= gain - EPS:
+                        continue
+                    new_a, new_b = problem.solve_day(without), problem.solve_day([*days[b], stop])
+                    dur_a, dur_b = _schedule(problem, new_a)[1], _schedule(problem, new_b)[1]
+                    if dur_b > budget_min or dur_a > max(budget_min, duration[a]):
+                        continue
+                    old = problem.cost(days[a]) + problem.cost(days[b])
+                    if problem.cost(new_a) + problem.cost(new_b) < old - EPS:
+                        days[a], days[b] = new_a, new_b
+                        duration[a], duration[b] = dur_a, dur_b
+                        improved = True
+                        break
+                if improved:
+                    break
+            if improved:
+                break
+    return days
+
+
 async def plan_route(
     stops: Sequence[Stop],
     *,
@@ -173,17 +240,18 @@ async def plan_route(
     distances = await provider.matrix(points)
     problem = _Problem(distances.matrix, stops, start)
 
+    budget = DAY_BUDGET_MIN[pace]
     candidates = {
         name: [problem.solve_day(group) for group in groups if group]
-        for name, groups in _split_strategies(problem, days).items()
+        for name, groups in _split_strategies(problem, days, budget).items()
     }
     strategy, day_orders = min(
         candidates.items(), key=lambda item: sum(problem.cost(o) for o in item[1])
     )
+    day_orders = _rebalance(problem, day_orders, budget)
 
     dropped: list[int] = []
     if enforce_budget:
-        budget = DAY_BUDGET_MIN[pace]
         fitted = []
         for order in day_orders:
             order, removed = _fit_budget(problem, order, budget)
