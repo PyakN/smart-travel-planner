@@ -16,12 +16,12 @@
 ---
 
 ## Phase 0. Repository skeleton
-- [ ] Monorepo layout: `backend/`, `frontend/`, `docs/`
-- [ ] `docker-compose.yml` with `postgis/postgis`
-- [ ] `.env.example` (DB_URL, LLM_PROVIDER, GEMINI_API_KEY, OPENAI_API_KEY)
-- [ ] Linters and formatters: ruff + mypy (backend), eslint + prettier (frontend)
-- [ ] pre-commit hooks (including a secret scan)
-- [ ] README with run commands
+- [x] Monorepo layout: `backend/`, `frontend/`, `docs/`
+- [x] `docker-compose.yml` with `postgis/postgis`
+- [x] `.env.example` (DB_URL, LLM_PROVIDER, GEMINI_API_KEY, OPENAI_API_KEY)
+- [x] Linters and formatters: ruff + mypy (backend); eslint + prettier for the frontend moved to Phase 6
+- [x] pre-commit hooks (including a secret scan)
+- [x] README with run commands
 
 **DoD:** `docker compose up` starts an empty PostGIS; hooks work.
 
@@ -82,6 +82,7 @@
 
 ## Phase 6. Frontend
 - [ ] Next.js + TypeScript skeleton
+- [ ] eslint + prettier, added to pre-commit (moved from Phase 0)
 - [ ] Request form (text field + examples)
 - [ ] Leaflet map: numbered markers, route polyline
 - [ ] POI cards, per-day tabs, total distance/time
