@@ -67,6 +67,8 @@ class Route(Base):
     request_text: Mapped[str] = mapped_column(Text)
     params: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default="{}")
     total_distance_m: Mapped[float | None] = mapped_column(Float)
+    # The full API response, so a saved plan can be served again without recomputing.
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     stops: Mapped[list["RouteStop"]] = relationship(
