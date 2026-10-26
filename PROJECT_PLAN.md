@@ -63,16 +63,19 @@
 **Result:** 5/5 eval cases pass on `gemini-3.5-flash-lite`, ~2 s and ~1–2.5k tokens per request (two LLM calls).
 
 ## Phase 4. Geo-optimization
-- [ ] Distance matrix: haversine first
-- [ ] TSP solver: nearest neighbour + 2-opt
-- [ ] Split into days: `ST_ClusterKMeans` / k-means
-- [ ] Starting point (hotel / city centre / user-defined)
-- [ ] Real walking distances: OSRM / Valhalla (foot profile)
-- [ ] OR-Tools for comparison/improvement
-- [ ] Constraints: opening hours, visit duration, daily time budget
-- [ ] Benchmark: LLM order vs optimizer (km, self-intersections)
+- [x] Distance matrix: haversine (× 1.3 detour factor) as fallback
+- [x] TSP solver: nearest neighbour + 2-opt + Or-opt (0.0% gap to OR-Tools on benchmark days)
+- [x] Split into days: balanced k-means, route-first and selection-order splits limited by the time budget, plus relocation between days (in Python, not `ST_ClusterKMeans`: it needs capacities)
+- [x] Starting point: optional hotel, open end or round trip (free start by default)
+- [x] Real walking distances: OSRM foot profile (public FOSSGIS server), haversine fallback
+- [x] OR-Tools for comparison (benchmark reference)
+- [x] Constraints: visit duration per category, daily time budget per pace (least important stops dropped)
+- [ ] Constraints: opening hours (OSM `opening_hours` not parsed yet)
+- [x] Benchmark: LLM order vs optimizer (km, self-intersections): see `docs/benchmark.md`
+- [ ] (later) Swap moves / joint VRP for the remaining multi-day gap
 
 **DoD:** on test sets the route is never longer than the baseline order; metrics recorded in `docs/benchmark.md`.
+**Result:** −55% walking vs the selection order and −1% vs an LLM-made itinerary (13 → 0 crossings); never longer than the selection order (property-tested); optimizer ≤ 8 ms per trip.
 
 ## Phase 5. Planning API
 - [ ] `POST /plan`: request → LLM → candidates → optimizer → response
