@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     llm_daily_token_budget: int = 1_000_000
     llm_cache_size: int = 256
 
+    # Walking distances: OSRM foot routing (public FOSSGIS server by default), with a
+    # haversine fallback when it is unavailable.
+    routing_provider: Literal["osrm", "haversine"] = "osrm"
+    osrm_base_url: str = "https://routing.openstreetmap.de/routed-foot"
+    osrm_timeout_s: float = 10.0
+
 
 @lru_cache
 def get_settings() -> Settings:

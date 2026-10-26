@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 import pytest
 
+from app.config import Settings
 from app.optimizer.distance import (
     DETOUR_FACTOR,
     HaversineProvider,
@@ -11,6 +12,7 @@ from app.optimizer.distance import (
     haversine_matrix,
     symmetrize,
 )
+from app.optimizer.factory import create_distance_provider
 from app.optimizer.geometry import LatLon
 
 COMERCIO = LatLon(38.7075, -9.1364)
@@ -82,6 +84,14 @@ def test_osrm_network_error_falls_back() -> None:
         raise httpx.ConnectError("down", request=request)
 
     assert asyncio.run(osrm(handler).matrix(POINTS)).source == "haversine"
+
+
+@pytest.mark.parametrize(
+    ("routing_provider", "expected"), [("osrm", OsrmProvider), ("haversine", HaversineProvider)]
+)
+def test_factory(routing_provider: str, expected: type) -> None:
+    settings = Settings(_env_file=None, database_url="x", routing_provider=routing_provider)
+    assert isinstance(create_distance_provider(settings), expected)
 
 
 def test_osrm_skips_request_for_too_many_points() -> None:
