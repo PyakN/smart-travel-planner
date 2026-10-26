@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.api.deps import get_distances, get_llm
-from app.db.models import RouteStop
+from app.db.models import Route, RouteStop
 from app.llm.base import LLMError, TransientLLMError
 from app.llm.service import LLMService, TokenBudget
 from app.optimizer.distance import HaversineProvider
@@ -52,6 +52,16 @@ def queue_relaxed_day(llm: FakeProvider, place_ids: dict[str, int]) -> list[int]
     return chosen
 
 
+def path_vertices(day: dict[str, Any]) -> list[list[float]]:
+    """All segment vertices in order, without the duplicated joints between segments."""
+    vertices: list[list[float]] = []
+    for segment in day["segments"]:
+        for point in segment["geometry"]:
+            if not vertices or vertices[-1] != point:
+                vertices.append(point)
+    return vertices
+
+
 def post_plan(client: TestClient, **body: Any) -> Any:
     return client.post("/plan", json={"text": "A slow day in Lisbon", **body})
 
@@ -69,10 +79,15 @@ def test_plan_end_to_end(
     [day] = plan["days"]
     assert sorted(s["place_id"] for s in day["stops"]) == sorted(chosen)
     assert day["stops"][0]["arrive"] == "09:30"
-    assert day["stops"][0]["walk_from_previous_m"] == 0
+    assert day["stops"][0]["travel_mode"] is None  # free start
+    assert day["stops"][0]["distance_from_previous_m"] == 0
     assert day["self_intersections"] == 0
-    # Straight-line geometry: one [lon, lat] vertex per stop, in visiting order.
-    assert day["geometry"] == [[s["lon"], s["lat"]] for s in day["stops"]]
+    # Straight-line test geometry: segments chain through every stop in visiting order.
+    assert path_vertices(day) == [[s["lon"], s["lat"]] for s in day["stops"]]
+    modes = [s["travel_mode"] for s in day["stops"][1:]]
+    assert day["transit_legs"] == modes.count("transit")
+    assert {seg["mode"] for seg in day["segments"]} == set(modes)
+    assert day["walking_m"] <= day["distance_m"]
     assert plan["total_distance_m"] == day["distance_m"] > 0
     assert plan["distance_source"] == "haversine"
     assert set(plan["timings_ms"]) == {"selection", "optimization", "geometry", "total"}
@@ -99,8 +114,8 @@ def test_hotel_round_trip(client: TestClient, llm: FakeProvider, place_ids: dict
     plan = post_plan(client, start={**ROSSIO, "round_trip": True}).json()
     [day] = plan["days"]
     hotel = [ROSSIO["lon"], ROSSIO["lat"]]
-    assert day["geometry"][0] == day["geometry"][-1] == hotel
-    assert day["stops"][0]["walk_from_previous_m"] > 0
+    assert day["segments"][0]["geometry"][0] == day["segments"][-1]["geometry"][-1] == hotel
+    assert day["stops"][0]["distance_from_previous_m"] > 0
 
 
 def test_unsupported_city_is_a_clear_422(client: TestClient, llm: FakeProvider) -> None:
@@ -150,3 +165,14 @@ def test_request_validation(client: TestClient, llm: FakeProvider, body: dict[st
 
 def test_missing_plan(client: TestClient) -> None:
     assert client.get("/plans/999999").status_code == 404
+
+
+def test_outdated_saved_plan_is_404(client: TestClient, db_session: SessionFactory) -> None:
+    async def save_old() -> int:
+        async with db_session() as session:
+            route = Route(city="lisbon", request_text="old", result={"geometry": []})
+            session.add(route)
+            await session.commit()
+            return route.id
+
+    assert client.get(f"/plans/{asyncio.run(save_old())}").status_code == 404

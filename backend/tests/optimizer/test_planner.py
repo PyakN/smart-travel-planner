@@ -9,11 +9,14 @@ from app.optimizer.distance import HaversineProvider, haversine_matrix
 from app.optimizer.geometry import LatLon
 from app.optimizer.planner import (
     DAY_START_MIN,
+    TRANSIT_M_PER_MIN,
+    TRANSIT_OVERHEAD_MIN,
     WALKING_M_PER_MIN,
     RoutePlan,
     StartPoint,
     Stop,
     plan_route,
+    travel_leg,
 )
 from app.optimizer.tsp import path_cost
 from app.schemas.trip import Pace
@@ -31,6 +34,7 @@ def plan(
     pace: Pace = "intense",
     start: StartPoint | None = None,
     enforce_budget: bool = False,
+    transit: bool = False,  # distance guarantees below are about walking
 ) -> RoutePlan:
     return asyncio.run(
         plan_route(
@@ -40,6 +44,7 @@ def plan(
             provider=HaversineProvider(),
             start=start,
             enforce_budget=enforce_budget,
+            transit=transit,
         )
     )
 
@@ -153,16 +158,20 @@ def test_hotel_round_trip_legs() -> None:
     stops = [stop(0, 38.7075, -9.1364), stop(1, 38.7116, -9.1301)]
     result = plan(stops, start=StartPoint(ROSSIO.lat, ROSSIO.lon, round_trip=True))
     day = result.days[0]
-    assert day.visits[0].walk_m > 0
-    walked = sum(v.walk_m for v in day.visits)
-    assert day.distance_m > walked  # includes the walk back
+    first_leg = day.visits[0].leg
+    assert first_leg is not None and first_leg.distance_m > 0
+    walked = sum(v.leg.distance_m for v in day.visits if v.leg)
+    assert day.return_leg is not None
+    assert day.distance_m == pytest.approx(walked + day.return_leg.distance_m)
 
 
 def test_schedule_times() -> None:
     stops = [stop(0, 38.71, -9.140, "museum"), stop(1, 38.71, -9.130, "viewpoint")]
     first, second = plan(stops).days[0].visits
     assert (first.arrive_min, first.leave_min) == (DAY_START_MIN, DAY_START_MIN + 90)
-    expected_arrival = first.leave_min + second.walk_m / WALKING_M_PER_MIN
+    assert first.leg is None  # free start
+    assert second.leg is not None and second.leg.mode == "walk"
+    expected_arrival = first.leave_min + second.leg.distance_m / WALKING_M_PER_MIN
     assert second.arrive_min == round(expected_arrival)
     assert second.leave_min == second.arrive_min + 20
 
@@ -191,3 +200,45 @@ def test_empty_input() -> None:
 
 def test_reports_distance_source() -> None:
     assert plan([stop(0, 38.71, -9.14)]).distance_source == "haversine"
+
+
+BELEM_TOWER = (38.6916, -9.2160)
+CENTRE = [(38.7075, -9.1364), (38.7116, -9.1301), (38.7139, -9.1335)]
+
+
+def test_travel_leg_modes() -> None:
+    assert travel_leg(2000, transit=True).mode == "walk"
+    leg = travel_leg(7000, transit=True)
+    assert leg.mode == "transit"
+    assert leg.minutes == pytest.approx(TRANSIT_OVERHEAD_MIN + 7000 / TRANSIT_M_PER_MIN)
+    assert leg.minutes < travel_leg(7000, transit=False).minutes
+    assert travel_leg(7000, transit=False).mode == "walk"
+
+
+def test_long_legs_use_transit() -> None:
+    stops = [stop(i, lat, lon, "landmark") for i, (lat, lon) in enumerate([*CENTRE, BELEM_TOWER])]
+    hotel = StartPoint(ROSSIO.lat, ROSSIO.lon)
+    by_transit = plan(stops, start=hotel, transit=True)
+    on_foot = plan(stops, start=hotel)
+
+    [day] = by_transit.days
+    modes = [v.leg.mode for v in day.visits if v.leg]
+    assert modes.count("transit") == day.transit_legs == 1
+    assert day.walking_m < day.distance_m
+    assert day.total_min < on_foot.days[0].total_min
+    assert on_foot.days[0].transit_legs == 0
+    assert on_foot.days[0].walking_m == pytest.approx(on_foot.days[0].distance_m)
+
+
+def test_transit_keeps_far_places_on_a_feasible_day() -> None:
+    # Hotel in the centre, 2 relaxed days: walking to Belem eats the budget, transit does not.
+    belem = [stop(10 + i, 38.6916 + 0.002 * i, -9.2160 + 0.004 * i, "landmark") for i in range(3)]
+    centre = [stop(i, lat, lon, "landmark") for i, (lat, lon) in enumerate(CENTRE)]
+    stops = centre + belem
+    hotel = StartPoint(ROSSIO.lat, ROSSIO.lon, round_trip=True)
+    result = plan(stops, days=2, pace="relaxed", start=hotel, transit=True, enforce_budget=True)
+    assert result.dropped == []
+    assert {frozenset(v.stop.id for v in d.visits) for d in result.days} == {
+        frozenset(s.id for s in centre),
+        frozenset(s.id for s in belem),
+    }

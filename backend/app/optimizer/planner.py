@@ -1,14 +1,19 @@
-"""Turn selected stops into an optimized, scheduled multi-day walking plan.
+"""Turn selected stops into an optimized, scheduled multi-day plan.
 
-Three ways of splitting stops into days are tried and the shortest total wins:
+The objective is total travel time. Legs up to TRANSIT_MIN_DISTANCE_M are walked; longer
+ones (e.g. the centre to Belem) are taken by tram/metro/train. With transit off, time is
+proportional to walking distance, so the plan is simply the shortest walk.
+
+Three ways of splitting stops into days are tried and the cheapest total wins:
 balanced k-means, one long tour cut into days ("route first, cluster second"), and
 the selection order cut into days. Every day is then ordered by the TSP solver, seeded
-with the selection order, so the plan is never longer than the selection order itself.
+with the selection order, so the plan is never worse than the selection order itself.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from math import ceil, inf
+from typing import Literal
 
 from app.optimizer.days import balanced_kmeans, day_sizes, split_sequence
 from app.optimizer.distance import DistanceProvider, DistanceSource, Matrix
@@ -17,6 +22,11 @@ from app.optimizer.tsp import EPS, order_stops, path_cost
 from app.schemas.trip import Pace
 
 WALKING_M_PER_MIN = 4000 / 60  # 4 km/h: Lisbon is hilly
+# Longer legs use public transport: a fixed overhead (walk to the stop, wait) plus
+# ~15 km/h door to door, which is typical for Lisbon's trams, metro and trains.
+TRANSIT_MIN_DISTANCE_M = 2500
+TRANSIT_OVERHEAD_MIN = 10
+TRANSIT_M_PER_MIN = 15000 / 60
 DAY_START_MIN = 9 * 60 + 30
 DAY_BUDGET_MIN: dict[Pace, int] = {"relaxed": 6 * 60, "moderate": 8 * 60, "intense": 10 * 60}
 VISIT_MIN: dict[str, int] = {
@@ -51,10 +61,27 @@ class StartPoint:
     round_trip: bool = False
 
 
+TravelMode = Literal["walk", "transit"]
+
+
+@dataclass(frozen=True)
+class Leg:
+    mode: TravelMode
+    distance_m: float
+    minutes: float
+
+
+def travel_leg(distance_m: float, transit: bool) -> Leg:
+    if transit and distance_m > TRANSIT_MIN_DISTANCE_M:
+        minutes = TRANSIT_OVERHEAD_MIN + distance_m / TRANSIT_M_PER_MIN
+        return Leg("transit", distance_m, minutes)
+    return Leg("walk", distance_m, distance_m / WALKING_M_PER_MIN)
+
+
 @dataclass(frozen=True)
 class Visit:
     stop: Stop
-    walk_m: float  # from the previous stop (or the start point)
+    leg: Leg | None  # from the previous stop or the start point; None for a free start
     arrive_min: int  # minutes since midnight
     leave_min: int
 
@@ -63,7 +90,10 @@ class Visit:
 class DayPlan:
     day: int
     visits: list[Visit]
-    distance_m: float  # including the walk back for round trips
+    return_leg: Leg | None  # back to the start point on round trips
+    distance_m: float  # all legs, including the way back for round trips
+    walking_m: float
+    transit_legs: int
     total_min: int
     self_intersections: int
 
@@ -90,10 +120,17 @@ def visit_minutes(category: str) -> int:
 
 
 class _Problem:
-    """Matrix indices: stops are 0..n-1, the start point (if any) is n."""
+    """Matrix indices: stops are 0..n-1, the start point (if any) is n.
 
-    def __init__(self, matrix: Matrix, stops: Sequence[Stop], start: StartPoint | None) -> None:
-        self.matrix = matrix
+    `matrix` holds travel minutes (what the solvers minimise), `distance` metres.
+    """
+
+    def __init__(
+        self, distance: Matrix, stops: Sequence[Stop], start: StartPoint | None, transit: bool
+    ) -> None:
+        self.distance = distance
+        self.legs = [[travel_leg(d, transit) for d in row] for row in distance]
+        self.matrix = [[leg.minutes for leg in row] for row in self.legs]
         self.stops = stops
         self.start = len(stops) if start else None
         self.round_trip = bool(start and start.round_trip)
@@ -105,7 +142,12 @@ class _Problem:
         return prefix + list(order) + suffix
 
     def cost(self, order: Sequence[int]) -> float:
+        """Travel minutes for a day in this order."""
         return path_cost(self.matrix, self.path(order)) if order else 0.0
+
+    def day_legs(self, order: Sequence[int]) -> list[Leg]:
+        path = self.path(order)
+        return [self.legs[a][b] for a, b in zip(path, path[1:], strict=False)]
 
     def solve_day(self, group: Sequence[int]) -> list[int]:
         initial = sorted(group, key=lambda i: self.rank[i])
@@ -148,16 +190,17 @@ def _split_strategies(problem: _Problem, days: int, budget_min: int) -> dict[str
 
 
 def _schedule(problem: _Problem, order: Sequence[int]) -> tuple[list[Visit], int]:
-    visits, clock, previous = [], float(DAY_START_MIN), problem.start
+    visits: list[Visit] = []
+    clock, previous = float(DAY_START_MIN), problem.start
     for i in order:
-        walk = problem.matrix[previous][i] if previous is not None else 0.0
-        clock += walk / WALKING_M_PER_MIN
+        leg = problem.legs[previous][i] if previous is not None else None
+        clock += leg.minutes if leg else 0.0
         arrive = clock
         clock += visit_minutes(problem.stops[i].category)
-        visits.append(Visit(problem.stops[i], walk, round(arrive), round(clock)))
+        visits.append(Visit(problem.stops[i], leg, round(arrive), round(clock)))
         previous = i
     if problem.round_trip and order and problem.start is not None:
-        clock += problem.matrix[order[-1]][problem.start] / WALKING_M_PER_MIN
+        clock += problem.matrix[order[-1]][problem.start]
     return visits, round(clock - DAY_START_MIN)
 
 
@@ -181,7 +224,7 @@ def _cheapest_insertion(problem: _Problem, order: Sequence[int], stop: int) -> f
 
 
 def _rebalance(problem: _Problem, day_orders: list[list[int]], budget_min: int) -> list[list[int]]:
-    """Move stops between days while that shortens the total walk and every day fits.
+    """Move stops between days while that cuts total travel time and every day fits.
 
     The initial splits keep days equal in stop count; real days are limited by time, so a
     dense neighbourhood can take more stops than a spread-out one.
@@ -226,6 +269,7 @@ async def plan_route(
     provider: DistanceProvider,
     start: StartPoint | None = None,
     enforce_budget: bool = True,
+    transit: bool = True,
 ) -> RoutePlan:
     if not stops:
         raise ValueError("no stops to plan")
@@ -238,7 +282,7 @@ async def plan_route(
         [LatLon(start.lat, start.lon)] if start else []
     )
     distances = await provider.matrix(points)
-    problem = _Problem(distances.matrix, stops, start)
+    problem = _Problem(distances.matrix, stops, start, transit)
 
     budget = DAY_BUDGET_MIN[pace]
     candidates = {
@@ -266,6 +310,7 @@ async def plan_route(
     plans = []
     for number, order in enumerate(day_orders, start=1):
         visits, total_min = _schedule(problem, order)
+        legs = problem.day_legs(order)
         path_points = [points[i] for i in problem.path(order)]
         if problem.round_trip:
             path_points = path_points[:-1]
@@ -273,7 +318,10 @@ async def plan_route(
             DayPlan(
                 day=number,
                 visits=visits,
-                distance_m=problem.cost(order),
+                return_leg=legs[-1] if problem.round_trip else None,
+                distance_m=sum(leg.distance_m for leg in legs),
+                walking_m=sum(leg.distance_m for leg in legs if leg.mode == "walk"),
+                transit_legs=sum(leg.mode == "transit" for leg in legs),
                 total_min=total_min,
                 self_intersections=count_self_intersections(path_points, closed=problem.round_trip),
             )

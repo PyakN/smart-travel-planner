@@ -1,6 +1,10 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.schemas.trip import MAX_REQUEST_CHARS, TripRequest
+
+TravelMode = Literal["walk", "transit"]
 
 
 class StartIn(BaseModel):
@@ -26,18 +30,29 @@ class PlannedStop(BaseModel):
     lon: float
     arrive: str = Field(description="HH:MM")
     leave: str = Field(description="HH:MM")
-    walk_from_previous_m: int
+    # How to get here from the previous stop (or the start point); null for a free start.
+    travel_mode: TravelMode | None
+    travel_min: int
+    distance_from_previous_m: int
+
+
+class RouteSegment(BaseModel):
+    mode: TravelMode
+    geometry: list[tuple[float, float]] = Field(
+        description="Path as [lon, lat] pairs (GeoJSON order); street-following when walked, "
+        "a straight line for transit legs"
+    )
 
 
 class PlannedDay(BaseModel):
     day: int
     stops: list[PlannedStop]
     distance_m: int
+    walking_m: int
+    transit_legs: int
     duration_min: int
     self_intersections: int
-    geometry: list[tuple[float, float]] = Field(
-        description="Walking path as [lon, lat] pairs (GeoJSON order)"
-    )
+    segments: list[RouteSegment]
 
 
 class DroppedPlace(BaseModel):

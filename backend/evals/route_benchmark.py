@@ -9,7 +9,7 @@ routings are compared on the same OSRM walking-distance matrix:
   D. optimizer        - our planner on OSRM walking distances
 
 OR-Tools (guided local search, 1 s per day) on D's days measures our TSP's optimality gap.
-No start point (free start, open end), no time budget: pure distance.
+No start point (free start, open end), no time budget, no transit: pure walking distance.
 
 Usage (from backend/): python evals/route_benchmark.py [case-name ...]
 """
@@ -189,12 +189,22 @@ async def run_case(name: str, text: str) -> Row:
     routings: dict[str, Days] = {"A": chunk_selection_order(len(places), days)}
     routings["B"], repairs = await llm_itinerary(llm, places, days)
     plan_c = await plan_route(
-        stops, days=days, pace=pace, provider=HaversineProvider(), enforce_budget=False
+        stops,
+        days=days,
+        pace=pace,
+        provider=HaversineProvider(),
+        enforce_budget=False,
+        transit=False,
     )
     routings["C"] = plan_days(plan_c, places)
     started = time.perf_counter()
     plan_d = await plan_route(
-        stops, days=days, pace=pace, provider=StaticProvider(walking), enforce_budget=False
+        stops,
+        days=days,
+        pace=pace,
+        provider=StaticProvider(walking),
+        enforce_budget=False,
+        transit=False,
     )
     optimizer_ms = (time.perf_counter() - started) * 1000
     routings["D"] = plan_days(plan_d, places)

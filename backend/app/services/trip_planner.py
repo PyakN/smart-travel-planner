@@ -1,17 +1,29 @@
 """The full pipeline behind POST /plan: select places, optimize the route, save it."""
 
 import asyncio
+import logging
 import time
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Route, RouteStop
 from app.llm.service import LLMService
 from app.optimizer.distance import DistanceProvider
 from app.optimizer.geometry import LatLon
-from app.optimizer.planner import DayPlan, StartPoint, Stop, plan_route
-from app.schemas.plan import DroppedPlace, PlannedDay, PlannedStop, PlanResponse, StartIn
+from app.optimizer.planner import DayPlan, Leg, StartPoint, Stop, plan_route
+from app.schemas.plan import (
+    DroppedPlace,
+    PlannedDay,
+    PlannedStop,
+    PlanResponse,
+    RouteSegment,
+    StartIn,
+    TravelMode,
+)
 from app.services.place_selection import select_places
+
+logger = logging.getLogger(__name__)
 
 
 def _clock(minutes: int) -> str:
@@ -33,12 +45,52 @@ class _Stopwatch:
         return {**self.laps, "total": round((time.perf_counter() - self.started) * 1000)}
 
 
-def _day_path(day: DayPlan, start: StartIn | None) -> list[LatLon]:
-    stops = [LatLon(v.stop.lat, v.stop.lon) for v in day.visits]
-    if start is None:
-        return stops
-    home = LatLon(start.lat, start.lon)
-    return [home, *stops] + ([home] if start.round_trip else [])
+def _day_legs(day: DayPlan, start: StartIn | None) -> list[tuple[LatLon, LatLon, Leg]]:
+    """Every leg of the day as (from, to, leg), including from/to the start point."""
+    points = [LatLon(v.stop.lat, v.stop.lon) for v in day.visits]
+    legs = [v.leg for v in day.visits]
+    if start is not None:
+        home = LatLon(start.lat, start.lon)
+        points.insert(0, home)
+        if day.return_leg is not None:
+            points.append(home)
+            legs.append(day.return_leg)
+    else:
+        legs = legs[1:]  # a free start has no leg into the first stop
+    return [
+        (a, b, leg)
+        for a, b, leg in zip(points[:-1], points[1:], legs, strict=True)
+        if leg is not None
+    ]
+
+
+async def _segments(
+    day: DayPlan, start: StartIn | None, distances: DistanceProvider
+) -> list[RouteSegment]:
+    """Consecutive walking legs become one street-following path; transit legs stay straight."""
+    runs: list[tuple[TravelMode, list[LatLon]]] = []
+    for a, b, leg in _day_legs(day, start):
+        if leg.mode == "walk" and runs and runs[-1][0] == "walk":
+            runs[-1][1].append(b)
+        else:
+            runs.append((leg.mode, [a, b]))
+    if not runs:  # a single stop and no start point
+        stop = day.visits[0].stop
+        runs = [("walk", [LatLon(stop.lat, stop.lon)])]
+    paths = await asyncio.gather(
+        *(
+            distances.geometry(points) if mode == "walk" else _straight(points)
+            for mode, points in runs
+        )
+    )
+    return [
+        RouteSegment(mode=mode, geometry=[(p.lon, p.lat) for p in path])
+        for (mode, _), path in zip(runs, paths, strict=True)
+    ]
+
+
+async def _straight(points: list[LatLon]) -> list[LatLon]:
+    return points
 
 
 async def plan_trip(
@@ -68,7 +120,7 @@ async def plan_trip(
     )
     watch.lap("optimization")
 
-    paths = await asyncio.gather(*(distances.geometry(_day_path(d, start)) for d in route.days))
+    segments = await asyncio.gather(*(_segments(d, start, distances) for d in route.days))
     watch.lap("geometry")
 
     days = [
@@ -83,16 +135,20 @@ async def plan_trip(
                     lon=v.stop.lon,
                     arrive=_clock(v.arrive_min),
                     leave=_clock(v.leave_min),
-                    walk_from_previous_m=round(v.walk_m),
+                    travel_mode=v.leg.mode if v.leg else None,
+                    travel_min=round(v.leg.minutes) if v.leg else 0,
+                    distance_from_previous_m=round(v.leg.distance_m) if v.leg else 0,
                 )
                 for v in day.visits
             ],
             distance_m=round(day.distance_m),
+            walking_m=round(day.walking_m),
+            transit_legs=day.transit_legs,
             duration_min=day.total_min,
             self_intersections=day.self_intersections,
-            geometry=[(p.lon, p.lat) for p in path],
+            segments=day_segments,
         )
-        for day, path in zip(route.days, paths, strict=True)
+        for day, day_segments in zip(route.days, segments, strict=True)
     ]
 
     saved = Route(
@@ -135,4 +191,9 @@ async def get_plan(session: AsyncSession, plan_id: int) -> PlanResponse | None:
     saved = await session.get(Route, plan_id)
     if saved is None or saved.result is None:
         return None
-    return PlanResponse.model_validate(saved.result)
+    try:
+        return PlanResponse.model_validate(saved.result)
+    except ValidationError:
+        # Saved by an older version with a different response shape.
+        logger.warning("plan %d has an outdated format", plan_id)
+        return None
