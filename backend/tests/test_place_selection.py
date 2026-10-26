@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from app.ingest.cities import CITIES, resolve_city
 from app.llm.service import LLMService
 from app.repositories.candidates import Candidate
 from app.services.place_selection import (
@@ -73,6 +74,11 @@ def test_rejects_empty_or_huge_requests(text: str) -> None:
     llm = LLMService(FakeProvider(), model="m")
     with pytest.raises(PlanningError):
         asyncio.run(select_places(llm, session=None, text=text, default_city="lisbon"))  # type: ignore[arg-type]
+
+
+def test_city_aliases_resolve() -> None:
+    assert resolve_city("Lisboa") is resolve_city(" lisbon ") is CITIES["lisbon"]
+    assert resolve_city("tokyo") is None
 
 
 def test_rejects_unsupported_city() -> None:

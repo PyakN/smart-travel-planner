@@ -15,7 +15,10 @@ MAX_REQUEST_CHARS = 1000
 
 
 class TripRequest(BaseModel):
-    city: str | None = Field(description="City slug, e.g. 'lisbon'; null if not mentioned")
+    city: str | None = Field(
+        description="City the traveller names, lowercase English (e.g. 'lisbon', 'tokyo'); "
+        "null if none is mentioned"
+    )
     days: int = Field(description="Number of sightseeing days; 1 if not mentioned")
     interests: list[CategorySlug] = Field(description="Categories the traveller wants")
     avoid: list[CategorySlug] = Field(description="Categories the traveller explicitly rejects")

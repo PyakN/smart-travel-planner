@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from app.config import get_settings
 from app.db.session import create_engine, create_sessionmaker
 from app.llm.factory import create_llm_service
-from app.services.place_selection import SelectionResult, select_places
+from app.services.place_selection import PlanningError, SelectionResult, select_places
 
 Check = Callable[[SelectionResult], str | None]  # returns an error message, or None
 
@@ -95,6 +95,11 @@ CASES = [
     ),
 ]
 
+# Requests that must be refused with a clear message instead of planning something else.
+REJECT_CASES = {
+    "unsupported-city": "A weekend in Tokyo, temples and ramen.",
+}
+
 
 async def run_case(case: Case) -> bool:
     settings = get_settings()
@@ -127,9 +132,29 @@ async def run_case(case: Case) -> bool:
     return not failures
 
 
+async def run_reject_case(name: str, text: str) -> bool:
+    settings = get_settings()
+    engine = create_engine()
+    try:
+        async with create_sessionmaker(engine)() as session:
+            result = await select_places(
+                create_llm_service(settings), session, text, default_city=settings.default_city
+            )
+    except PlanningError as exc:
+        print(f"\n[PASS] {name}  refused: {exc}")
+        return True
+    finally:
+        await engine.dispose()
+    print(f"\n[FAIL] {name}  planned {result.city} instead of refusing")
+    return False
+
+
 async def main(names: list[str]) -> int:
     cases = [c for c in CASES if not names or c.name in names]
     results = [await run_case(case) for case in cases]
+    for name, text in REJECT_CASES.items():
+        if not names or name in names:
+            results.append(await run_reject_case(name, text))
     print(f"\n{sum(results)}/{len(results)} cases passed")
     return 0 if all(results) else 1
 

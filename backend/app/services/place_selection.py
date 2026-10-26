@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ingest.cities import CITIES
+from app.ingest.cities import CITIES, resolve_city
 from app.llm.service import LLMService
 from app.repositories.candidates import Candidate, find_candidates
 from app.schemas.trip import MAX_REQUEST_CHARS, PlaceSelection, TripRequest
@@ -32,7 +32,8 @@ CATEGORY_GUIDE = {
 
 PARSE_SYSTEM = f"""You convert a traveller's free-text request into a structured trip request.
 
-Supported city slugs: {", ".join(CITIES)}. Set `city` to one of them, or null if no city is named.
+`city`: the city the traveller wants to visit, as a lowercase English name (e.g. "lisbon",
+"porto", "tokyo"), even if it is not one we support; null only if no city is mentioned.
 `interests` and `avoid` may only use these categories:
 {chr(10).join(f"- {slug}: {desc}" for slug, desc in CATEGORY_GUIDE.items())}
 
@@ -137,10 +138,11 @@ async def select_places(
         raise PlanningError(f"Keep the request under {MAX_REQUEST_CHARS} characters.")
 
     trip = await parse_trip_request(llm, text)
-    city = trip.city or default_city
-    if city not in CITIES:
+    resolved = resolve_city(trip.city or default_city)
+    if resolved is None:
         supported = ", ".join(c.name for c in CITIES.values())
-        raise PlanningError(f"'{city}' is not supported yet. Supported: {supported}.")
+        raise PlanningError(f"'{trip.city}' is not supported yet. Supported: {supported}.")
+    city = resolved.slug
 
     pool = max(MIN_POOL, min(MAX_POOL, trip.stops_target * POOL_PER_STOP))
     candidates = await find_candidates(
