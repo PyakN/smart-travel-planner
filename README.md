@@ -56,12 +56,28 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 | `GET /places` | Search: `city`, `category` (repeatable), `bbox=west,south,east,north`, or `lat`+`lon`+`radius_m` (sorted by distance); `limit` / `offset` |
 | `GET /places/{id}` | One place |
 | `GET /categories` | Categories with place counts (optional `city`) |
+| `POST /plan` | **Plan a trip from text**: `{"text": "...", "start": {"lat", "lon", "round_trip"}?}` → days with ordered, timed stops and map geometry. Saved; returns `id` |
+| `GET /plans/{id}` | A saved plan |
 
 Example: museums and viewpoints within 400 m of Praça do Comércio:
 
 ```
 GET /places?lat=38.7075&lon=-9.1364&radius_m=400&category=museum&category=viewpoint
 ```
+
+Plan a trip (needs an LLM key in `.env`):
+
+```bash
+curl -X POST localhost:8000/plan -H "Content-Type: application/json" \
+  -d '{"text": "2 days in Lisbon: viewpoints, the castle and Belém", "start": {"lat": 38.7139, "lon": -9.1394}}'
+```
+
+Error statuses:
+- **422:** the request can't be planned, for example an unsupported city.
+- **429:** the daily LLM token budget is used up.
+- **502:** the LLM rejected the request.
+- **503:** the LLM is unavailable or not configured.
+- **504:** planning timed out.
 
 ## LLM layer
 
