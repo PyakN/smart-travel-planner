@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health
+from app.api import health, places
 from app.db.session import create_engine, create_sessionmaker
 
 
@@ -18,6 +18,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(title="Smart AI Travel Planner", version="0.1.0", lifespan=lifespan)
     app.include_router(health.router)
+    app.include_router(places.router)
     return app
 
 
