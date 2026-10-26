@@ -39,3 +39,8 @@ repos:
       - id: mypy
         files: ^backend/app/
         args: [--config-file=backend/pyproject.toml]
+        additional_dependencies:
+          - sqlalchemy[asyncio]>=2.0.36
+          - geoalchemy2>=0.16
+          - pydantic-settings>=2.6
+          - httpx>=0.28

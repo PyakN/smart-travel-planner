@@ -3,7 +3,14 @@ name = "travel-planner-backend"
 version = "0.1.0"
 description = "Smart AI Travel Planner API: LLM place selection + geo-optimized walking routes"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "geoalchemy2>=0.16",
+    "pydantic-settings>=2.6",
+    "httpx>=0.28",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -39,6 +46,7 @@ select = [
 python_version = "3.12"
 strict = true
 packages = ["app"]
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
