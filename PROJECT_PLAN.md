@@ -50,15 +50,17 @@
 **DoD:** tests are green; endpoints are documented at `/docs`.
 
 ## Phase 3. LLM layer
-- [ ] Provider abstraction (`LLMClient`) with Gemini and OpenAI implementations
-- [ ] Parse the request into structured JSON: `{city, days, interests, pace, constraints}` (structured output + Pydantic validation)
-- [ ] Candidate generation from the DB: tag/category filter + ranking
-- [ ] LLM picks POIs from the candidate list (by `id`, not by name)
-- [ ] Guard: the LLM cannot return an id that is not among the candidates
-- [ ] Retries, timeouts, response cache, spending limits
-- [ ] Tests with a mocked LLM + a small set of eval prompts
+- [x] Provider abstraction (`LLMProvider` + `LLMService`) with Gemini and OpenAI implementations (OpenAI tested with mocks only so far)
+- [x] Parse the request into structured JSON: `TripRequest {city, days, interests, avoid, pace, keywords, notes}` (structured output + Pydantic validation)
+- [x] Candidate generation from the DB: notability + interest + accent-insensitive keyword ranking, avoided categories excluded
+- [x] LLM picks POIs from the candidate list (by `id`, not by name)
+- [x] Guard: unknown/duplicate ids are dropped and backfilled from the ranking
+- [x] Retries with backoff, fallback model, timeouts, LRU response cache, daily token budget, request length cap
+- [x] Tests with a mocked LLM + live eval prompts (`python evals/selection_eval.py`)
+- [ ] (optional) Embeddings / pgvector for semantic matching: not needed so far, revisit if keyword matching falls short
 
 **DoD:** a request text yields a list of valid `place_id`s in reasonable time.
+**Result:** 5/5 eval cases pass on `gemini-3.5-flash-lite`, ~2 s and ~1–2.5k tokens per request (two LLM calls).
 
 ## Phase 4. Geo-optimization
 - [ ] Distance matrix: haversine first
