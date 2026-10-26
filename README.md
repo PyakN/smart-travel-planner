@@ -103,6 +103,7 @@ python evals/selection_eval.py     # live eval against the real LLM + DB (costs 
 - **Order within a day:** a TSP solver (nearest neighbour + 2-opt + Or-opt).
 - **Split into days:** several strategies are tried and the shortest wins, with every day kept within the pace's time budget.
 - **Schedule:** arrival and departure times for each stop.
+- **Transit:** legs over 2.5 km (e.g. the centre to Belém) are taken by tram, metro or train: 10 min overhead + 15 km/h. The optimizer minimises total travel time; each stop says how to get there (`travel_mode`), and the map geometry is split into walking and transit segments.
 
 Results against LLM-only ordering are in [docs/benchmark.md](docs/benchmark.md): **55% less walking than the selection order, and on par with an itinerary the LLM arranged itself, with zero route crossings.**
 

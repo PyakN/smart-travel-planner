@@ -83,7 +83,8 @@
 - [x] Timeouts, clear errors (422 / 429 / 502 / 503 / 504), step timings in the response
 - [x] Persist the route to `routes` / `route_stops` + full response; `GET /plans/{id}`
 - [x] End-to-end integration tests (LLM mocked)
-- [ ] Transit for long legs: Belém is 7 km from the centre, so legs over ~2.5 km should become "take tram/metro" and not count against the walking budget (found in the live smoke test)
+- [x] Transit for long legs: legs over 2.5 km become tram/metro/train (10 min + 15 km/h) and the optimizer minimises travel time. Live re-test: the Belém day is reached in 37 min instead of a 1 h 44 min walk, and no stops are dropped (2 were before)
+- [ ] (later) Real transit routing (GTFS / OpenTripPlanner) instead of the fixed-speed estimate
 
 **DoD:** a single request returns a ready, optimized route.
 **Result:** a live 2-day Lisbon request returns in ~3.6 s (LLM 2.4 s, optimization 0.6 s, geometry 0.6 s), with OSRM distances and zero crossings.
