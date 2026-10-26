@@ -90,15 +90,17 @@
 **Result:** a live 2-day Lisbon request returns in ~3.6 s (LLM 2.4 s, optimization 0.6 s, geometry 0.6 s), with OSRM distances and zero crossings.
 
 ## Phase 6. Frontend
-- [ ] Next.js + TypeScript skeleton
-- [ ] eslint + prettier, added to pre-commit (moved from Phase 0)
-- [ ] Request form (text field + examples)
-- [ ] Leaflet map: numbered markers, route polyline
-- [ ] POI cards, per-day tabs, total distance/time
-- [ ] Loading and error states
-- [ ] Mobile layout
+- [x] Next.js + TypeScript skeleton (Next.js 16, App Router, Tailwind; `/api/*` proxied to FastAPI)
+- [x] eslint + prettier, added to pre-commit and CI (moved from Phase 0); vitest for the API client and formatters
+- [x] Request form (text field + examples) and an optional start point picked on the map
+- [x] Leaflet map: numbered markers, walking routes (solid) and transit legs (dotted), other days muted
+- [x] POI cards, per-day tabs, total distance/time, travel leg between stops
+- [x] Loading and error states (backend messages shown as is)
+- [x] Mobile layout (map on top, plan below)
+- [x] Share links: `?plan=<id>` reopens a saved plan
 
 **DoD:** the user types a request and sees the route on the map.
+**Result:** checked in a real browser (Playwright, desktop 1440 px and phone 390 px): plan, day switch, share link and error state work, with no console errors. Testing the error state found a real bug: "a weekend in Tokyo" was silently planned as Lisbon (fixed in `fix(llm): refuse unsupported cities`).
 
 ## Phase 7. Quality and reliability
 - [ ] E2E tests (Playwright)
@@ -109,6 +111,8 @@
 
 ## Phase 8. Deployment
 - [ ] Dockerfiles for backend and frontend
+- [ ] Self-hosted OSRM (Docker, Portugal extract): the public server takes 1–10 s per matrix, most of a plan's time, and its 10 s timeout silently falls back to straight lines
+- [ ] Map tiles from a provider with an API key (the public OSM tile server is for light use only)
 - [ ] CI/CD (GitHub Actions)
 - [ ] Hosting: Fly.io / Render (API), Neon / Supabase (PostGIS), Vercel (frontend)
 - [ ] Secrets via hosting environment variables
