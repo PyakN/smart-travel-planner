@@ -43,6 +43,26 @@ pre-commit install
 
 The importer caches the raw Overpass response in `backend/data/raw/`. Re-runs use the cache and upsert by OSM id; pass `--refresh` to fetch fresh data.
 
+## API
+
+```bash
+cd backend
+uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive docs
+```
+
+| Endpoint | Description |
+|---|---|
+| `GET /health` | Service and database status |
+| `GET /places` | Search: `city`, `category` (repeatable), `bbox=west,south,east,north`, or `lat`+`lon`+`radius_m` (sorted by distance); `limit` / `offset` |
+| `GET /places/{id}` | One place |
+| `GET /categories` | Categories with place counts (optional `city`) |
+
+Example: museums and viewpoints within 400 m of Praça do Comércio:
+
+```
+GET /places?lat=38.7075&lon=-9.1364&radius_m=400&category=museum&category=viewpoint
+```
+
 ## Everyday commands
 
 ```bash
@@ -54,7 +74,8 @@ alembic upgrade head               # apply migrations
 alembic check                      # models and migrations in sync?
 ruff check . && ruff format .      # lint + format
 mypy                               # type check
-pytest                             # tests
+pytest                             # all tests (integration tests need Docker)
+pytest -m "not integration"        # unit tests only
 
 pre-commit run --all-files         # run every hook manually
 ```
