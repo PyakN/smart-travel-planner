@@ -1,6 +1,15 @@
+from dataclasses import dataclass
 from math import asin, cos, radians, sin, sqrt
 
 EARTH_RADIUS_M = 6_371_008.8
+
+
+@dataclass(frozen=True)
+class BBox:
+    south: float
+    west: float
+    north: float
+    east: float
 
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

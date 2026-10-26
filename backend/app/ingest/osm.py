@@ -7,8 +7,7 @@ from typing import Any, cast
 
 import httpx
 
-from app.geo import haversine_m
-from app.ingest.cities import BBox
+from app.geo import BBox, haversine_m
 
 OVERPASS_URLS = (
     "https://overpass-api.de/api/interpreter",

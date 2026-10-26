@@ -1,12 +1,6 @@
 from dataclasses import dataclass
 
-
-@dataclass(frozen=True)
-class BBox:
-    south: float
-    west: float
-    north: float
-    east: float
+from app.geo import BBox
 
 
 @dataclass(frozen=True)
