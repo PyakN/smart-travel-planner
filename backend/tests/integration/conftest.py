@@ -1,7 +1,8 @@
 """Integration fixtures: a throwaway PostGIS container, migrated and seeded once per run."""
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from geoalchemy2 import WKTElement
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from testcontainers.community.postgres import PostgresContainer
 
 from app.config import get_settings
@@ -20,14 +22,23 @@ from app.main import create_app
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 POSTGIS_IMAGE = "postgis/postgis:17-3.5"
 
-# (osm_id, city, name, category, lat, lon, wikidata)
-SEED_PLACES = [
-    (1, "lisbon", "Praça do Comércio", "landmark", 38.7075, -9.1364, "Q1130427"),
-    (2, "lisbon", "Castelo de São Jorge", "landmark", 38.7139, -9.1335, "Q753226"),
-    (3, "lisbon", "Miradouro de Santa Luzia", "viewpoint", 38.7116, -9.1301, None),
-    (4, "lisbon", "Torre de Belém", "landmark", 38.6916, -9.2160, "Q213402"),
-    (5, "lisbon", "Museu Calouste Gulbenkian", "museum", 38.7372, -9.1545, None),
-    (6, "porto", "Museu de Serralves", "museum", 41.1597, -8.6598, None),
+# (osm_id, city, name, category, lat, lon, wikidata, extra tags)
+SEED_PLACES: list[tuple[int, str, str, str, float, float, str | None, dict[str, str]]] = [
+    (1, "lisbon", "Praça do Comércio", "landmark", 38.7075, -9.1364, "Q1130427", {}),
+    (2, "lisbon", "Castelo de São Jorge", "landmark", 38.7139, -9.1335, "Q753226", {}),
+    (3, "lisbon", "Miradouro de Santa Luzia", "viewpoint", 38.7116, -9.1301, None, {}),
+    (
+        4,
+        "lisbon",
+        "Torre de Belém",
+        "landmark",
+        38.6916,
+        -9.2160,
+        "Q213402",
+        {"name:en": "Belém Tower", "wikipedia": "pt:Torre de Belém"},
+    ),
+    (5, "lisbon", "Museu Calouste Gulbenkian", "museum", 38.7372, -9.1545, None, {}),
+    (6, "porto", "Museu de Serralves", "museum", 41.1597, -8.6598, None, {}),
 ]
 
 
@@ -47,10 +58,10 @@ async def _seed() -> None:
                     name=name,
                     category_id=category_ids[category],
                     geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
-                    tags={"name": name},
+                    tags={"name": name, **extra_tags},
                     wikidata=wikidata,
                 )
-                for osm_id, city, name, category, lat, lon, wikidata in SEED_PLACES
+                for osm_id, city, name, category, lat, lon, wikidata, extra_tags in SEED_PLACES
             )
     finally:
         await engine.dispose()
@@ -75,6 +86,25 @@ def database_url() -> Iterator[str]:
 def client(database_url: str) -> Iterator[TestClient]:
     with TestClient(create_app()) as test_client:
         yield test_client
+
+
+SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
+
+
+@pytest.fixture
+def db_session(database_url: str) -> SessionFactory:
+    """Factory for sessions bound to the test database; use inside asyncio.run()."""
+
+    @asynccontextmanager
+    async def session_scope() -> AsyncIterator[AsyncSession]:
+        engine = create_engine()
+        try:
+            async with create_sessionmaker(engine)() as session:
+                yield session
+        finally:
+            await engine.dispose()
+
+    return session_scope
 
 
 @pytest.fixture(scope="session")
