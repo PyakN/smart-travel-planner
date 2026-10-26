@@ -11,6 +11,8 @@ class Settings(BaseSettings):
 
     database_url: str
     default_city: str = "lisbon"
+    # Upper bound for POST /plan end to end (two LLM calls with retries + routing).
+    plan_timeout_s: float = 90.0
 
     llm_provider: Literal["gemini", "openai"] = "gemini"
     gemini_api_key: SecretStr | None = None
