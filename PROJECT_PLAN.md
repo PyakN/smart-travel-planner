@@ -39,13 +39,13 @@
 **Result:** 2,143 Lisbon POIs in 10 categories (632 with a Wikidata link); a 1 km `ST_DWithin` around Praça do Comércio uses the GIST index and runs in ~0.6 ms.
 
 ## Phase 2. Backend core
-- [ ] FastAPI skeleton, package layout (api / services / repositories / schemas)
-- [ ] Config via `pydantic-settings`
-- [ ] `GET /health`
-- [ ] Async DB access (SQLAlchemy 2 + asyncpg)
-- [ ] `GET /places` (filters: category, bbox, radius)
-- [ ] Tests: pytest + DB in a container
-- [ ] CI job: lint + tests
+- [x] FastAPI skeleton, package layout (api / repositories / schemas; `services/` arrives with the LLM and optimizer logic)
+- [x] Config via `pydantic-settings`
+- [x] `GET /health`
+- [x] Async DB access (SQLAlchemy 2 + asyncpg)
+- [x] `GET /places` (filters: city, category, bbox, radius) + `GET /places/{id}`, `GET /categories`
+- [x] Tests: pytest + DB in a container (testcontainers)
+- [x] CI job: lint + tests (`.github/workflows/ci.yml`; first run happens once the repo is pushed)
 
 **DoD:** tests are green; endpoints are documented at `/docs`.
 
