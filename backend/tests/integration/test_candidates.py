@@ -73,5 +73,10 @@ def test_hint_uses_english_name(db_session: SessionFactory) -> None:
     assert torre.hint == "Belém Tower"
 
 
+def test_coordinates(db_session: SessionFactory) -> None:
+    luzia = next(c for c in candidates(db_session) if c.name == "Miradouro de Santa Luzia")
+    assert (luzia.lat, luzia.lon) == (38.7116, -9.1301)
+
+
 def test_limit(db_session: SessionFactory) -> None:
     assert len(candidates(db_session, limit=2)) == 2

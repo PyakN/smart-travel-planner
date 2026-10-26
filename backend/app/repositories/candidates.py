@@ -25,6 +25,8 @@ class Candidate:
     category: str
     score: float
     hint: str | None
+    lat: float
+    lon: float
 
 
 def _like_pattern(keyword: str) -> str:
@@ -77,15 +79,32 @@ async def find_candidates(
         # An explicitly named place survives even if its category is avoided.
         conditions.append(or_(Category.slug.not_in(avoid), keyword_match))
 
+    point = func.geometry(Place.geom)
     stmt = (
-        select(Place.id, Place.name, Category.slug, Place.tags, score.label("score"))
+        select(
+            Place.id,
+            Place.name,
+            Category.slug.label("category"),
+            Place.tags,
+            score.label("score"),
+            func.ST_Y(point).label("lat"),
+            func.ST_X(point).label("lon"),
+        )
         .join(Category)
         .where(*conditions)
         .order_by(score.desc(), Place.id)
         .limit(limit)
     )
-    rows = await session.execute(stmt)
+    rows = (await session.execute(stmt)).mappings()
     return [
-        Candidate(id=pid, name=name, category=slug, score=s, hint=_hint(name, tags))
-        for pid, name, slug, tags, s in rows
+        Candidate(
+            id=row["id"],
+            name=row["name"],
+            category=row["category"],
+            score=row["score"],
+            hint=_hint(row["name"], row["tags"]),
+            lat=row["lat"],
+            lon=row["lon"],
+        )
+        for row in rows
     ]

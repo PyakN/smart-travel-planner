@@ -14,7 +14,9 @@ from app.services.place_selection import (
 from tests.fakes import FakeProvider
 from tests.test_trip_schema import trip
 
-CANDIDATES = [Candidate(i, f"Place {i}", "landmark", 10 - i, None) for i in range(1, 8)]
+CANDIDATES = [
+    Candidate(i, f"Place {i}", "landmark", 10 - i, None, lat=38.7, lon=-9.1) for i in range(1, 8)
+]
 
 
 def ids(places: list[Candidate]) -> list[int]:
