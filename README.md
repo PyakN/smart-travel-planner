@@ -63,6 +63,22 @@ Example: museums and viewpoints within 400 m of Praça do Comércio:
 GET /places?lat=38.7075&lon=-9.1364&radius_m=400&category=museum&category=viewpoint
 ```
 
+## LLM layer
+
+The LLM never invents places. A request goes through four steps:
+
+1. **Parse:** the request text becomes a `TripRequest` (city, days, interests, avoid, pace, keywords).
+2. **Candidates:** SQL ranks the city's places by notability, interests and keywords.
+3. **Select:** the LLM picks place ids from that candidate list.
+4. **Guard:** a deterministic check drops any id that isn't a candidate.
+
+Configure it in `.env`: `LLM_PROVIDER`, the matching API key, and optionally `LLM_MODEL` and `LLM_FALLBACK_MODEL`.
+
+```bash
+cd backend
+python evals/selection_eval.py     # live eval against the real LLM + DB (costs a few cents)
+```
+
 ## Everyday commands
 
 ```bash
