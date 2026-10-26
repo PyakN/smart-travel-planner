@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background: var(--color-zinc-50);
+  color: var(--color-zinc-900);
+  font-family: var(--font-sans);
+}
+
+/* Map markers (Leaflet divIcons; Tailwind classes don't reach injected HTML reliably). */
+.stop-marker,
+.hotel-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid white;
+  border-radius: 9999px;
+  color: white;
+  font: 600 13px/1 var(--font-sans);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  transition:
+    width 0.15s,
+    height 0.15s;
+}
+
+.hotel-marker {
+  width: 30px;
+  height: 30px;
+  background: var(--color-zinc-900);
+}
