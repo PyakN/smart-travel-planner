@@ -79,6 +79,22 @@ cd backend
 python evals/selection_eval.py     # live eval against the real LLM + DB (costs a few cents)
 ```
 
+## Route optimizer
+
+`app/optimizer/` turns the selected places into days and walking order:
+
+- **Distances:** an OSRM foot routing matrix, falling back to haversine × 1.3. Set `ROUTING_PROVIDER` to choose.
+- **Order within a day:** a TSP solver (nearest neighbour + 2-opt + Or-opt).
+- **Split into days:** several strategies are tried and the shortest wins, with every day kept within the pace's time budget.
+- **Schedule:** arrival and departure times for each stop.
+
+Results against LLM-only ordering are in [docs/benchmark.md](docs/benchmark.md): **55% less walking than the selection order, and on par with an itinerary the LLM arranged itself, with zero route crossings.**
+
+```bash
+cd backend
+python evals/route_benchmark.py    # live benchmark (LLM + OSRM)
+```
+
 ## Everyday commands
 
 ```bash
