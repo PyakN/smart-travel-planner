@@ -23,6 +23,7 @@ dev = [
     "pytest>=8.3",
     "testcontainers[postgres]>=4.15",
     "httpx2>=2.16",  # transport for starlette's TestClient
+    "ortools>=9.11",  # reference solver for evals/route_benchmark.py
 ]
 
 [build-system]
