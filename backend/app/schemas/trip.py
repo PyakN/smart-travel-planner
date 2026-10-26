@@ -11,6 +11,7 @@ Pace = Literal["relaxed", "moderate", "intense"]
 STOPS_PER_DAY: dict[Pace, int] = {"relaxed": 4, "moderate": 6, "intense": 8}
 MAX_DAYS = 7
 MAX_KEYWORDS = 8
+MAX_REQUEST_CHARS = 1000
 
 
 class TripRequest(BaseModel):

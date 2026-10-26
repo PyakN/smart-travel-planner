@@ -13,9 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ingest.cities import CITIES
 from app.llm.service import LLMService
 from app.repositories.candidates import Candidate, find_candidates
-from app.schemas.trip import PlaceSelection, TripRequest
+from app.schemas.trip import MAX_REQUEST_CHARS, PlaceSelection, TripRequest
 
-MAX_REQUEST_CHARS = 1000
 MIN_POOL, MAX_POOL, POOL_PER_STOP = 30, 100, 3
 
 CATEGORY_GUIDE = {
