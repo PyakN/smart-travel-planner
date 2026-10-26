@@ -1,123 +1,123 @@
 # Smart AI Travel Planner — Master Plan (MVP)
 
-**Идея:** двухуровневая архитектура.
-1. **LLM** (Gemini / OpenAI) разбирает запрос и выбирает интересные локации из нашей БД.
-2. **Оптимизатор** (TSP / PostGIS) переставляет точки так, чтобы пеший маршрут был кратчайшим и без зигзагов.
+**Idea:** a two-layer architecture.
+1. **LLM** (Gemini / OpenAI) parses the request and picks interesting places from our database.
+2. **Optimizer** (TSP / PostGIS) reorders the places so the walking route is as short as possible, with no zigzags.
 
-**Стек:** Python (FastAPI), PostgreSQL + PostGIS, Next.js + Leaflet (Mapbox GL — позже, опционально).
+**Stack:** Python (FastAPI), PostgreSQL + PostGIS, Next.js + Leaflet (Mapbox GL later, optional).
 
-**Ключевая метрика проекта:** сколько километров экономит оптимизатор по сравнению с порядком, который предложил LLM (+ число самопересечений маршрута).
+**Key project metric:** how many kilometres the optimizer saves compared with the order the LLM suggested (plus the number of route self-intersections).
 
-**Принципы:**
-- LLM только выбирает и парсит; координаты и порядок — всегда из БД и алгоритма.
-- Один город для MVP, расширение — после.
-- Каждый шаг = небольшой атомарный коммит.
+**Principles:**
+- The LLM only parses and selects; coordinates and visiting order always come from the database and the algorithm.
+- One city for the MVP; expand later.
+- Every step = one small atomic commit.
 
 ---
 
-## Фаза 0. Каркас репозитория
-- [ ] Структура монорепо: `backend/`, `frontend/`, `docs/`
-- [ ] `docker-compose.yml` с `postgis/postgis`
+## Phase 0. Repository skeleton
+- [ ] Monorepo layout: `backend/`, `frontend/`, `docs/`
+- [ ] `docker-compose.yml` with `postgis/postgis`
 - [ ] `.env.example` (DB_URL, LLM_PROVIDER, GEMINI_API_KEY, OPENAI_API_KEY)
-- [ ] Линтеры и форматтеры: ruff + mypy (backend), eslint + prettier (frontend)
-- [ ] pre-commit хуки (включая проверку на секреты)
-- [ ] README с командами запуска
+- [ ] Linters and formatters: ruff + mypy (backend), eslint + prettier (frontend)
+- [ ] pre-commit hooks (including a secret scan)
+- [ ] README with run commands
 
-**DoD:** `docker compose up` поднимает пустую PostGIS; хуки работают.
+**DoD:** `docker compose up` starts an empty PostGIS; hooks work.
 
-## Фаза 1. Данные и схема БД
-- [ ] Расширения `postgis` (и `pgvector`, если нужны эмбеддинги)
-- [ ] Таблицы: `places`, `categories`, `routes`, `route_stops`
-- [ ] Alembic-миграции
-- [ ] Колонка `geography(Point, 4326)` + GIST-индекс
-- [ ] Выбор стартового города (Прага / Лиссабон)
-- [ ] Скрипт импорта POI из OpenStreetMap (Overpass API)
-- [ ] Очистка: дубли, пустые названия, нормализация категорий/тегов
-- [ ] (опц.) Описания и эмбеддинги POI для семантического поиска
+## Phase 1. Data and database schema
+- [ ] Extensions `postgis` (and `pgvector` if embeddings are needed)
+- [ ] Tables: `places`, `categories`, `routes`, `route_stops`
+- [ ] Alembic migrations
+- [ ] `geography(Point, 4326)` column + GIST index
+- [ ] Pick the starting city (Prague / Lisbon)
+- [ ] POI import script from OpenStreetMap (Overpass API)
+- [ ] Cleanup: duplicates, empty names, normalized categories/tags
+- [ ] (optional) POI descriptions and embeddings for semantic search
 
-**DoD:** в БД ≥ 500 осмысленных POI одного города, запрос `ST_DWithin` работает быстро.
+**DoD:** the DB holds ≥ 500 meaningful POIs for one city; `ST_DWithin` queries are fast.
 
-## Фаза 2. Ядро backend
-- [ ] Скелет FastAPI, структура пакетов (api / services / repositories / schemas)
-- [ ] Конфиг через `pydantic-settings`
+## Phase 2. Backend core
+- [ ] FastAPI skeleton, package layout (api / services / repositories / schemas)
+- [ ] Config via `pydantic-settings`
 - [ ] `GET /health`
-- [ ] Async-доступ к БД (SQLAlchemy 2 + asyncpg)
-- [ ] `GET /places` (фильтры: категория, bbox, радиус)
-- [ ] Тесты: pytest + БД в контейнере
-- [ ] CI-job: lint + tests
+- [ ] Async DB access (SQLAlchemy 2 + asyncpg)
+- [ ] `GET /places` (filters: category, bbox, radius)
+- [ ] Tests: pytest + DB in a container
+- [ ] CI job: lint + tests
 
-**DoD:** тесты зелёные, эндпоинты документированы в `/docs`.
+**DoD:** tests are green; endpoints are documented at `/docs`.
 
-## Фаза 3. LLM-слой
-- [ ] Абстракция провайдера (`LLMClient`), реализации Gemini и OpenAI
-- [ ] Парсинг запроса в структурированный JSON: `{city, days, interests, pace, constraints}` (structured output + валидация Pydantic)
-- [ ] Генерация кандидатов из БД: фильтр по тегам/категориям + ранжирование
-- [ ] Выбор LLM'ом POI из списка кандидатов (по `id`, не по названиям)
-- [ ] Защита: LLM не может вернуть id, которого нет в кандидатах
-- [ ] Ретраи, таймауты, кэш ответов, лимиты расходов
-- [ ] Тесты с замоканным LLM + небольшой набор eval-запросов
+## Phase 3. LLM layer
+- [ ] Provider abstraction (`LLMClient`) with Gemini and OpenAI implementations
+- [ ] Parse the request into structured JSON: `{city, days, interests, pace, constraints}` (structured output + Pydantic validation)
+- [ ] Candidate generation from the DB: tag/category filter + ranking
+- [ ] LLM picks POIs from the candidate list (by `id`, not by name)
+- [ ] Guard: the LLM cannot return an id that is not among the candidates
+- [ ] Retries, timeouts, response cache, spending limits
+- [ ] Tests with a mocked LLM + a small set of eval prompts
 
-**DoD:** по тексту запроса получаем список валидных `place_id` за разумное время.
+**DoD:** a request text yields a list of valid `place_id`s in reasonable time.
 
-## Фаза 4. Гео-оптимизация
-- [ ] Матрица расстояний: сначала haversine
-- [ ] Решатель TSP: nearest neighbour + 2-opt
-- [ ] Разбиение по дням: `ST_ClusterKMeans` / k-means
-- [ ] Выбор стартовой точки (отель / центр / задаётся пользователем)
-- [ ] Реальные пешие расстояния: OSRM / Valhalla (foot profile)
-- [ ] OR-Tools для сравнения/улучшения
-- [ ] Ограничения: часы работы, время на посещение, лимит времени в день
-- [ ] Бенчмарк: порядок LLM vs оптимизатор (км, самопересечения)
+## Phase 4. Geo-optimization
+- [ ] Distance matrix: haversine first
+- [ ] TSP solver: nearest neighbour + 2-opt
+- [ ] Split into days: `ST_ClusterKMeans` / k-means
+- [ ] Starting point (hotel / city centre / user-defined)
+- [ ] Real walking distances: OSRM / Valhalla (foot profile)
+- [ ] OR-Tools for comparison/improvement
+- [ ] Constraints: opening hours, visit duration, daily time budget
+- [ ] Benchmark: LLM order vs optimizer (km, self-intersections)
 
-**DoD:** на тестовых наборах маршрут не длиннее базового порядка; метрики записаны в `docs/benchmark.md`.
+**DoD:** on test sets the route is never longer than the baseline order; metrics recorded in `docs/benchmark.md`.
 
-## Фаза 5. API планирования
-- [ ] `POST /plan`: запрос → LLM → кандидаты → оптимизатор → ответ
-- [ ] Схема ответа: дни, остановки по порядку, геометрия, расстояние, время
-- [ ] Таймауты, понятные ошибки, трассировка шагов (для отладки)
-- [ ] Сохранение маршрута в `routes` / `route_stops`
-- [ ] Интеграционные тесты end-to-end (LLM замокан)
+## Phase 5. Planning API
+- [ ] `POST /plan`: request → LLM → candidates → optimizer → response
+- [ ] Response schema: days, ordered stops, geometry, distance, time
+- [ ] Timeouts, clear errors, step tracing (for debugging)
+- [ ] Persist the route to `routes` / `route_stops`
+- [ ] End-to-end integration tests (LLM mocked)
 
-**DoD:** один запрос возвращает готовый оптимизированный маршрут.
+**DoD:** a single request returns a ready, optimized route.
 
-## Фаза 6. Frontend
-- [ ] Каркас Next.js + TypeScript
-- [ ] Форма запроса (текстовое поле + примеры)
-- [ ] Карта на Leaflet: маркеры с номерами, polyline маршрута
-- [ ] Карточки POI, вкладки по дням, итоговая дистанция/время
-- [ ] Состояния загрузки и ошибок
-- [ ] Адаптив под мобильные
+## Phase 6. Frontend
+- [ ] Next.js + TypeScript skeleton
+- [ ] Request form (text field + examples)
+- [ ] Leaflet map: numbered markers, route polyline
+- [ ] POI cards, per-day tabs, total distance/time
+- [ ] Loading and error states
+- [ ] Mobile layout
 
-**DoD:** пользователь вводит запрос и видит маршрут на карте.
+**DoD:** the user types a request and sees the route on the map.
 
-## Фаза 7. Качество и надёжность
-- [ ] E2E-тесты (Playwright)
-- [ ] Структурированные логи, request id
-- [ ] Rate limiting и защита от злоупотребления LLM
-- [ ] Обработка недоступности LLM (фолбэк / понятное сообщение)
-- [ ] Проверка отсутствия секретов в репозитории
+## Phase 7. Quality and reliability
+- [ ] E2E tests (Playwright)
+- [ ] Structured logs, request id
+- [ ] Rate limiting and protection against LLM abuse
+- [ ] Handling LLM outages (fallback / clear message)
+- [ ] Check that no secrets are in the repository
 
-## Фаза 8. Деплой
-- [ ] Dockerfile для backend и frontend
+## Phase 8. Deployment
+- [ ] Dockerfiles for backend and frontend
 - [ ] CI/CD (GitHub Actions)
-- [ ] Хостинг: Fly.io / Render (API), Neon / Supabase (PostGIS), Vercel (frontend)
-- [ ] Секреты через переменные окружения хостинга
-- [ ] Демо-ссылка и скриншоты в README
+- [ ] Hosting: Fly.io / Render (API), Neon / Supabase (PostGIS), Vercel (frontend)
+- [ ] Secrets via hosting environment variables
+- [ ] Demo link and screenshots in the README
 
-## Фаза 9. После MVP
-- [ ] Авторизация и сохранённые поездки
-- [ ] Экспорт (GPX, ссылка в Google Maps)
-- [ ] Несколько городов
-- [ ] Перетаскивание точек и пересчёт маршрута
-- [ ] Mapbox GL вместо Leaflet (при необходимости)
+## Phase 9. Post-MVP
+- [ ] Authentication and saved trips
+- [ ] Export (GPX, Google Maps link)
+- [ ] Multiple cities
+- [ ] Drag-and-drop stops with route recalculation
+- [ ] Mapbox GL instead of Leaflet (if needed)
 
 ---
 
-## Риски
-| Риск | Митигация |
+## Risks
+| Risk | Mitigation |
 |---|---|
-| Качество и покрытие POI | Один город, данные OSM + ручная чистка |
-| Haversine даёт ложные «короткие» маршруты (реки, барьеры) | Перейти на OSRM/Valhalla (Фаза 4) |
-| Задержка и стоимость LLM | Structured output, малая модель, кэш |
-| Галлюцинации LLM | Выбор только по `id` из кандидатов |
-| Слабое отличие от конкурентов | Позиционировать как инженерный проект с измеримой метрикой |
+| POI quality and coverage | One city, OSM data + manual cleanup |
+| Haversine produces fake "short" routes (rivers, barriers) | Switch to OSRM/Valhalla (Phase 4) |
+| LLM latency and cost | Structured output, small model, caching |
+| LLM hallucinations | Selection only by `id` from the candidate list |
+| Weak differentiation from competitors | Position as an engineering project with a measurable metric |
