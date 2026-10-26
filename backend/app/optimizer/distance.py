@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx
 
@@ -29,6 +29,10 @@ class DistanceResult:
 class DistanceProvider(Protocol):
     async def matrix(self, points: Sequence[LatLon]) -> DistanceResult: ...
 
+    async def geometry(self, points: Sequence[LatLon]) -> list[LatLon]:
+        """Polyline for walking the points in the given order, for drawing on a map."""
+        ...
+
 
 def haversine_matrix(points: Sequence[LatLon], factor: float = DETOUR_FACTOR) -> Matrix:
     return [[factor * haversine_m(a.lat, a.lon, b.lat, b.lon) for b in points] for a in points]
@@ -43,6 +47,9 @@ def symmetrize(matrix: Matrix) -> Matrix:
 class HaversineProvider:
     async def matrix(self, points: Sequence[LatLon]) -> DistanceResult:
         return DistanceResult(haversine_matrix(points), "haversine")
+
+    async def geometry(self, points: Sequence[LatLon]) -> list[LatLon]:
+        return list(points)
 
 
 class OsrmProvider:
@@ -73,20 +80,37 @@ class OsrmProvider:
             logger.warning("OSRM table failed (%r), using haversine", exc)
             return DistanceResult(haversine_matrix(points), "haversine")
 
-    async def _fetch(self, points: Sequence[LatLon]) -> Matrix:
+    async def geometry(self, points: Sequence[LatLon]) -> list[LatLon]:
+        """Street-following polyline through the points, in order (straight lines on failure)."""
+        if len(points) < 2 or len(points) > self.max_points:
+            return list(points)
+        try:
+            body = await self._get("route", points, {"overview": "full", "geometries": "geojson"})
+            coordinates = body["routes"][0]["geometry"]["coordinates"]
+            return [LatLon(lat=lat, lon=lon) for lon, lat in coordinates]
+        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+            logger.warning("OSRM route failed (%r), using straight lines", exc)
+            return list(points)
+
+    async def _get(
+        self, service: str, points: Sequence[LatLon], params: dict[str, str]
+    ) -> dict[str, Any]:
         coords = ";".join(f"{p.lon:.6f},{p.lat:.6f}" for p in points)
         # The profile segment is ignored by single-profile servers; "driving" is OSRM's default.
-        url = f"{self.base_url}/table/v1/driving/{coords}"
-        params = {"annotations": "distance"}
+        url = f"{self.base_url}/{service}/v1/driving/{coords}"
         if self._client is not None:
             response = await self._client.get(url, params=params, timeout=self.timeout_s)
         else:
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, params=params, timeout=self.timeout_s)
         response.raise_for_status()
-        body = response.json()
+        body: dict[str, Any] = response.json()
         if body.get("code") != "Ok":
             raise ValueError(f"OSRM returned {body.get('code')}")
+        return body
+
+    async def _fetch(self, points: Sequence[LatLon]) -> Matrix:
+        body = await self._get("table", points, {"annotations": "distance"})
         raw: Matrix = body["distances"]
         if len(raw) != len(points) or any(len(row) != len(points) for row in raw):
             raise ValueError("OSRM matrix has the wrong shape")

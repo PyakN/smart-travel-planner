@@ -86,6 +86,27 @@ def test_osrm_network_error_falls_back() -> None:
     assert asyncio.run(osrm(handler).matrix(POINTS)).source == "haversine"
 
 
+def test_osrm_geometry_follows_streets() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "/route/v1/driving/" in request.url.path
+        assert request.url.params["geometries"] == "geojson"
+        line = [[-9.1364, 38.7075], [-9.1350, 38.7100], [-9.1335, 38.7139]]
+        return httpx.Response(
+            200, json={"code": "Ok", "routes": [{"geometry": {"coordinates": line}}]}
+        )
+
+    path = asyncio.run(osrm(handler).geometry(POINTS[:2]))
+    assert path == [COMERCIO, LatLon(38.7100, -9.1350), CASTELO]
+
+
+def test_geometry_falls_back_to_straight_lines() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    assert asyncio.run(osrm(handler).geometry(POINTS)) == POINTS
+    assert asyncio.run(HaversineProvider().geometry(POINTS)) == POINTS
+
+
 @pytest.mark.parametrize(
     ("routing_provider", "expected"), [("osrm", OsrmProvider), ("haversine", HaversineProvider)]
 )

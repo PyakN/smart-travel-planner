@@ -83,6 +83,9 @@ class StaticProvider:
     async def matrix(self, points: Sequence[LatLon]) -> DistanceResult:
         return self.result
 
+    async def geometry(self, points: Sequence[LatLon]) -> list[LatLon]:
+        return list(points)
+
 
 def cost(matrix: Matrix, days: Days) -> float:
     return sum(path_cost(matrix, day) for day in days)
