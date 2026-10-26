@@ -44,3 +44,4 @@ repos:
           - geoalchemy2>=0.16
           - pydantic-settings>=2.6
           - httpx>=0.28
+          - fastapi>=0.115

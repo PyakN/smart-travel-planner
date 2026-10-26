@@ -10,6 +10,8 @@ dependencies = [
     "geoalchemy2>=0.16",
     "pydantic-settings>=2.6",
     "httpx>=0.28",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
 ]
 
 [project.optional-dependencies]
@@ -17,6 +19,8 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "pytest>=8.3",
+    "testcontainers[postgres]>=4.15",
+    "httpx2>=2.16",  # transport for starlette's TestClient
 ]
 
 [build-system]
@@ -50,3 +54,4 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: needs Docker (starts a PostGIS container)"]
