@@ -26,16 +26,17 @@
 **DoD:** `docker compose up` starts an empty PostGIS; hooks work.
 
 ## Phase 1. Data and database schema
-- [ ] Extensions `postgis` (and `pgvector` if embeddings are needed)
-- [ ] Tables: `places`, `categories`, `routes`, `route_stops`
-- [ ] Alembic migrations
-- [ ] `geography(Point, 4326)` column + GIST index
-- [ ] Pick the starting city (Prague / Lisbon)
-- [ ] POI import script from OpenStreetMap (Overpass API)
-- [ ] Cleanup: duplicates, empty names, normalized categories/tags
-- [ ] (optional) POI descriptions and embeddings for semantic search
+- [x] Extension `postgis` (`pgvector` deferred to Phase 3, only if embeddings are needed)
+- [x] Tables: `places`, `categories`, `routes`, `route_stops`
+- [x] Alembic migrations
+- [x] `geography(Point, 4326)` column + GIST index
+- [x] Pick the starting city: **Lisbon**
+- [x] POI import script from OpenStreetMap (Overpass API): `python -m app.ingest lisbon`
+- [x] Cleanup: duplicates, empty names, normalized categories/tags
+- [ ] (optional) POI descriptions and embeddings for semantic search (moved to Phase 3)
 
 **DoD:** the DB holds ≥ 500 meaningful POIs for one city; `ST_DWithin` queries are fast.
+**Result:** 2,143 Lisbon POIs in 10 categories (632 with a Wikidata link); a 1 km `ST_DWithin` around Praça do Comércio uses the GIST index and runs in ~0.6 ms.
 
 ## Phase 2. Backend core
 - [ ] FastAPI skeleton, package layout (api / services / repositories / schemas)
