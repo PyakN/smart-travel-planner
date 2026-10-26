@@ -18,6 +18,20 @@ repos:
         language: fail
         files: '(^|/)\.env(\..+)?$'
         exclude: '(^|/)\.env\.example$'
+      # Frontend checks use the project's own node_modules (run `npm ci` in frontend/ first).
+      # CI skips these here and runs them in the dedicated frontend job.
+      - id: frontend-eslint
+        name: eslint (frontend)
+        entry: npm --prefix frontend run lint
+        language: system
+        files: ^frontend/.*\.(ts|tsx|js|mjs)$
+        pass_filenames: false
+      - id: frontend-prettier
+        name: prettier (frontend)
+        entry: npm --prefix frontend run format:check
+        language: system
+        files: ^frontend/
+        pass_filenames: false
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2

@@ -15,6 +15,9 @@ jobs:
           python-version: "3.12"
       # ruff, mypy, gitleaks, .env guard and file hygiene, as configured in .pre-commit-config.yaml
       - uses: pre-commit/action@v3.0.1
+        env:
+          # Need node_modules; the frontend job runs the same checks.
+          SKIP: frontend-eslint,frontend-prettier
 
   test:
     runs-on: ubuntu-latest
@@ -31,3 +34,22 @@ jobs:
       - run: pip install -e ".[dev]"
       # Integration tests start their own PostGIS container (Docker is available on the runner).
       - run: pytest -v
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
