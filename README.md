@@ -32,10 +32,16 @@ python -m venv .venv
 .venv/Scripts/activate        # Windows (Git Bash); on macOS/Linux: source .venv/bin/activate
 pip install -e ".[dev]" pre-commit
 
-# 4. Git hooks (run from the repo root)
+# 4. Schema + data (from backend/)
+alembic upgrade head
+python -m app.ingest lisbon        # ~2k POIs from OpenStreetMap, ~1 min
+
+# 5. Git hooks (run from the repo root)
 cd ..
 pre-commit install
 ```
+
+The importer caches the raw Overpass response in `backend/data/raw/`. Re-runs use the cache and upsert by OSM id; pass `--refresh` to fetch fresh data.
 
 ## Everyday commands
 
@@ -44,6 +50,8 @@ docker compose up -d --wait        # start the database
 docker compose down                # stop it (data persists in the pgdata volume)
 
 cd backend
+alembic upgrade head               # apply migrations
+alembic check                      # models and migrations in sync?
 ruff check . && ruff format .      # lint + format
 mypy                               # type check
 pytest                             # tests
