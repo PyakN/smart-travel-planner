@@ -126,6 +126,18 @@
 **DoD:** with the checkbox off, plans are what they were. With it on, a rainy afternoon gets the museums and the dry morning the viewpoints, outdoor stops end by sunset, and a wet day swaps outdoor picks for indoor places that suit the request.
 **Result:** checked live in a browser (Gemini + OSRM + HERE, Playwright, desktop and phone), with OpenWeatherMap replaced by a local server for a rainy day (dry until 10:30, rain until 16:30): no key was available. Without the checkbox, 3 of 5 stops were outdoors in the rain and the plan said so; with it, the LLM chose museums for the rain, the castle got the dry 09:30 slot, and no outdoor stop met rain (5.7 → 3.4 km). It also showed the trimming problem above: 2 stops dropped instead of 1. On random 1–7 day trips, outdoor visits meet 80–100% less bad weather for 5–20% more travel, and a week of 56 stops takes ~50 ms longer to plan.
 
+## Phase 6d. Custom day hours and evenings
+- [ ] Evening places: bars, pubs, clubs and fado houses (`nightlife`), fado and well-known restaurants (`restaurant`), and named squares (landmarks) from OSM; closed venues skipped
+- [ ] When a place can be visited, from its category and OSM tags: by day (indoor sights close at 20:00), in daylight (outdoor sights), at night (evening places open at 20:00), or any time (lit squares, venues open late per `opening_hours`)
+- [ ] Sunrise and sunset computed for every trip day, so darkness is known without a forecast
+- [ ] Optimizer (VRPTW): every day has its own hours (start, end past midnight allowed, daylight); a place visited too early waits for it to open, a visit past its closing time or sunset is not allowed (reordered, else dropped and reported). The pace is a share of the day's hours (relaxed ½, moderate ⅔, intense ⅚), so the default 09:30–21:30 day plans as before
+- [ ] Selection: places per day scale with the hours (a day from 16:00 gets 2–3 instead of 6); the LLM is told how many go before and after 20:00 and how many can be outdoors before dark, and a guard swaps picks that cannot take those slots
+- [ ] Weather only when the checkbox is on: no forecast is fetched otherwise; when on, rain, snow, fog and visibility count only within the day's hours (forecast slots of those hours, overnight included)
+- [ ] API: `day_start`, `day_end` (earlier than the start: the next morning) and `first_day_start` in `POST /plan`; a trip that starts today starts no earlier than now; days return their hours and daylight, stops their free time before them
+- [ ] Frontend: start and end time pickers (09:30–21:30 by default; today's start defaults to the current time in Lisbon, later days keep their own start), overnight hint, free time and evening places in the plan
+
+**DoD:** a 09:30–21:30 day plans as before. A plan for today at 16:00 has 2–3 places from 16:00. 16:00–03:00 fills the afternoon with sights and outdoor places before sunset, and the night with bars, fado houses, restaurants and lit squares, never a museum or a viewpoint after dark. With the checkbox off no forecast is used; with it on, only the weather within the chosen hours counts.
+
 ## Phase 7. Quality and reliability
 - [ ] E2E tests (Playwright)
 - [ ] Structured logs, request id
