@@ -102,6 +102,15 @@
 **DoD:** the user types a request and sees the route on the map.
 **Result:** checked in a real browser (Playwright, desktop 1440 px and phone 390 px): plan, day switch, share link and error state work, with no console errors. Testing the error state found a real bug: "a weekend in Tokyo" was silently planned as Lisbon (fixed in `fix(llm): refuse unsupported cities`).
 
+## Phase 6b. Refinements
+- [ ] Must-visit places: name search (`GET /places?q=`) and an autocomplete in the form; they always get a slot on some day if they fit the daily budget (trimmed only after every optional stop, moved to another day if their own day overflows)
+- [ ] Travel modes: walking and/or public transit (walking only: no tram/metro; transit only: ride every leg over 1 km)
+- [ ] Proximity-first selection: supplementary candidates ranked by PostGIS distance to the hotel and the must-visit places; the LLM sees the distances
+- [ ] Rich stop cards: Wikimedia photo with credit, short description (English Wikipedia / Wikidata), a personal note from the LLM, opening hours, website
+- [ ] Replace stops: tick stops of a day and replace them (`POST /plans/{id}/replace` → a new plan version). The LLM picks nearby places that fit the day's free time, never repeating a planned or rejected place; as a last resort, other stops of the day are adjusted when it ends up sparse or one-note, and every adjustment is reported. Undo returns to the previous version
+
+**DoD:** a trip with a hotel and two must-visit places keeps both, its other stops cluster around them, and replacing a stop gives a new, non-duplicate place that fits the day.
+
 ## Phase 7. Quality and reliability
 - [ ] E2E tests (Playwright)
 - [ ] Structured logs, request id
