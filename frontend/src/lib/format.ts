@@ -257,14 +257,21 @@ export function dayLength(start: string, end: string): number {
   return length > 0 ? length : length + MINUTES_PER_DAY;
 }
 
-/** A day's hours in a few words: "12 h a day", "11 h a day, until 03:00 the next morning". */
-export function hoursHint(start: string, end: string): string {
-  if (start === end) return "Pick an end time after the start.";
-  const length = dayLength(start, end);
-  const overnight = clockMinutes(end) < clockMinutes(start);
+/**
+ * A day's hours in a few words: "12 h a day", "11 h a day, until 03:00 the next morning".
+ * With `laterStart`, `start` is today's (from now) and later days start then: whether the
+ * end is the next morning goes by the days' own start, and today may be over already.
+ */
+export function hoursHint(start: string, end: string, laterStart: string | null = null): string {
+  const dayStart = laterStart ?? start;
+  if (dayStart === end) return "Pick an end time after the start.";
+  const overnight = clockMinutes(end) < clockMinutes(dayStart);
+  const length = clockMinutes(end) + (overnight ? MINUTES_PER_DAY : 0) - clockMinutes(start);
+  if (length <= 0) return `Today's hours end at ${end}: start tomorrow, or end the day later.`;
+  const days = laterStart === null ? "a day" : "today";
   const hint = overnight
-    ? `${formatDuration(length)} a day, until ${end} the next morning.`
-    : `${formatDuration(length)} a day.`;
+    ? `${formatDuration(length)} ${days}, until ${end} the next morning.`
+    : `${formatDuration(length)} ${days}.`;
   // Past 22:00 an evening is long enough to plan with places open at night.
   if (!overnight && clockMinutes(end) <= 22 * 60) return hint;
   return `${hint} From 20:00 the plan only has places open at night: bars, fado houses, restaurants and lit squares.`;

@@ -276,7 +276,7 @@ export default function PlanForm({
           </label>
         )}
         <p className="mt-1 text-xs text-zinc-500">
-          {hoursHint(startTime, endTime)}
+          {hoursHint(startTime, endTime, laterStartTime)}
           {nowMinutes !== null && ` It is ${clockTime(nowMinutes)} in ${CITY_NAME} now.`}
         </p>
         <label className="mt-2 flex items-center gap-2 text-zinc-700">

@@ -326,6 +326,12 @@ describe("day hours", () => {
     );
     expect(hoursHint("10:00", "23:30")).toMatch(/^13 h 30 min a day\. From 20:00/);
     expect(hoursHint("10:00", "10:00")).toBe("Pick an end time after the start.");
+    // Today from now, later days from 09:30: today is over at 23:15 if days end at 21:30.
+    expect(hoursHint("23:15", "21:30", "09:30")).toBe(
+      "Today's hours end at 21:30: start tomorrow, or end the day later.",
+    );
+    expect(hoursHint("16:15", "21:30", "09:30")).toBe("5 h 15 min today.");
+    expect(hoursHint("23:15", "03:00", "09:30")).toMatch(/^3 h 45 min today, until 03:00 the next/);
   });
 
   it("shows a day's hours and the free time before a place that opens later", () => {
