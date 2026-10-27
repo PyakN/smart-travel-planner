@@ -80,13 +80,12 @@ def test_must_visit_places_come_first_and_anchor_the_rest(
     assert "dropped 1 id(s) not in the candidate list" in result.warnings
 
     prompt = str(provider.calls[1]["prompt"])
-    assert (
-        "Must-visit places (already in the plan):\n- Museu Calouste Gulbenkian (museum)" in prompt
-    )
+    must_line = f"- {gulbenkian} | Museu Calouste Gulbenkian | museum"
+    assert f"Must-visit places (already in the plan):\n{must_line}\n" in prompt
     assert "Number of places to choose: 3" in prompt
     assert "(id | name | category | distance | hint)" in prompt
     assert f"{luzia} | Miradouro de Santa Luzia | viewpoint | 0.7 km" in prompt
-    assert f"{gulbenkian} |" not in prompt
+    assert prompt.count(f"{gulbenkian} |") == 1  # listed as must-visit, not as a candidate
 
 
 def test_must_visit_places_can_fill_the_trip(

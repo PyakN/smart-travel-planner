@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     llm_fallback_model: str | None = None
     llm_timeout_s: float = 30.0
     llm_max_retries: int = 2
-    llm_max_output_tokens: int = 2048
+    # Room for a short note per place: a 7-day intense trip has 56 of them.
+    llm_max_output_tokens: int = 4096
     llm_daily_token_budget: int = 1_000_000
     llm_cache_size: int = 256
 

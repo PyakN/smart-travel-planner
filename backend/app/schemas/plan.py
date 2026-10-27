@@ -52,6 +52,7 @@ class PlannedStop(BaseModel):
     travel_min: int
     distance_from_previous_m: int
     must_visit: bool = False
+    note: str | None = Field(default=None, description="Why this place suits the traveller")
 
 
 class RouteSegment(BaseModel):

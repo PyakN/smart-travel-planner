@@ -49,6 +49,14 @@ class TripRequest(BaseModel):
         return self.days * STOPS_PER_DAY[self.pace]
 
 
+class PlaceNote(BaseModel):
+    place_id: int
+    note: str = Field(description="Why this place suits this traveller, at most 20 words")
+
+
 class PlaceSelection(BaseModel):
     place_ids: list[int] = Field(description="Chosen candidate ids, most important first")
+    notes: list[PlaceNote] = Field(
+        default_factory=list, description="One note per chosen place and per must-visit place"
+    )
     rationale: str = Field(description="One or two sentences on why this mix fits the request")

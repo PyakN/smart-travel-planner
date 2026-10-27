@@ -5,11 +5,14 @@ import pytest
 from app.ingest.cities import CITIES, resolve_city
 from app.llm.service import LLMService
 from app.repositories.candidates import Candidate
+from app.schemas.trip import PlaceNote
 from app.services.place_selection import (
+    NOTE_MAX_CHARS,
     PARSE_SYSTEM,
     PlanningError,
     parse_trip_request,
     select_places,
+    validate_notes,
     validate_selection,
 )
 from tests.fakes import FakeProvider
@@ -58,6 +61,20 @@ class TestValidateSelection:
     def test_backfill_limited_by_pool(self) -> None:
         places, _ = validate_selection([999] * 3, CANDIDATES[:2], target=3)
         assert ids(places) == [1, 2]
+
+
+def test_notes_are_kept_for_selected_places_only() -> None:
+    notes = [
+        PlaceNote(place_id=1, note="  Great   views for you. "),
+        PlaceNote(place_id=1, note="A second note."),
+        PlaceNote(place_id=2, note="   "),
+        PlaceNote(place_id=99, note="Not selected."),
+        PlaceNote(place_id=3, note="x" * 500),
+    ]
+    valid = validate_notes(notes, {1, 2, 3})
+    assert valid[1] == "Great views for you."
+    assert 2 not in valid and 99 not in valid
+    assert len(valid[3]) == NOTE_MAX_CHARS and valid[3].endswith("…")
 
 
 def test_parse_wraps_request_as_data() -> None:

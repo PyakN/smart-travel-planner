@@ -13,7 +13,7 @@ from app.db.models import Route, RouteStop
 from app.llm.base import LLMError, TransientLLMError
 from app.llm.service import LLMService, TokenBudget
 from app.optimizer.distance import HaversineProvider
-from app.schemas.trip import PlaceSelection
+from app.schemas.trip import PlaceNote, PlaceSelection
 from tests.fakes import FakeProvider
 from tests.integration.conftest import SessionFactory
 from tests.test_trip_schema import trip
@@ -47,7 +47,11 @@ def queue_relaxed_day(llm: FakeProvider, place_ids: dict[str, int]) -> list[int]
     ]
     llm.queue(
         trip(city=None, days=1, pace="relaxed", interests=["viewpoint"]),
-        PlaceSelection(place_ids=chosen, rationale="Views and classics."),
+        PlaceSelection(
+            place_ids=chosen,
+            notes=[PlaceNote(place_id=chosen[0], note="The castle has the best views.")],
+            rationale="Views and classics.",
+        ),
     )
     return chosen
 
@@ -91,6 +95,9 @@ def test_plan_end_to_end(
     assert plan["total_distance_m"] == day["distance_m"] > 0
     assert plan["distance_source"] == "haversine"
     assert set(plan["timings_ms"]) == {"selection", "optimization", "geometry", "total"}
+    notes = {s["place_id"]: s["note"] for s in day["stops"]}
+    assert notes.pop(chosen[0]) == "The castle has the best views."
+    assert set(notes.values()) == {None}
 
     # The plan is persisted: same response from GET, stops stored in visiting order.
     assert client.get(f"/plans/{plan['id']}").json() == plan

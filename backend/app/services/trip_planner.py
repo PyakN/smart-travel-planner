@@ -153,6 +153,7 @@ async def plan_trip(
                     travel_min=round(v.leg.minutes) if v.leg else 0,
                     distance_from_previous_m=round(v.leg.distance_m) if v.leg else 0,
                     must_visit=v.stop.required,
+                    note=selection.notes.get(v.stop.id),
                 )
                 for v in day.visits
             ],
