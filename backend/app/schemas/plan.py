@@ -6,6 +6,9 @@ from app.schemas.trip import MAX_REQUEST_CHARS, TripRequest
 
 TravelMode = Literal["walk", "transit"]
 ALL_MODES: list[TravelMode] = ["walk", "transit"]
+TransitVehicle = Literal[
+    "metro", "tram", "bus", "train", "ferry", "funicular", "cable_car", "other"
+]
 MAX_MUST_VISIT = 10
 
 
@@ -45,6 +48,23 @@ class StopPhoto(BaseModel):
     credit: str | None = Field(description="Author and licence, e.g. 'Jane Doe, CC BY-SA 4.0'")
 
 
+class Attribution(BaseModel):
+    text: str = Field(description="Data credit the transit operator requires with its routes")
+    url: str | None
+
+
+class TransitRide(BaseModel):
+    vehicle: TransitVehicle
+    line: str = Field(description="Line name, e.g. '28E', 'Verde' (metro), 'Linha de Cascais'")
+    headsign: str | None = Field(description="Where the vehicle is going")
+    color: str | None = Field(description="The line's own colour, '#RRGGBB'")
+    board: str | None = Field(description="Stop to get on at")
+    alight: str | None = Field(description="Stop to get off at")
+    stops: int = Field(description="Number of stops ridden")
+    minutes: int
+    attributions: list[Attribution] = Field(default_factory=list)
+
+
 class PlannedStop(BaseModel):
     place_id: int
     name: str
@@ -57,6 +77,10 @@ class PlannedStop(BaseModel):
     travel_mode: TravelMode | None
     travel_min: int
     distance_from_previous_m: int
+    rides: list[TransitRide] = Field(
+        default_factory=list,
+        description="The rides of a transit leg, in order; empty for walks and estimated rides",
+    )
     must_visit: bool = False
     note: str | None = Field(default=None, description="Why this place suits the traveller")
     description: str | None = None
@@ -68,9 +92,10 @@ class PlannedStop(BaseModel):
 class RouteSegment(BaseModel):
     mode: TravelMode
     geometry: list[tuple[float, float]] = Field(
-        description="Path as [lon, lat] pairs (GeoJSON order); street-following when walked, "
-        "a straight line for transit legs"
+        description="Path as [lon, lat] pairs (GeoJSON order): street-following when walked, "
+        "along the line when ridden, a straight line for an estimated ride"
     )
+    ride: TransitRide | None = Field(default=None, description="The ride of a transit segment")
 
 
 class PlannedDay(BaseModel):
@@ -120,6 +145,8 @@ class PlanResponse(BaseModel):
     days: list[PlannedDay]
     total_distance_m: int
     distance_source: str
+    # "here" (real timetables), "estimate", "mixed"; None when nothing is ridden.
+    transit_source: str | None = None
     strategy: str
     dropped: list[PlaceRef]
     warnings: list[str]

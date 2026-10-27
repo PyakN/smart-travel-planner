@@ -1,7 +1,7 @@
 import asyncio
 import random
-from collections.abc import Callable, Collection, Sequence
-from dataclasses import dataclass, field, replace
+from collections.abc import Collection, Sequence
+from dataclasses import replace
 from math import inf
 
 import pytest
@@ -29,6 +29,7 @@ from app.optimizer.planner import (
 from app.optimizer.transit import Ride, Section, TransitProvider, TransitRoute
 from app.optimizer.tsp import path_cost
 from app.schemas.trip import Pace
+from tests.fakes import FakeTransit
 
 ROSSIO = StartPoint(38.7139, -9.1394)
 
@@ -331,20 +332,6 @@ def metro(minutes: float, walking_m: float = 300) -> TransitRoute:
         (Section("walk", (a, a), walking_m, 5, None), Section("transit", (a, b), 6000, 0, line)),
         minutes,
     )
-
-
-@dataclass
-class FakeTransit:
-    answer: Callable[[LatLon, LatLon], TransitRoute | None]
-    calls: list[list[tuple[LatLon, LatLon]]] = field(default_factory=list)
-
-    async def routes(self, pairs: Sequence[tuple[LatLon, LatLon]]) -> list[TransitRoute | None]:
-        self.calls.append(list(pairs))
-        return [self.answer(a, b) for a, b in pairs]
-
-    @property
-    def asked(self) -> list[tuple[LatLon, LatLon]]:
-        return [pair for call in self.calls for pair in call]
 
 
 def on_foot_m(a: LatLon, b: LatLon) -> float:

@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from testcontainers.community.postgres import PostgresContainer
 
-from app.api.deps import get_distances, get_llm
+from app.api.deps import get_distances, get_llm, get_transit
 from app.config import get_settings
 from app.db.models import Category, Place
 from app.db.session import create_engine, create_sessionmaker
@@ -107,6 +107,7 @@ def database_url() -> Iterator[str]:
     ):
         url = postgres.get_connection_url()
         monkeypatch.setenv("DATABASE_URL", url)
+        monkeypatch.setenv("TRANSIT_PROVIDER", "estimate")  # tests that ride use a fake
         get_settings.cache_clear()
         command.upgrade(Config(str(BACKEND_DIR / "alembic.ini")), "head")
         asyncio.run(_seed())
@@ -167,9 +168,11 @@ def use_llm(client: TestClient, provider: FakeProvider, **service_kwargs: Any) -
 
 @pytest.fixture
 def llm(client: TestClient) -> Iterator[FakeProvider]:
-    """Scripted LLM and straight-line distances for API tests."""
+    """Scripted LLM, straight-line distances and estimated ride times for API tests."""
     provider = FakeProvider()
     use_llm(client, provider)
-    client.app.dependency_overrides[get_distances] = HaversineProvider  # type: ignore[attr-defined]
+    overrides = client.app.dependency_overrides  # type: ignore[attr-defined]
+    overrides[get_distances] = HaversineProvider
+    overrides[get_transit] = lambda: None
     yield provider
     client.app.dependency_overrides.clear()  # type: ignore[attr-defined]

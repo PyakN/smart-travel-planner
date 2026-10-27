@@ -8,6 +8,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import ValidationError
@@ -18,9 +19,11 @@ from app.llm.service import LLMService
 from app.optimizer.distance import DistanceProvider
 from app.optimizer.geometry import LatLon
 from app.optimizer.planner import DayPlan, Leg, StartPoint, Stop, Visit, plan_route
+from app.optimizer.transit import Ride, TransitProvider
 from app.repositories.places import PlaceDetails, place_details
 from app.schemas.plan import (
     ALL_MODES,
+    Attribution,
     PlaceRef,
     PlannedDay,
     PlannedStop,
@@ -28,6 +31,7 @@ from app.schemas.plan import (
     RouteSegment,
     StartIn,
     StopPhoto,
+    TransitRide,
     TravelMode,
 )
 from app.services.place_selection import select_places
@@ -73,29 +77,74 @@ def _day_legs(day: DayPlan, start: StartIn | None) -> list[tuple[LatLon, LatLon,
     ]
 
 
+def transit_ride(ride: Ride) -> TransitRide:
+    return TransitRide(
+        vehicle=ride.vehicle,
+        line=ride.line,
+        headsign=ride.headsign,
+        color=ride.color,
+        board=ride.board,
+        alight=ride.alight,
+        stops=ride.stops,
+        minutes=round(ride.minutes),
+        attributions=[Attribution(text=a.text, url=a.url) for a in ride.attributions],
+    )
+
+
+@dataclass
+class _Run:
+    mode: TravelMode
+    points: list[LatLon]
+    # A path that is drawn as is: a transit route's section, or a straight estimated ride.
+    # Other walks in a row are routed on the street network together.
+    fixed: bool = False
+    ride: TransitRide | None = None
+
+
 async def day_segments(
     day: DayPlan, start: StartIn | None, distances: DistanceProvider
 ) -> list[RouteSegment]:
-    """Consecutive walking legs become one street-following path; transit legs stay straight."""
-    runs: list[tuple[TravelMode, list[LatLon]]] = []
+    """Walking legs in a row become one street-following path. A ridden leg is drawn as its
+    transit route (walks to and from the stops, then each ride along its line), or as a
+    straight line when its time is an estimate."""
+    runs: list[_Run] = []
     for a, b, leg in _day_legs(day, start):
-        if leg.mode == "walk" and runs and runs[-1][0] == "walk":
-            runs[-1][1].append(b)
+        if leg.route is not None:
+            runs.extend(
+                _Run(
+                    s.mode, list(s.path), fixed=True, ride=transit_ride(s.ride) if s.ride else None
+                )
+                for s in leg.route.sections
+            )
+        elif leg.mode == "transit":
+            runs.append(_Run("transit", [a, b], fixed=True))
+        elif runs and runs[-1].mode == "walk" and not runs[-1].fixed:
+            runs[-1].points.append(b)
         else:
-            runs.append((leg.mode, [a, b]))
+            runs.append(_Run("walk", [a, b]))
     if not runs:  # a single stop and no start point
         stop = day.visits[0].stop
-        runs = [("walk", [LatLon(stop.lat, stop.lon)])]
+        runs = [_Run("walk", [LatLon(stop.lat, stop.lon)])]
     paths = await asyncio.gather(
-        *(
-            distances.geometry(points) if mode == "walk" else _straight(points)
-            for mode, points in runs
-        )
+        *(_straight(run.points) if run.fixed else distances.geometry(run.points) for run in runs)
     )
     return [
-        RouteSegment(mode=mode, geometry=[(p.lon, p.lat) for p in path])
-        for (mode, _), path in zip(runs, paths, strict=True)
+        RouteSegment(mode=run.mode, geometry=[(p.lon, p.lat) for p in path], ride=run.ride)
+        for run, path in zip(runs, paths, strict=True)
     ]
+
+
+def transit_source(days: Sequence[PlannedDay]) -> str | None:
+    """Where the plan's ride times come from: "here", "estimate" or "mixed"."""
+    sources = {
+        "here" if segment.ride else "estimate"
+        for day in days
+        for segment in day.segments
+        if segment.mode == "transit"
+    }
+    if len(sources) > 1:
+        return "mixed"
+    return sources.pop() if sources else None
 
 
 async def _straight(points: list[LatLon]) -> list[LatLon]:
@@ -125,6 +174,7 @@ def planned_stop(
         travel_mode=leg.mode if leg else None,
         travel_min=round(leg.minutes) if leg else 0,
         distance_from_previous_m=round(leg.distance_m) if leg else 0,
+        rides=[transit_ride(r) for r in leg.route.rides] if leg and leg.route else [],
         must_visit=visit.stop.required,
         note=note,
         description=details.description if details else None,
@@ -183,6 +233,7 @@ async def plan_trip(
     default_city: str,
     must_visit: Sequence[int] = (),
     modes: Sequence[TravelMode] = ALL_MODES,
+    transit: TransitProvider | None = None,
 ) -> PlanResponse:
     watch = Stopwatch()
     selection = await select_places(
@@ -209,6 +260,7 @@ async def plan_trip(
         provider=distances,
         start=StartPoint(start.lat, start.lon, start.round_trip) if start else None,
         modes=modes,
+        transit=transit,
     )
     watch.lap("optimization")
 
@@ -255,6 +307,7 @@ async def plan_trip(
             days=days,
             total_distance_m=round(route.total_distance_m),
             distance_source=route.distance_source,
+            transit_source=transit_source(days),
             strategy=route.strategy,
             dropped=[PlaceRef(place_id=s.id, name=places[s.id].name) for s in route.dropped],
             warnings=selection.warnings + route.warnings,

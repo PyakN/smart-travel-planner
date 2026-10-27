@@ -7,12 +7,15 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.api.deps import get_transit
 from app.db.models import Route, RouteStop
 from app.llm.base import LLMError, TransientLLMError
 from app.llm.service import TokenBudget
+from app.optimizer.transit import parse_routes
 from app.schemas.trip import PlaceNote, PlaceSelection
-from tests.fakes import FakeProvider
+from tests.fakes import FakeProvider, FakeTransit
 from tests.integration.conftest import SEED_DETAILS, SessionFactory, use_llm
+from tests.optimizer.test_transit import fixture
 from tests.test_trip_schema import trip
 
 ROSSIO = {"lat": 38.7139, "lon": -9.1394}
@@ -154,6 +157,34 @@ def test_must_visit_and_walking_only(
 
     stored = asyncio.run(params())
     assert (stored["must_visit"], stored["modes"]) == ([torre], ["walk"])
+
+
+def test_rides_follow_real_transit_routes(
+    client: TestClient, llm: FakeProvider, place_ids: dict[str, int]
+) -> None:
+    route = parse_routes(fixture("figueira_belem"))  # metro Green line, then the Cascais line
+    transit = FakeTransit(lambda a, b: route)
+    client.app.dependency_overrides[get_transit] = lambda: transit  # type: ignore[attr-defined]
+    chosen = [place_ids[n] for n in ("Praça do Comércio", "Castelo de São Jorge", "Torre de Belém")]
+    llm.queue(
+        trip(city=None, days=1, pace="intense"),
+        PlaceSelection(place_ids=chosen, rationale="Classics."),
+    )
+    response = post_plan(client)
+    assert response.status_code == 201, response.text
+    plan = response.json()
+
+    assert plan["transit_source"] == "here"
+    [day] = plan["days"]
+    [ridden] = [s for s in day["stops"] if s["travel_mode"] == "transit"]
+    assert [r["line"] for r in ridden["rides"]] == ["Verde", "Linha de Cascais"]
+    assert ridden["travel_min"] == 24
+    assert [seg["ride"]["line"] for seg in day["segments"] if seg["ride"]] == [
+        "Verde",
+        "Linha de Cascais",
+    ]
+    assert len(transit.asked) == 1  # only the leg to (or from) Belém
+    assert client.get(f"/plans/{plan['id']}").json() == plan
 
 
 def test_unknown_must_visit_is_422(client: TestClient, llm: FakeProvider) -> None:

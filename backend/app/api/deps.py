@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import Settings, get_settings
 from app.llm.service import LLMService
 from app.optimizer.distance import DistanceProvider
+from app.optimizer.transit import TransitProvider
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
@@ -29,7 +30,14 @@ def get_distances(request: Request) -> DistanceProvider:
     return distances
 
 
+def get_transit(request: Request) -> TransitProvider | None:
+    """Real public transport routes; None means estimated ride times."""
+    transit: TransitProvider | None = request.app.state.transit
+    return transit
+
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 LLMDep = Annotated[LLMService, Depends(get_llm)]
 DistancesDep = Annotated[DistanceProvider, Depends(get_distances)]
+TransitDep = Annotated[TransitProvider | None, Depends(get_transit)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]

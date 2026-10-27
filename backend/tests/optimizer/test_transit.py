@@ -205,5 +205,8 @@ def test_failures_never_log_the_key(
     ],
 )
 def test_factory(overrides: dict[str, Any], expected: type) -> None:
-    settings = Settings(_env_file=None, database_url="x", **overrides)
+    # Explicit provider: the integration tests set TRANSIT_PROVIDER for the whole session.
+    settings = Settings(
+        _env_file=None, database_url="x", **{"transit_provider": "here", **overrides}
+    )
     assert isinstance(create_transit_provider(settings), expected)

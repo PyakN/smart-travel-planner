@@ -1,9 +1,12 @@
 from collections import deque
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel
 
 from app.llm.base import LLMResponse
+from app.optimizer.geometry import LatLon
+from app.optimizer.transit import TransitRoute
 
 
 @dataclass
@@ -26,3 +29,19 @@ class FakeProvider:
             raise outcome
         assert isinstance(outcome, schema), f"queued {type(outcome)}, asked for {schema}"
         return LLMResponse(parsed=outcome, input_tokens=100, output_tokens=20)
+
+
+@dataclass
+class FakeTransit:
+    """Answers every leg with `answer(origin, destination)`; records the requests."""
+
+    answer: Callable[[LatLon, LatLon], TransitRoute | None]
+    calls: list[list[tuple[LatLon, LatLon]]] = field(default_factory=list)
+
+    async def routes(self, pairs: Sequence[tuple[LatLon, LatLon]]) -> list[TransitRoute | None]:
+        self.calls.append(list(pairs))
+        return [self.answer(a, b) for a, b in pairs]
+
+    @property
+    def asked(self) -> list[tuple[LatLon, LatLon]]:
+        return [pair for call in self.calls for pair in call]

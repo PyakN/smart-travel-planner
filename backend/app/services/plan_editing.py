@@ -32,6 +32,7 @@ from app.optimizer.planner import (
     plan_route,
     visit_minutes,
 )
+from app.optimizer.transit import TransitProvider
 from app.repositories.candidates import Candidate, find_candidates
 from app.repositories.places import place_details
 from app.schemas.plan import (
@@ -58,6 +59,7 @@ from app.services.trip_planner import (
     planned_day,
     planned_stop,
     save_plan,
+    transit_source,
 )
 
 # Candidates ranked for a swap; the ones the LLM does not pick stay at hand (and are
@@ -149,6 +151,7 @@ async def replace_stops(
     plan_id: int,
     day: int,
     place_ids: Sequence[int],
+    transit: TransitProvider | None = None,
 ) -> PlanResponse | None:
     """New version of the plan with the given stops of `day` replaced; None if no such plan."""
     watch = Stopwatch()
@@ -235,6 +238,7 @@ async def replace_stops(
             provider=provider,
             start=StartPoint(start.lat, start.lon, start.round_trip) if start else None,
             modes=plan.modes,
+            transit=transit,
         )
 
     route = await optimize(stops)
@@ -348,6 +352,7 @@ async def replace_stops(
                 "distance_source": plan.distance_source
                 if route.distance_source == plan.distance_source
                 else "mixed",
+                "transit_source": transit_source(days),
                 # A place dropped earlier may be back as a replacement.
                 "dropped": [d for d in plan.dropped if d.place_id not in final_ids]
                 + [PlaceRef(place_id=s.place_id, name=s.name) for s in lost],
