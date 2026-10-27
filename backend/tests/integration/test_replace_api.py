@@ -1,5 +1,6 @@
 """POST /plans/{id}/replace end to end, in the seeded fictional town of Testville."""
 
+import asyncio
 from collections.abc import Sequence
 from typing import Any
 
@@ -9,9 +10,11 @@ from httpx import Response
 
 from app.geo import BBox
 from app.ingest.cities import CITIES, City
-from app.optimizer.planner import DAY_BUDGET_MIN
+from app.optimizer.distance import HaversineProvider
+from app.optimizer.planner import DAY_BUDGET_MIN, Stop, plan_route
 from app.schemas.trip import PlaceNote, PlaceSelection
 from tests.fakes import FakeProvider
+from tests.integration.conftest import SEED_PLACES
 from tests.test_trip_schema import trip
 
 TESTVILLE = City("testville", "Testville", BBox(44.99, 6.99, 45.09, 7.10))
@@ -248,3 +251,38 @@ def test_replacements_that_do_not_fit_together_are_reported(
     assert [a["name"] for a in new["edit"]["added"]] == ["City Museum"]
     assert "1 replacement(s) did not fit day 1's 3 h budget" in new["warnings"]
     assert new["days"][0]["duration_min"] <= 200
+
+
+def test_filler_that_does_not_fit_is_skipped_for_the_next(
+    client: TestClient,
+    llm: FakeProvider,
+    place_ids: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # After the swap below the day is the cathedral, the viewpoint and the park. Leave
+    # 92 free minutes: the top candidate, a 90-minute museum, is short enough on paper
+    # but not with the walk to it, so the next candidate fills the gap instead.
+    remaining = [("Testville Cathedral", "religious"), ("Hilltop Viewpoint", "viewpoint")]
+    remaining.append(("River Park", "park"))
+    coords = {s[2]: (s[4], s[5]) for s in SEED_PLACES}
+    stops = [
+        Stop(i, *coords[name], category, priority=i) for i, (name, category) in enumerate(remaining)
+    ]
+    probe = asyncio.run(
+        plan_route(
+            stops, days=1, pace="relaxed", provider=HaversineProvider(), enforce_budget=False
+        )
+    )
+    monkeypatch.setitem(DAY_BUDGET_MIN, "relaxed", probe.days[0].total_min + 92)
+
+    plan = create_plan(client, llm, place_ids, FIRST_DAY)
+    picks(llm, place_ids["River Park"])  # one place for two removed stops
+    new = replace(client, plan, 1, [place_ids["Old Town Square"], place_ids["Clock Tower"]]).json()
+
+    first_candidate = str(llm.calls[-1]["prompt"]).split("hint):\n", 1)[1].split(" | ")[1]
+    assert first_candidate == "City Museum"
+    [adjustment] = new["edit"]["adjustments"]
+    assert adjustment["reason"] == "Fills free time."
+    assert adjustment["added"]["name"] != "City Museum"
+    assert "City Museum" not in names(new)
+    assert len(new["days"][0]["stops"]) == 4

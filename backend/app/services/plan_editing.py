@@ -60,12 +60,13 @@ from app.services.trip_planner import (
     save_plan,
 )
 
+# Candidates ranked for a swap; the ones the LLM does not pick stay at hand (and are
+# routed up front) for adjustments.
 REPLACE_POOL = 30
-# Candidates beyond the replacements kept at hand (and routed up front) for adjustments.
-SPARE_POOL = 8
 # A day this much shorter than before counts as sparse.
 SPARSE_SHRINK_MIN = 60
 MAX_FILLERS = 2
+MAX_FILLER_TRIES = 6
 MONOTONY_MIN_STOPS = 4
 
 REPLACE_SYSTEM = """You replace places in one day of a walking trip.
@@ -222,7 +223,7 @@ async def replace_stops(
         raise PlanningError(f"No other places fit day {day}. Keep at least one of its stops.")
 
     chosen_ids = {c.id for c in chosen}
-    spare = [c for c in fitting if c.id not in chosen_ids][:SPARE_POOL]
+    spare = [c for c in fitting if c.id not in chosen_ids]
     provider = PrefetchedProvider(distances)
     await provider.prefetch([LatLon(s.lat, s.lon) for s in stops] + list(map(_point, spare)) + home)
 
@@ -241,30 +242,31 @@ async def replace_stops(
     protected = {s.place_id for s in kept if s.must_visit} | chosen_ids
     adjustments: list[Adjustment] = []
 
-    # Last resort 1: the day lost stops or time -> fill it with nearby places that fit.
+    # Last resort 1: the day lost stops or time -> fill it with nearby places that fit,
+    # trying candidates one at a time (a short visit can still be a long walk away).
     current = route.days[0]
-    if spare and is_sparse(
-        len(current.visits), current.total_min, len(target.stops), target.duration_min
-    ):
+    if is_sparse(len(current.visits), current.total_min, len(target.stops), target.duration_min):
         wanted = min(MAX_FILLERS, max(1, len(target.stops) - len(current.visits)))
-        room = budget - current.total_min
-        fillers = [c for c in spare if visit_minutes(c.category) < room][:wanted]
-        if fillers:
-            trial = await optimize(
-                [v.stop for v in current.visits]
-                + [_stop(c, next_rank + i) for i, c in enumerate(fillers)]
-            )
-            planned_now = {v.stop.id for v in trial.days[0].visits}
-            added = [c for c in fillers if c.id in planned_now]
-            if added:
+        tried, added = 0, []
+        for candidate in spare:
+            if wanted == 0 or tried == MAX_FILLER_TRIES:
+                break
+            if visit_minutes(candidate.category) >= budget - current.total_min:
+                continue
+            tried += 1
+            trial = await optimize([v.stop for v in current.visits] + [_stop(candidate, next_rank)])
+            if candidate.id in {v.stop.id for v in trial.days[0].visits}:
                 route, current = trial, trial.days[0]
-                spare = [c for c in spare if c not in added]
-                protected |= {c.id for c in added}
-                next_rank += len(fillers)
-                adjustments += [
-                    Adjustment(removed=None, added=_ref(c.id, names), reason="Fills free time.")
-                    for c in added
-                ]
+                next_rank += 1
+                wanted -= 1
+                protected.add(candidate.id)
+                added.append(candidate)
+                adjustments.append(
+                    Adjustment(
+                        removed=None, added=_ref(candidate.id, names), reason="Fills free time."
+                    )
+                )
+        spare = [c for c in spare if c not in added]
 
     # Last resort 2: one kind of place dominates the day -> swap one unticked stop of it.
     categories = [v.stop.category for v in current.visits]
