@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 
 import PlanForm from "@/components/PlanForm";
 import PlanResult from "@/components/PlanResult";
-import { ApiError, createPlan, getPlan } from "@/lib/api";
+import { ApiError, createPlan, getPlan, replaceStops } from "@/lib/api";
 import type { PlaceRef, PlanResponse, StartPoint, TravelMode } from "@/lib/types";
 
 // Leaflet touches `window`, so the map only renders in the browser.
@@ -29,6 +29,8 @@ export default function Planner() {
   const [start, setStart] = useState<StartPoint | null>(null);
   const [mustVisit, setMustVisit] = useState<PlaceRef[]>([]);
   const [modes, setModes] = useState<TravelMode[]>(["walk", "transit"]);
+  const [replacing, setReplacing] = useState(false);
+  const [replaceError, setReplaceError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [selectedDay, setSelectedDay] = useState(1);
   const [highlightedStop, setHighlightedStop] = useState<number | null>(null);
@@ -46,7 +48,8 @@ export default function Planner() {
         setText(saved.request_text);
         setMustVisit(saved.must_visit);
         setModes(saved.modes);
-        setSelectedDay(1);
+        setSelectedDay(saved.edit?.day ?? 1);
+        setReplaceError(null);
         setStatus({ kind: "idle" });
       })
       .catch((error: unknown) => {
@@ -69,10 +72,43 @@ export default function Planner() {
       });
       setPlan(created);
       setSelectedDay(1);
+      setReplaceError(null);
       setStatus({ kind: "idle" });
       window.history.replaceState(null, "", `?plan=${created.id}`);
     } catch (error) {
       setStatus({ kind: "error", message: describe(error) });
+    }
+  }
+
+  // Each replacement is a new plan version with its own link; Back (or Undo) returns
+  // to the previous one.
+  async function replace(day: number, placeIds: number[]) {
+    if (!plan) return;
+    setReplacing(true);
+    setReplaceError(null);
+    try {
+      const next = await replaceStops(plan.id, { day, place_ids: placeIds });
+      setPlan(next);
+      setSelectedDay(day);
+      window.history.pushState(null, "", `?plan=${next.id}`);
+    } catch (error) {
+      setReplaceError(describe(error));
+    } finally {
+      setReplacing(false);
+    }
+  }
+
+  async function undo() {
+    if (!plan?.parent_id) return;
+    try {
+      const previous = await getPlan(plan.parent_id);
+      setPlan(previous);
+      setMustVisit(previous.must_visit);
+      setSelectedDay(plan.edit?.day ?? 1);
+      setReplaceError(null);
+      window.history.pushState(null, "", `?plan=${previous.id}`);
+    } catch (error) {
+      setReplaceError(describe(error));
     }
   }
 
@@ -142,6 +178,10 @@ export default function Planner() {
               selectedDay={selectedDay}
               onSelectDay={setSelectedDay}
               onHoverStop={setHighlightedStop}
+              onReplace={replace}
+              replacing={replacing}
+              replaceError={replaceError}
+              onUndo={plan.parent_id ? undo : null}
             />
           )}
         </div>

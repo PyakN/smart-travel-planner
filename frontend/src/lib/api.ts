@@ -1,4 +1,4 @@
-import type { PlacePage, PlanRequest, PlanResponse } from "./types";
+import type { PlacePage, PlanRequest, PlanResponse, ReplaceRequest } from "./types";
 
 /** Same-origin prefix; next.config.ts proxies it to the FastAPI backend. */
 export const API_BASE = "/api";
@@ -53,6 +53,19 @@ export function createPlan(body: PlanRequest, fetchImpl: typeof fetch = fetch) {
 
 export function getPlan(id: number, fetchImpl: typeof fetch = fetch) {
   return request<PlanResponse>(`/plans/${id}`, { method: "GET" }, fetchImpl);
+}
+
+/** Replaces stops of one day; resolves to a new plan version. */
+export function replaceStops(
+  planId: number,
+  body: ReplaceRequest,
+  fetchImpl: typeof fetch = fetch,
+) {
+  return request<PlanResponse>(
+    `/plans/${planId}/replace`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    fetchImpl,
+  );
 }
 
 /** Places whose name contains `query` (accents ignored), for the must-visit picker. */

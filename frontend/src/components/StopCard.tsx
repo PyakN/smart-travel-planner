@@ -10,6 +10,11 @@ export interface StopCardProps {
   stop: PlannedStop;
   number: number;
   color: string;
+  selected: boolean;
+  onToggleSelected: () => void;
+  selectionDisabled: boolean;
+  /** Added by the last replacement. */
+  isNew: boolean;
   onHover: (placeId: number | null) => void;
 }
 
@@ -56,18 +61,42 @@ function Photo({ stop, number, color }: Pick<StopCardProps, "stop" | "number" | 
   );
 }
 
-export default function StopCard({ stop, number, color, onHover }: StopCardProps) {
+export default function StopCard({
+  stop,
+  number,
+  color,
+  selected,
+  onToggleSelected,
+  selectionDisabled,
+  isNew,
+  onHover,
+}: StopCardProps) {
   const [expanded, setExpanded] = useState(false);
   return (
     <article
       onMouseEnter={() => onHover(stop.place_id)}
       onMouseLeave={() => onHover(null)}
-      className="rounded-lg border border-zinc-200 bg-white p-2.5 shadow-sm transition hover:border-zinc-300"
+      className={`rounded-lg border bg-white p-2.5 shadow-sm transition ${
+        selected
+          ? "border-blue-400 ring-2 ring-blue-500/20"
+          : "border-zinc-200 hover:border-zinc-300"
+      }`}
     >
       <div className="flex gap-3">
         <Photo stop={stop} number={number} color={color} />
         <div className="min-w-0 flex-1 space-y-1">
-          <h3 className="leading-snug font-medium text-zinc-900">{stop.name}</h3>
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="leading-snug font-medium text-zinc-900">{stop.name}</h3>
+            <input
+              type="checkbox"
+              checked={selected}
+              disabled={selectionDisabled}
+              onChange={onToggleSelected}
+              aria-label={`Select ${stop.name} to replace`}
+              title="Select to replace"
+              className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-blue-600"
+            />
+          </div>
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
             <span>
               {categoryLabel(stop.category)} · {stop.arrive}–{stop.leave}
@@ -75,6 +104,11 @@ export default function StopCard({ stop, number, color, onHover }: StopCardProps
             {stop.must_visit && (
               <span className="rounded-full bg-amber-100 px-1.5 py-px font-medium text-amber-800">
                 Must-visit
+              </span>
+            )}
+            {isNew && (
+              <span className="rounded-full bg-emerald-100 px-1.5 py-px font-medium text-emerald-800">
+                New
               </span>
             )}
           </div>

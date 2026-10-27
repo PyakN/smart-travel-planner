@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiError, createPlan, errorMessage, getPlan, searchPlaces } from "./api";
+import { ApiError, createPlan, errorMessage, getPlan, replaceStops, searchPlaces } from "./api";
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(async () => new Response(JSON.stringify(body), { status }));
@@ -38,6 +38,18 @@ describe("getPlan", () => {
     await getPlan(3, fetchImpl);
     const [url] = fetchImpl.mock.calls[0] as unknown as [string];
     expect(url).toBe("/api/plans/3");
+  });
+});
+
+describe("replaceStops", () => {
+  it("posts the day and the ticked stops", async () => {
+    const fetchImpl = fakeFetch(201, { id: 9, parent_id: 3 });
+    const plan = await replaceStops(3, { day: 2, place_ids: [11, 12] }, fetchImpl);
+    expect(plan.parent_id).toBe(3);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/plans/3/replace");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ day: 2, place_ids: [11, 12] });
   });
 });
 

@@ -4,6 +4,8 @@ import {
   categoryIcon,
   categoryLabel,
   dayColor,
+  describeAdjustment,
+  describeEdit,
   formatDistance,
   formatDuration,
   formatOpeningHours,
@@ -95,5 +97,31 @@ describe("categoryIcon", () => {
   it("has an icon per category and a fallback", () => {
     expect(categoryIcon("viewpoint")).toBe("🌅");
     expect(categoryIcon("beach")).toBe("📍");
+  });
+});
+
+describe("edit descriptions", () => {
+  const ref = (place_id: number, name: string) => ({ place_id, name });
+
+  it("names what was replaced and by what", () => {
+    const edit = {
+      day: 2,
+      replaced: [ref(1, "A"), ref(2, "B")],
+      added: [ref(3, "C")],
+      adjustments: [],
+    };
+    expect(describeEdit(edit)).toBe("Day 2: replaced A, B with C.");
+    expect(describeEdit({ ...edit, added: [] })).toBe(
+      "Day 2: replaced A, B; nothing else fits the day.",
+    );
+  });
+
+  it("explains adjustments", () => {
+    expect(
+      describeAdjustment({ removed: ref(1, "A"), added: ref(2, "B"), reason: "For variety." }),
+    ).toBe("Also swapped A for B. For variety.");
+    expect(
+      describeAdjustment({ removed: null, added: ref(2, "B"), reason: "Fills free time." }),
+    ).toBe("Also added B. Fills free time.");
   });
 });

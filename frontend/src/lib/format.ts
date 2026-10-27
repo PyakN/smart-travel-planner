@@ -1,4 +1,4 @@
-import type { PlannedStop } from "./types";
+import type { Adjustment, PlanEdit, PlannedStop } from "./types";
 
 export function formatDistance(meters: number): string {
   if (meters < 1000) return `${Math.round(meters)} m`;
@@ -100,4 +100,23 @@ export function formatOpeningHours(raw: string): string {
     )
     .filter(Boolean)
     .join(" · ");
+}
+
+function names(places: { name: string }[]): string {
+  return places.map((p) => p.name).join(", ");
+}
+
+/** "Day 2: replaced A, B with C, D." */
+export function describeEdit(edit: PlanEdit): string {
+  const replaced = `Day ${edit.day}: replaced ${names(edit.replaced)}`;
+  return edit.added.length > 0
+    ? `${replaced} with ${names(edit.added)}.`
+    : `${replaced}; nothing else fits the day.`;
+}
+
+/** A change the planner made to a stop the traveller did not tick. */
+export function describeAdjustment({ removed, added, reason }: Adjustment): string {
+  if (removed && added) return `Also swapped ${removed.name} for ${added.name}. ${reason}`;
+  if (added) return `Also added ${added.name}. ${reason}`;
+  return `Also removed ${removed?.name ?? "a stop"}. ${reason}`;
 }

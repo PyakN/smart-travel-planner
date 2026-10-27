@@ -3,14 +3,27 @@
 import { useState } from "react";
 
 import StopCard from "@/components/StopCard";
-import { dayColor, formatDistance, formatDuration, travelLabel } from "@/lib/format";
-import type { PlannedDay, PlanResponse } from "@/lib/types";
+import {
+  dayColor,
+  describeAdjustment,
+  describeEdit,
+  formatDistance,
+  formatDuration,
+  travelLabel,
+} from "@/lib/format";
+import type { PlanEdit, PlannedDay, PlanResponse } from "@/lib/types";
 
 export interface PlanResultProps {
   plan: PlanResponse;
   selectedDay: number;
   onSelectDay: (day: number) => void;
   onHoverStop: (placeId: number | null) => void;
+  /** Replace the given stops of a day; the parent swaps in the new plan version. */
+  onReplace: (day: number, placeIds: number[]) => void;
+  replacing: boolean;
+  replaceError: string | null;
+  /** Go back to the version this plan was made from, if any. */
+  onUndo: (() => void) | null;
 }
 
 function ShareButton({ planId }: { planId: number }) {
@@ -31,11 +44,47 @@ function ShareButton({ planId }: { planId: number }) {
   );
 }
 
+function EditSummary({ edit, onUndo }: { edit: PlanEdit; onUndo: PlanResultProps["onUndo"] }) {
+  return (
+    <div className="mt-3 space-y-1 rounded-md bg-emerald-50 p-2 text-xs text-emerald-900">
+      <div className="flex items-start justify-between gap-2">
+        <p>{describeEdit(edit)}</p>
+        {onUndo && (
+          <button
+            type="button"
+            onClick={onUndo}
+            className="shrink-0 font-medium text-emerald-800 underline hover:text-emerald-950"
+          >
+            Undo
+          </button>
+        )}
+      </div>
+      {edit.adjustments.map((a) => (
+        <p key={`${a.removed?.place_id}-${a.added?.place_id}`}>{describeAdjustment(a)}</p>
+      ))}
+    </div>
+  );
+}
+
+function newStops(edit: PlanEdit | null, day: number): Set<number> {
+  if (!edit || edit.day !== day) return new Set();
+  const added = [...edit.added, ...edit.adjustments.flatMap((a) => (a.added ? [a.added] : []))];
+  return new Set(added.map((p) => p.place_id));
+}
+
 function DayStops({
   day,
+  selected,
+  onToggle,
+  locked,
+  fresh,
   onHoverStop,
 }: {
   day: PlannedDay;
+  selected: number[];
+  onToggle: (placeId: number) => void;
+  locked: boolean;
+  fresh: Set<number>;
   onHoverStop: PlanResultProps["onHoverStop"];
 }) {
   const color = dayColor(day.day);
@@ -54,7 +103,16 @@ function DayStops({
                 {travel}
               </div>
             )}
-            <StopCard stop={stop} number={i + 1} color={color} onHover={onHoverStop} />
+            <StopCard
+              stop={stop}
+              number={i + 1}
+              color={color}
+              selected={selected.includes(stop.place_id)}
+              onToggleSelected={() => onToggle(stop.place_id)}
+              selectionDisabled={locked}
+              isNew={fresh.has(stop.place_id)}
+              onHover={onHoverStop}
+            />
           </li>
         );
       })}
@@ -67,10 +125,26 @@ export default function PlanResult({
   selectedDay,
   onSelectDay,
   onHoverStop,
+  onReplace,
+  replacing,
+  replaceError,
+  onUndo,
 }: PlanResultProps) {
   const day = plan.days.find((d) => d.day === selectedDay) ?? plan.days[0];
   const walking = plan.days.reduce((sum, d) => sum + d.walking_m, 0);
   const transitLegs = plan.days.reduce((sum, d) => sum + d.transit_legs, 0);
+
+  // Ticked stops belong to one day of one plan version; switching either clears them.
+  const selectionKey = `${plan.id}:${day.day}`;
+  const [picked, setPicked] = useState({ key: "", ids: [] as number[] });
+  const selected = picked.key === selectionKey ? picked.ids : [];
+  const toggle = (placeId: number) =>
+    setPicked({
+      key: selectionKey,
+      ids: selected.includes(placeId)
+        ? selected.filter((id) => id !== placeId)
+        : [...selected, placeId],
+    });
 
   return (
     <section className="space-y-4" aria-label="Trip plan">
@@ -92,6 +166,7 @@ export default function PlanResult({
           <ShareButton planId={plan.id} />
         </div>
         {plan.rationale && <p className="mt-3 text-sm text-zinc-700">{plan.rationale}</p>}
+        {plan.edit && <EditSummary edit={plan.edit} onUndo={onUndo} />}
         {(plan.warnings.length > 0 || plan.dropped.length > 0) && (
           <div className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-800">
             {plan.dropped.length > 0 && (
@@ -134,10 +209,49 @@ export default function PlanResult({
         <p className="mb-2 text-xs text-zinc-500">
           {formatDistance(day.walking_m)} on foot
           {day.transit_legs > 0 && ` + ${day.transit_legs} tram/metro`} · {day.stops[0]?.arrive}–
-          {day.stops.at(-1)?.leave}
+          {day.stops.at(-1)?.leave} · tick stops to replace them
         </p>
-        <DayStops day={day} onHoverStop={onHoverStop} />
+        <DayStops
+          day={day}
+          selected={selected}
+          onToggle={toggle}
+          locked={replacing}
+          fresh={newStops(plan.edit, day.day)}
+          onHoverStop={onHoverStop}
+        />
       </div>
+
+      {(selected.length > 0 || replaceError) && (
+        <div className="sticky bottom-0 -mx-4 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] backdrop-blur lg:-mx-6 lg:px-6">
+          {replaceError && (
+            <p role="alert" className="mb-2 text-xs text-red-700">
+              {replaceError}
+            </p>
+          )}
+          {selected.length > 0 && (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => onReplace(day.day, selected)}
+                disabled={replacing}
+                className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-wait disabled:bg-blue-400"
+              >
+                {replacing
+                  ? "Finding new places…"
+                  : `Replace ${selected.length} ${selected.length === 1 ? "stop" : "stops"}`}
+              </button>
+              <button
+                type="button"
+                onClick={() => setPicked({ key: selectionKey, ids: [] })}
+                disabled={replacing}
+                className="text-sm text-zinc-600 hover:text-zinc-900"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <p className="text-[11px] text-zinc-400">
         Plan #{plan.id} · distances: {plan.distance_source} · planned in{" "}

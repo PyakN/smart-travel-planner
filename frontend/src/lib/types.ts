@@ -1,4 +1,4 @@
-// Mirrors backend/app/schemas/plan.py (POST /plan, GET /plans/{id})
+// Mirrors backend/app/schemas/plan.py (POST /plan, GET /plans/{id}, POST /plans/{id}/replace)
 // and backend/app/schemas/place.py (GET /places).
 
 export type TravelMode = "walk" | "transit";
@@ -18,6 +18,11 @@ export interface PlanRequest {
   /** Place ids from GET /places. */
   must_visit?: number[];
   modes?: TravelMode[];
+}
+
+export interface ReplaceRequest {
+  day: number;
+  place_ids: number[];
 }
 
 export interface PlaceRef {
@@ -93,6 +98,20 @@ export interface TripRequest {
   notes: string;
 }
 
+export interface Adjustment {
+  removed: PlaceRef | null;
+  added: PlaceRef | null;
+  reason: string;
+}
+
+export interface PlanEdit {
+  day: number;
+  replaced: PlaceRef[];
+  added: PlaceRef[];
+  /** Last-resort changes to stops the traveller did not tick. */
+  adjustments: Adjustment[];
+}
+
 export interface PlanResponse {
   id: number;
   request_text: string;
@@ -108,4 +127,7 @@ export interface PlanResponse {
   timings_ms: Record<string, number>;
   modes: TravelMode[];
   must_visit: PlaceRef[];
+  /** Set on versions made by replacing stops. */
+  parent_id: number | null;
+  edit: PlanEdit | null;
 }
