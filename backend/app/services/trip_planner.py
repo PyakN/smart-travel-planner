@@ -50,7 +50,7 @@ from app.schemas.plan import (
     TravelMode,
 )
 from app.schemas.trip import Pace
-from app.services.day_hours import DEFAULT_HOURS, DailyHours, clock, minute_of, trip_windows
+from app.services.day_hours import DEFAULT_HOURS, DailyHours, minute_of, trip_windows
 from app.services.place_selection import (
     HoursLookup,
     PlanningError,
@@ -63,6 +63,7 @@ from app.services.weather_service import (
     WeatherProvider,
     city_trip_weather,
     day_forecast,
+    hhmm,
     outdoor_conditions,
     stop_forecast,
 )
@@ -203,8 +204,8 @@ def planned_stop(
         category=visit.stop.category,
         lat=visit.stop.lat,
         lon=visit.stop.lon,
-        arrive=clock(visit.arrive_min),
-        leave=clock(visit.leave_min),
+        arrive=hhmm(visit.arrive_min),
+        leave=hhmm(visit.leave_min),
         travel_mode=leg.mode if leg else None,
         travel_min=round(leg.minutes) if leg else 0,
         distance_from_previous_m=round(leg.distance_m) if leg else 0,
@@ -243,10 +244,10 @@ def planned_day(
         segments=segments,
         date=on,
         weather=weather,
-        start=clock(window.start_min),
-        end=clock(window.end_min),
-        sunrise=clock(window.sunrise_min) if window.sunrise_min is not None else None,
-        sunset=clock(window.sunset_min) if window.sunset_min is not None else None,
+        start=hhmm(window.start_min),
+        end=hhmm(window.end_min),
+        sunrise=hhmm(window.sunrise_min) if window.sunrise_min is not None else None,
+        sunset=hhmm(window.sunset_min) if window.sunset_min is not None else None,
     )
 
 
@@ -319,7 +320,7 @@ def late_start_warnings(hours: DailyHours, windows: Sequence[DayWindow]) -> list
     asked = minute_of(hours.first_start or hours.start)
     if not windows or windows[0].start_min <= asked:
         return []
-    return [f"Day 1 starts at {clock(windows[0].start_min)}: it is past {clock(asked)} already."]
+    return [f"Day 1 starts at {hhmm(windows[0].start_min)}: it is past {hhmm(asked)} already."]
 
 
 def day_weather_of(weather: TripWeather | None, day: int) -> DayWeather | None:
