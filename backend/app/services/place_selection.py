@@ -2,6 +2,13 @@
 
 The LLM never invents places: it may only return ids from the candidate list, and
 `validate_selection` enforces that deterministically.
+
+The days' hours decide how many places to choose and when they will be visited: a day
+fills its hours from the start, and from NIGHT_START_MIN on only places open at night fit.
+Days that reach into the evening get candidates open at night (bars, fado houses,
+restaurants) besides the usual ones, the LLM is told how many places go before and after
+20:00 and how many outdoor ones daylight leaves room for, and guards swap picks that the
+hours cannot take.
 """
 
 import json
@@ -11,11 +18,18 @@ from math import floor
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.catalog import EVENING_CATEGORIES
 from app.ingest.cities import CITIES, City, resolve_city
 from app.ingest.osm import normalize_name
 from app.llm.service import LLMService
 from app.optimizer.geometry import LatLon
-from app.optimizer.planner import ALL_MODES, FULL_DAY_MIN, DayWindow, TravelMode
+from app.optimizer.planner import (
+    ALL_MODES,
+    FULL_DAY_MIN,
+    NIGHT_START_MIN,
+    DayWindow,
+    TravelMode,
+)
 from app.repositories.candidates import Candidate, find_candidates, get_candidates
 from app.schemas.trip import (
     MAX_REQUEST_CHARS,
@@ -25,9 +39,11 @@ from app.schemas.trip import (
     PlaceSelection,
     TripRequest,
 )
-from app.services.weather_service import TripWeather, describe_day
+from app.services.weather_service import TripWeather, describe_day, hhmm
 
 MIN_POOL, MAX_POOL, POOL_PER_STOP = 30, 100, 3
+# Candidates open at night, for days that reach into the evening.
+MIN_EVENING_POOL = 15
 NOTE_MAX_CHARS = 160
 # Supplementary places are pulled towards the hotel and the must-visit places: within
 # walking range for walkers, a few tram stops further when transit is allowed.
@@ -88,6 +104,12 @@ SELECT_SYSTEM = """You choose places for a walking trip.
 WEATHER_PROMPT = """Weather in the sightseeing hours (outdoor places are marked "outdoor"; they
 only suit dry daylight):"""
 
+HOURS_GUIDE = """When places can be visited (marked after the category): "day" closes at
+20:00, "daylight" is outdoors and needs daylight, "night" opens at 20:00 (bars, fado, dinner),
+"any" suits day and night (lit squares, places open late)."""
+HOURS_PROMPT = f"{HOURS_GUIDE} The days' hours, in local time:"
+HOURS_RULE = "Choose for each part of the day places that can be visited then."
+
 # The weather of a trip's days in a city, by number of days; None without a forecast.
 WeatherLookup = Callable[[City, int], Awaitable[TripWeather | None]]
 # The hours of a trip's days in a city, by number of days.
@@ -113,12 +135,56 @@ class SelectionResult:
     weather_swaps: list[tuple[Candidate, Candidate]] = field(default_factory=list)
     # The hours of the trip's days, in date order.
     windows: list[DayWindow] = field(default_factory=list)
+    # Picks the days' hours had no room for, what replaced them, and why.
+    hours_swaps: list[tuple[Candidate, Candidate, str]] = field(default_factory=list)
+
+
+def _half_up(x: float) -> int:
+    return floor(x + 0.5)
 
 
 def day_places(window: DayWindow, pace: Pace) -> int:
     """Places a day with these hours holds: as many as a full day at this pace (09:30 to
     21:30) for the same share of its hours, at least one."""
-    return max(1, floor(STOPS_PER_DAY[pace] * window.length_min / FULL_DAY_MIN + 0.5))
+    return max(1, _half_up(STOPS_PER_DAY[pace] * window.length_min / FULL_DAY_MIN))
+
+
+@dataclass(frozen=True)
+class DaySlots:
+    """What a day's hours hold at a pace: `places` in all, `night` of them from
+    NIGHT_START_MIN on (places open at night), and at most `outdoor` of the others outdoors
+    in daylight. `busy` is when the day is out: it fills its sightseeing time from its
+    start until 20:00, and the rest from 20:00."""
+
+    places: int
+    night: int
+    outdoor: int
+    busy: tuple[tuple[int, int], ...]
+
+    @property
+    def before_night(self) -> int:
+        return self.places - self.night
+
+
+def day_slots(window: DayWindow, pace: Pace) -> DaySlots:
+    places, budget = day_places(window, pace), window.budget(pace)
+    start = window.start_min
+    day_end = min(start + budget, window.end_min, max(start, NIGHT_START_MIN))
+    night_from = max(start, NIGHT_START_MIN)
+    night_end = night_from + max(0, min(budget - (day_end - start), window.end_min - night_from))
+    by_day, at_night = day_end - start, night_end - night_from
+    night = _half_up(places * at_night / (by_day + at_night)) if at_night else 0
+    light = by_day
+    if window.sunrise_min is not None and window.sunset_min is not None:
+        light = max(0, min(day_end, window.sunset_min) - max(start, window.sunrise_min))
+    outdoor = _half_up((places - night) * light / by_day) if by_day else 0
+    busy = tuple((a, b) for a, b in ((start, day_end), (night_from, night_end)) if b > a)
+    return DaySlots(places, night, outdoor, busy)
+
+
+def is_timed(slots: Sequence[DaySlots]) -> bool:
+    """Whether the hours limit what can be chosen: evenings, or too little daylight."""
+    return any(s.night or s.outdoor < s.before_night for s in slots)
 
 
 def validate_selection(
@@ -166,31 +232,98 @@ def validate_selection(
     return chosen, warnings
 
 
+def limit_places(
+    places: Sequence[Candidate],
+    candidates: Sequence[Candidate],
+    limit: int,
+    counts: Callable[[Candidate], bool],
+    replaces: Callable[[Candidate, Candidate], bool],
+    taken_names: Iterable[str] = (),
+) -> tuple[list[Candidate], list[tuple[Candidate, Candidate]]]:
+    """Swap the least important places that `counts` for the best-ranked candidates left
+    that do not and `replaces(old, new)` them, until at most `limit` places count. Returns
+    the places and the (old, new) swaps; places keep their rank, so a swap takes the place
+    of what it replaces."""
+    places = list(places)
+    excess = sum(map(counts, places)) - limit
+    if excess <= 0:
+        return places, []
+    chosen = {p.id for p in places}
+    names = [*taken_names, *(p.name for p in places)]
+    unchosen = without_names([c for c in candidates if c.id not in chosen], names)
+    spare = [c for c in unchosen if not counts(c)]
+    swaps = []
+    for i in reversed(range(len(places))):
+        if excess == 0:
+            break
+        old = places[i]
+        new = next((c for c in spare if replaces(old, c)), None) if counts(old) else None
+        if new is not None:
+            spare.remove(new)
+            swaps.append((old, new))
+            places[i] = new
+            excess -= 1
+    return places, swaps
+
+
+def same_time_of_day(old: Candidate, new: Candidate) -> bool:
+    """Whether `new` can be visited when `old` would have been: by day, at night, or both."""
+    if old.hours == "night":
+        return new.hours in ("night", "any")
+    if old.hours in ("day", "daylight"):
+        return new.hours in ("day", "daylight", "any")
+    return True
+
+
 def limit_outdoor(
     places: Sequence[Candidate],
     candidates: Sequence[Candidate],
     limit: int,
     taken_names: Iterable[str] = (),
 ) -> tuple[list[Candidate], list[tuple[Candidate, Candidate]]]:
-    """Swap the least important outdoor places for the best-ranked indoor candidates left,
-    until at most `limit` places are outdoor. Returns the places and the (outdoor, indoor)
-    swaps; places keep their rank, so a swap takes the place of what it replaces."""
-    places = list(places)
-    excess = sum(p.outdoor for p in places) - limit
-    if excess <= 0:
-        return places, []
-    chosen = {p.id for p in places}
-    names = [*taken_names, *(p.name for p in places)]
-    spare = without_names([c for c in candidates if c.id not in chosen], names)
-    indoor = [c for c in spare if not c.outdoor]
-    swaps = []
-    for i in reversed(range(len(places))):
-        if excess == 0 or not indoor:
-            break
-        if places[i].outdoor:
-            swaps.append((places[i], indoor[0]))
-            places[i] = indoor.pop(0)
-            excess -= 1
+    """Swap the least important outdoor places for the best-ranked indoor candidates left
+    that can be visited at the same time of day, until at most `limit` places are
+    outdoor."""
+    return limit_places(
+        places, candidates, limit, lambda c: c.outdoor, same_time_of_day, taken_names
+    )
+
+
+def fit_hours(
+    places: Sequence[Candidate],
+    candidates: Sequence[Candidate],
+    slots: Sequence[DaySlots],
+    must: Sequence[Candidate] = (),
+) -> tuple[list[Candidate], list[tuple[Candidate, Candidate, str]]]:
+    """Swap picks the days' hours cannot take: outdoor sights beyond what daylight leaves
+    room for, then places closed at night beyond the time before 20:00. Must-visit places
+    count, but are never swapped. Returns the places and the (old, new, reason) swaps."""
+    Rule = tuple[Callable[[Candidate], bool], int, Callable[[Candidate, Candidate], bool], str]
+    rules: list[Rule] = [
+        (
+            lambda c: c.hours == "daylight",
+            sum(s.outdoor for s in slots),
+            lambda _, new: new.hours in ("day", "any"),
+            "Your hours leave too little daylight for it.",
+        ),
+        (
+            lambda c: c.hours in ("day", "daylight"),
+            sum(s.before_night for s in slots),
+            lambda _, new: new.hours in ("night", "any"),
+            "It closes at 20:00, and more of your day is in the evening.",
+        ),
+    ]
+    places, swaps = list(places), []
+    for counts, limit, replaces, reason in rules:
+        places, made = limit_places(
+            places,
+            candidates,
+            limit - sum(map(counts, must)),
+            counts,
+            replaces,
+            [m.name for m in must],
+        )
+        swaps += [(old, new, reason) for old, new in made]
     return places, swaps
 
 
@@ -224,15 +357,23 @@ async def parse_trip_request(llm: LLMService, text: str) -> TripRequest:
     )
 
 
-def _category(c: Candidate, exposure: bool) -> str:
-    return f"{c.category}, {'outdoor' if c.outdoor else 'indoor'}" if exposure else c.category
+def _category(c: Candidate, exposure: bool, hours: bool = False) -> str:
+    """The category, with whether the place is outdoor (`exposure`) and when it can be
+    visited (`hours`)."""
+    marks = [c.category]
+    if exposure:
+        marks.append("outdoor" if c.outdoor else "indoor")
+    if hours:
+        marks.append(c.hours)
+    return ", ".join(marks)
 
 
-def candidate_line(c: Candidate, exposure: bool = False) -> str:
-    """`exposure` adds whether the place is outdoor, for weather-aware selection."""
+def candidate_line(c: Candidate, exposure: bool = False, hours: bool = False) -> str:
+    """`exposure` adds whether the place is outdoor, for weather-aware selection, and `hours`
+    when it can be visited, for days whose hours limit that."""
     distance = f" | {c.distance_m / 1000:.1f} km" if c.distance_m is not None else ""
     hint = f" | {c.hint}" if c.hint else ""
-    return f"{c.id} | {c.name} | {_category(c, exposure)}{distance}{hint}"
+    return f"{c.id} | {c.name} | {_category(c, exposure, hours)}{distance}{hint}"
 
 
 @dataclass(frozen=True)
@@ -242,21 +383,47 @@ class _WeatherNote:
     windows: Sequence[DayWindow]
 
 
+def describe_hours(window: DayWindow, slots: DaySlots) -> str:
+    """A day's hours and what they hold, for the LLM: "16:00-03:00, dark from 17:41:
+    3 before 20:00 (at most 1 outdoors), 3 from 20:00"."""
+    line = f"{hhmm(window.start_min)}-{hhmm(window.end_min)}"
+    if window.sunset_min is not None and slots.before_night:
+        line += f", dark from {hhmm(window.sunset_min)}"
+    parts = []
+    if slots.before_night:
+        parts.append(f"{slots.before_night} before 20:00")
+        if slots.outdoor < slots.before_night:
+            parts[-1] += f" (at most {slots.outdoor} outdoors)"
+    if slots.night:
+        parts.append(f"{slots.night} from 20:00")
+    return f"{line}: {', '.join(parts)}"
+
+
 def _selection_prompt(
     trip: TripRequest,
     candidates: Sequence[Candidate],
     target: int,
     must_visit: Sequence[Candidate] = (),
     weather: _WeatherNote | None = None,
+    hours: Sequence[tuple[DayWindow, DaySlots]] = (),
 ) -> str:
-    exposure = weather is not None
+    """`hours`, for days whose hours limit what can be chosen, adds them and marks when each
+    place can be visited."""
+    exposure, timed = weather is not None, bool(hours)
     columns = "id | name | category"
     if any(c.distance_m is not None for c in candidates):
         columns += " | distance"
     lines = [f"Trip request: {json.dumps(trip.model_dump(), ensure_ascii=False)}"]
     if must_visit:
         lines.append("Must-visit places (already in the plan):")
-        lines.extend(f"- {m.id} | {m.name} | {_category(m, exposure)}" for m in must_visit)
+        lines.extend(f"- {m.id} | {m.name} | {_category(m, exposure, timed)}" for m in must_visit)
+    if hours:
+        lines.append(HOURS_PROMPT)
+        lines.extend(
+            f"- Day {number}: {describe_hours(window, slots)}"
+            for number, (window, slots) in enumerate(hours, start=1)
+        )
+        lines.append(HOURS_RULE)
     if weather is not None:
         lines.append(WEATHER_PROMPT)
         days = zip(weather.weather.days, weather.windows, strict=True)
@@ -271,12 +438,25 @@ def _selection_prompt(
                 "theatres, markets."
             )
     lines += [f"Number of places to choose: {target}", "", f"Candidates ({columns} | hint):"]
-    lines.extend(candidate_line(c, exposure) for c in candidates)
+    lines.extend(candidate_line(c, exposure, timed) for c in candidates)
     return "\n".join(lines)
 
 
 def proximity_radius_m(modes: Collection[TravelMode]) -> float:
     return PROXIMITY_RADIUS_TRANSIT_M if "transit" in modes else PROXIMITY_RADIUS_WALK_M
+
+
+def merge_ranked(*pools: Sequence[Candidate]) -> list[Candidate]:
+    """Candidate pools as one ranking, best score first; a place in several pools once."""
+    unique = {c.id: c for pool in pools for c in pool}
+    return sorted(unique.values(), key=lambda c: -c.score)
+
+
+def evening_warnings(trip: TripRequest, slots: Sequence[DaySlots]) -> list[str]:
+    """Evening places asked for on days that end before there is time for them."""
+    if not set(trip.interests) & EVENING_CATEGORIES or any(s.night for s in slots):
+        return []
+    return ["Bars, fado houses and restaurants open at 20:00: end the day later to visit them."]
 
 
 async def select_places(
@@ -293,10 +473,10 @@ async def select_places(
     hours: HoursLookup | None = None,
 ) -> SelectionResult:
     """`hours` gives the hours of the trip's days (by default 09:30 to 21:30), and with them
-    how many places to choose. `weather` gives the trip's weather, returned with the result.
-    When the selection is `weather_aware`, the LLM also sees it with each candidate's
-    exposure, and outdoor picks are capped at the share of the sightseeing hours that are
-    dry and light."""
+    how many places to choose and when they are visited. `weather` gives the trip's weather,
+    returned with the result. When the selection is `weather_aware`, the LLM also sees it
+    with each candidate's exposure, and outdoor picks are capped at the share of the
+    sightseeing hours that are dry and light."""
     text = text.strip()
     if not text:
         raise PlanningError("Describe the trip you want.")
@@ -314,8 +494,10 @@ async def select_places(
     if len(must) < len(set(must_visit)):
         raise PlanningError(f"Some must-visit places are not in {resolved.name}.")
     windows = hours(resolved, trip.days) if hours else [DayWindow()] * trip.days
+    slots = [day_slots(w, trip.pace) for w in windows]
     forecast = await weather(resolved, trip.days) if weather else None
-    target = max(0, sum(day_places(w, trip.pace) for w in windows) - len(must))
+    target = max(0, sum(s.places for s in slots) - len(must))
+    hours_warnings = evening_warnings(trip, slots)
     if target == 0:
         return SelectionResult(
             trip=trip,
@@ -323,6 +505,7 @@ async def select_places(
             places=must,
             rationale="Your must-visit places fill the whole trip.",
             candidates_considered=0,
+            warnings=hours_warnings,
             must_visit=must,
             weather=forecast,
             windows=windows,
@@ -336,31 +519,51 @@ async def select_places(
 
     anchors = ([start] if start else []) + [LatLon(m.lat, m.lon) for m in must]
     pool = max(MIN_POOL, min(MAX_POOL, target * POOL_PER_STOP))
-    candidates = await find_candidates(
-        session,
-        city=city,
-        interests=trip.interests,
-        avoid=trip.avoid,
-        keywords=trip.keywords,
-        anchors=anchors,
-        proximity_radius_m=proximity_radius_m(modes),
-        exclude_ids=[m.id for m in must],
-        limit=pool,
-    )
+
+    async def ranked(avoid: Sequence[str], limit: int, only: Sequence[str] = ()) -> list[Candidate]:
+        return await find_candidates(
+            session,
+            city=city,
+            interests=trip.interests,
+            avoid=avoid,
+            keywords=trip.keywords,
+            anchors=anchors,
+            proximity_radius_m=proximity_radius_m(modes),
+            exclude_ids=[m.id for m in must],
+            limit=limit,
+            categories=only,
+        )
+
+    # Evening places come with days that have evenings, or when the traveller names one.
+    evening = sorted(EVENING_CATEGORIES)
+    candidates = await ranked([*trip.avoid, *evening], pool)
+    if night := sum(s.night for s in slots):
+        evening_pool = max(MIN_EVENING_POOL, min(MAX_POOL, night * POOL_PER_STOP))
+        candidates = merge_ranked(candidates, await ranked(trip.avoid, evening_pool, evening))
     candidates = without_names(candidates, [m.name for m in must])
     if not candidates:
         if not must:
             raise PlanningError("No places match this request.")
         return SelectionResult(
-            trip, city, must, "", 0, must_visit=must, weather=forecast, windows=windows
+            trip,
+            city,
+            must,
+            "",
+            0,
+            warnings=hours_warnings,
+            must_visit=must,
+            weather=forecast,
+            windows=windows,
         )
 
+    timed = list(zip(windows, slots, strict=True)) if is_timed(slots) else []
     selection = await llm.generate(
         system=SELECT_SYSTEM,
-        prompt=_selection_prompt(trip, candidates, target, must, note),
+        prompt=_selection_prompt(trip, candidates, target, must, note, timed),
         schema=PlaceSelection,
     )
     places, warnings = validate_selection(selection.place_ids, candidates, target)
+    places, hours_swaps = fit_hours(places, candidates, slots, must)
     swaps: list[tuple[Candidate, Candidate]] = []
     if note is not None:
         places, swaps = limit_outdoor(places, candidates, note.max_outdoor, [m.name for m in must])
@@ -371,10 +574,11 @@ async def select_places(
         places=places,
         rationale=selection.rationale,
         candidates_considered=len(candidates),
-        warnings=warnings,
+        warnings=hours_warnings + warnings,
         must_visit=must,
         notes=validate_notes(selection.notes, {p.id for p in places}),
         weather=forecast,
         weather_swaps=swaps,
         windows=windows,
+        hours_swaps=hours_swaps,
     )

@@ -50,7 +50,7 @@ def enrich(db_session: SessionFactory, cache: WikiCache, calls: Counter[str]) ->
 def test_enrich_city(db_session: SessionFactory) -> None:
     cache, calls = WikiCache(), Counter[str]()
     stats = enrich(db_session, cache, calls)
-    assert stats == EnrichStats(places=13, photos=1, descriptions=2)
+    assert stats == EnrichStats(places=15, photos=1, descriptions=2)
 
     async def load() -> dict[str, tuple[str | None, str | None, str | None]]:
         async with db_session() as session:

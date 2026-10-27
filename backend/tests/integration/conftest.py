@@ -59,6 +59,9 @@ SEED_PLACES: list[tuple[int, str, str, str, float, float, str | None, dict[str, 
     (111, "testville", "Modern Art Gallery", "gallery", 45.0030, 7.0070, None, {}),
     (112, "testville", "Harbour Theatre", "culture", 45.0000, 7.0080, None, {}),
     (113, "testville", "Far Fort", "landmark", 45.0800, 7.0900, "Q900013", {}),
+    # Open at night only: plans offer them for evenings, from 20:00.
+    (114, "testville", "Harbour Bar", "nightlife", 45.0005, 7.0075, None, {"amenity": "bar"}),
+    (115, "testville", "Old Town Fado", "restaurant", 45.0015, 7.0035, None, {}),
 ]
 # Stop-card details (normally from OSM tags and app.ingest.enrich), by place name.
 SEED_DETAILS: dict[str, dict[str, str]] = {

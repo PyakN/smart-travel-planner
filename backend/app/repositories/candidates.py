@@ -97,7 +97,9 @@ async def find_candidates(
     proximity_radius_m: float = DEFAULT_PROXIMITY_RADIUS_M,
     exclude_ids: Collection[int] = (),
     limit: int = 60,
+    categories: Sequence[str] = (),
 ) -> list[Candidate]:
+    """`categories`, if given, limits the candidates to those categories."""
     keyword_match = name_matches(keywords)
     score = (
         _as_score(Place.wikidata.is_not(None), WEIGHT_WIKIDATA)
@@ -118,6 +120,8 @@ async def find_candidates(
         conditions.append(or_(Category.slug.not_in(avoid), keyword_match))
     if exclude_ids:
         conditions.append(Place.id.not_in(exclude_ids))
+    if categories:
+        conditions.append(Category.slug.in_(categories))
 
     # Ties go to the closer place, then to the lower id (stable results).
     order_by = [score.desc(), *([distance] if anchors else []), Place.id]

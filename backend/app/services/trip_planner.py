@@ -33,6 +33,7 @@ from app.optimizer.planner import (
     plan_route,
 )
 from app.optimizer.transit import Ride, TransitProvider
+from app.repositories.candidates import Candidate
 from app.repositories.places import PlaceDetails, place_details
 from app.schemas.plan import (
     ALL_MODES,
@@ -295,6 +296,14 @@ async def optimize(
         ) from exc
 
 
+def swap(removed: Candidate, added: Candidate, reason: str) -> Adjustment:
+    return Adjustment(
+        removed=PlaceRef(place_id=removed.id, name=removed.name),
+        added=PlaceRef(place_id=added.id, name=added.name),
+        reason=reason,
+    )
+
+
 def first_day(city: City, requested: date | None) -> date:
     """The trip's first day: the requested one, or tomorrow in the city."""
     return requested or city.today() + timedelta(days=1)
@@ -463,14 +472,9 @@ async def plan_trip(
                 weather=forecast_of(today, day.window, selection.trip.pace),
             )
         )
-    swaps = [
-        Adjustment(
-            removed=PlaceRef(place_id=outdoor.id, name=outdoor.name),
-            added=PlaceRef(place_id=indoor.id, name=indoor.name),
-            reason="The forecast leaves too few dry daylight hours for it outdoors.",
-        )
-        for outdoor, indoor in selection.weather_swaps
-    ]
+    weather_reason = "The forecast leaves too few dry daylight hours for it outdoors."
+    swaps = [swap(outdoor, indoor, weather_reason) for outdoor, indoor in selection.weather_swaps]
+    hours_swaps = [swap(old, new, reason) for old, new, reason in selection.hours_swaps]
     params = {
         "trip": selection.trip.model_dump(mode="json"),
         "start": start.model_dump() if start else None,
@@ -511,6 +515,7 @@ async def plan_trip(
             start_date=first,
             weather_aware=weather_aware,
             weather_swaps=swaps,
+            hours_swaps=hours_swaps,
             **hours.as_params(),
         ),
     )

@@ -238,6 +238,8 @@ class PlanResponse(BaseModel):
     weather_aware: bool = False
     # Outdoor picks the forecast left no room for, and the indoor places that replaced them.
     weather_swaps: list[Adjustment] = Field(default_factory=list)
+    # Picks the days' hours had no room for (dark or closed then), and what replaced them.
+    hours_swaps: list[Adjustment] = Field(default_factory=list)
     # The hours asked for, HH:MM (see PlanRequest).
     day_start: str = "09:30"
     day_end: str = "21:30"

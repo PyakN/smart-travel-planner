@@ -15,6 +15,10 @@
 
 The edited day gets the latest forecast for its date. On weather-aware plans the LLM also
 sees that day's weather and which candidates are outdoor, and the day is ordered around it.
+
+The day keeps its hours. Replacements must be open when the removed stops were visited:
+places open at night only come for stops from 20:00 on, places closed at night only for
+earlier ones, and outdoor sights only in daylight.
 """
 
 import json
@@ -24,12 +28,16 @@ from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.catalog import EVENING_CATEGORIES
 from app.db.models import Route
 from app.ingest.cities import CITIES
 from app.llm.service import LLMService
 from app.optimizer.distance import DistanceProvider, PrefetchedProvider
 from app.optimizer.geometry import LatLon
 from app.optimizer.planner import (
+    MINUTES_PER_DAY,
+    NIGHT_START_MIN,
+    DayWindow,
     RoutePlan,
     StartPoint,
     Stop,
@@ -49,8 +57,12 @@ from app.schemas.plan import (
 )
 from app.schemas.trip import PlaceSelection, TripRequest
 from app.services.place_selection import (
+    HOURS_GUIDE,
     PlanningError,
     candidate_line,
+    day_slots,
+    is_timed,
+    merge_ranked,
     proximity_radius_m,
     validate_notes,
     validate_selection,
@@ -126,8 +138,10 @@ def _replace_prompt(
     candidates: Sequence[Candidate],
     free_min: int,
     weather: str | None = None,
+    hours: bool = False,
 ) -> str:
-    """`weather` (that day's, weather-aware plans only) also marks the outdoor candidates."""
+    """`weather` (that day's, weather-aware plans only) also marks the outdoor candidates;
+    `hours`, for a day whose hours limit what fits, when the candidates can be visited."""
     lengths = ", ".join(
         f"{category} {visit_minutes(category)}"
         for category in dict.fromkeys(c.category for c in candidates)
@@ -136,7 +150,12 @@ def _replace_prompt(
     lines.append("Staying on the day:")
     lines.extend([f"- {s.name} ({s.category})" for s in kept] or ["- (nothing)"])
     lines.append("Removed by the traveller:")
-    lines.extend(f"- {s.name} ({s.category})" for s in removed)
+    lines.extend(
+        f"- {s.name} ({s.category}, at {s.arrive})" if hours else f"- {s.name} ({s.category})"
+        for s in removed
+    )
+    if hours:
+        lines.append(f"{HOURS_GUIDE} Choose places that can be visited when the removed ones were.")
     if weather:
         lines.append(
             f"Weather that day: {weather}. Outdoor places only suit dry daylight; in bad "
@@ -148,8 +167,21 @@ def _replace_prompt(
         "",
         "Candidates (id | name | category | distance | hint):",
     ]
-    lines.extend(candidate_line(c, exposure=weather is not None) for c in candidates)
+    lines.extend(candidate_line(c, weather is not None, hours) for c in candidates)
     return "\n".join(lines)
+
+
+def slot_minute(clock: str, window: DayWindow) -> int:
+    """A stop's HH:MM as minutes since its day's midnight (past 24 * 60 after midnight)."""
+    hours, minutes = map(int, clock.split(":"))
+    minute = hours * 60 + minutes
+    return minute + MINUTES_PER_DAY if minute < window.start_min else minute
+
+
+def takes_a_slot(c: Candidate, slots: Sequence[int], window: DayWindow) -> bool:
+    """Whether `c` can be visited at one of these times on a day with these hours."""
+    opens, closes = window.opening(c.hours)
+    return any(opens <= t and t + visit_minutes(c.category) <= closes for t in slots)
 
 
 def _point(stop: PlannedStop | Candidate) -> LatLon:
@@ -213,20 +245,31 @@ async def replace_stops(
     today = forecast.days[0] if forecast else None
     aware = forecast if plan.weather_aware else None
 
-    pool = await find_candidates(
-        session,
-        city=plan.city,
-        interests=trip.interests,
-        avoid=trip.avoid,
-        keywords=trip.keywords,
-        anchors=[_point(s) for s in (kept or removed)] + home,
-        proximity_radius_m=proximity_radius_m(plan.modes),
-        exclude_ids=sorted(planned | rejected),
-        limit=REPLACE_POOL,
-    )
+    async def ranked(avoid: Sequence[str], only: Sequence[str] = ()) -> list[Candidate]:
+        return await find_candidates(
+            session,
+            city=plan.city,
+            interests=trip.interests,
+            avoid=avoid,
+            keywords=trip.keywords,
+            anchors=[_point(s) for s in (kept or removed)] + home,
+            proximity_radius_m=proximity_radius_m(plan.modes),
+            exclude_ids=sorted(planned | rejected),
+            limit=REPLACE_POOL,
+            categories=only,
+        )
+
+    # Replacements take the removed stops' times: evening places only for evening stops.
+    slots = [slot_minute(s.arrive, window) for s in removed]
+    evening = sorted(EVENING_CATEGORIES)
+    pool = await ranked([*trip.avoid, *evening])
+    if any(t >= NIGHT_START_MIN for t in slots):
+        pool = merge_ranked(pool, await ranked(trip.avoid, evening))
     planned_names = [s.name for d in plan.days for s in d.stops]
     fitting = [
-        c for c in without_names(pool, planned_names) if visit_minutes(c.category) <= free_min
+        c
+        for c in without_names(pool, planned_names)
+        if visit_minutes(c.category) <= free_min and takes_a_slot(c, slots, window)
     ]
     chosen: list[Candidate] = []
     notes: dict[int, str] = {}
@@ -241,6 +284,7 @@ async def replace_stops(
                 fitting,
                 free_min,
                 describe_day(aware.days[0], *window.sightseeing(trip.pace)) if aware else None,
+                is_timed([day_slots(window, trip.pace)]),
             ),
             schema=PlaceSelection,
         )
