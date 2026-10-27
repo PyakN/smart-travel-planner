@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     here_transit_url: str = "https://transit.router.hereapi.com/v8/routes"
     here_timeout_s: float = 8.0
 
+    # Weather: OpenWeatherMap's 5 day / 3 hour forecast, shown with every plan and used by
+    # weather-aware plans (app.services.weather_service). Without a key, plans go without.
+    openweather_api_key: SecretStr | None = None
+    openweather_url: str = "https://api.openweathermap.org/data/2.5/forecast"
+    openweather_timeout_s: float = 5.0
+
 
 @lru_cache
 def get_settings() -> Settings:
