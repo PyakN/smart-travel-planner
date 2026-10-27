@@ -3,6 +3,7 @@
 import asyncio
 import random
 from collections.abc import Sequence
+from dataclasses import replace
 from math import inf
 
 import pytest
@@ -140,6 +141,15 @@ def test_nothing_is_visited_after_closing_or_in_the_dark() -> None:
     assert all(v.stop.hours == "night" for v in route.days[0].visits)
     with pytest.raises(NothingFitsError):
         plan(BAIRRO_ALTO[3:4], [late_night])
+
+
+def test_a_place_that_cannot_be_visited_that_day_goes_first() -> None:
+    # From 18:00 the viewpoint is in the dark all day, the museum still open until 20:00.
+    viewpoint, museum = replace(BAIRRO_ALTO[4], priority=0), replace(BAIRRO_ALTO[3], priority=1)
+    evening = DayWindow(18 * H, 27 * H, sunrise_min=7 * H, sunset_min=SUNSET)
+    route = plan([viewpoint, museum], [evening])
+    assert route.dropped == [viewpoint]
+    assert [v.stop for v in route.days[0].visits] == [museum]
 
 
 def test_bars_after_midnight() -> None:

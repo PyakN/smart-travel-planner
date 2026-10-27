@@ -445,9 +445,17 @@ class _Problem:
     def fits(self, cost: _DayCost, day: int) -> bool:
         return cost.late == 0 and cost.length <= self.budgets[day]
 
+    def hopeless(self, i: int, day: int) -> bool:
+        """Whether stop i cannot be visited at all within trip day `day`'s hours."""
+        window = self.windows[day]
+        opens, closes = self.opening[day][i]
+        return max(opens, window.start_min) + self.visit_min[i] > min(closes, window.end_min)
+
     def timed_stops(self, order: Sequence[int], day: int) -> list[int]:
-        """Stops of `order` that close (or lose the light) during trip day `day`."""
-        return [i for i in order if self.opening[day][i][1] < inf]
+        """Stops of `order` that close (or lose the light) during trip day `day`; only those
+        that cannot be visited that day at all, if there are any."""
+        hopeless = [i for i in order if self.hopeless(i, day)]
+        return hopeless or [i for i in order if self.opening[day][i][1] < inf]
 
     def exposed(self, order: Sequence[int], day: int) -> list[int]:
         """Outdoor stops of a day that meet bad weather."""
@@ -511,8 +519,9 @@ def _fit_budget(
     """Drop stops until the day fits; returns (order, dropped for time, dropped for hours).
 
     While a visit runs past closing time or sunset, the least important stop with such hours
-    goes; while the day is too long, the least important stop. Optional stops go first,
-    must-visit ones only when nothing optional is left.
+    goes (one that cannot be visited that day at all first); while the day is too long, the
+    least important stop. Optional stops go first, must-visit ones only when nothing
+    optional is left.
     """
     over: list[int] = []
     closed: list[int] = []
@@ -534,6 +543,8 @@ def _make_room(
     problem: _Problem, order: Sequence[int], stop: int, day: int
 ) -> tuple[list[int], list[int]] | None:
     """Add `stop` to a day, dropping its least important optional stops until it fits."""
+    if problem.hopeless(stop, day):
+        return None
     new_order = problem.solve_day([*order, stop], day)
     removed: list[int] = []
     while not problem.fits(cost := problem.day_cost(new_order, day, weather=False), day):
