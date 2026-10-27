@@ -1,4 +1,5 @@
-// Mirrors backend/app/schemas/plan.py (POST /plan, GET /plans/{id}).
+// Mirrors backend/app/schemas/plan.py (POST /plan, GET /plans/{id})
+// and backend/app/schemas/place.py (GET /places).
 
 export type TravelMode = "walk" | "transit";
 export type Pace = "relaxed" | "moderate" | "intense";
@@ -14,6 +15,28 @@ export interface StartPoint {
 export interface PlanRequest {
   text: string;
   start?: StartPoint | null;
+  /** Place ids from GET /places. */
+  must_visit?: number[];
+  modes?: TravelMode[];
+}
+
+export interface PlaceRef {
+  place_id: number;
+  name: string;
+}
+
+/** A search result from GET /places. */
+export interface Place {
+  id: number;
+  name: string;
+  category: string;
+  lat: number;
+  lon: number;
+}
+
+export interface PlacePage {
+  items: Place[];
+  total: number;
 }
 
 export interface PlannedStop {
@@ -65,7 +88,9 @@ export interface PlanResponse {
   total_distance_m: number;
   distance_source: string;
   strategy: string;
-  dropped: { place_id: number; name: string }[];
+  dropped: PlaceRef[];
   warnings: string[];
   timings_ms: Record<string, number>;
+  modes: TravelMode[];
+  must_visit: PlaceRef[];
 }

@@ -1,4 +1,4 @@
-import type { PlanRequest, PlanResponse } from "./types";
+import type { PlacePage, PlanRequest, PlanResponse } from "./types";
 
 /** Same-origin prefix; next.config.ts proxies it to the FastAPI backend. */
 export const API_BASE = "/api";
@@ -53,4 +53,18 @@ export function createPlan(body: PlanRequest, fetchImpl: typeof fetch = fetch) {
 
 export function getPlan(id: number, fetchImpl: typeof fetch = fetch) {
   return request<PlanResponse>(`/plans/${id}`, { method: "GET" }, fetchImpl);
+}
+
+/** Places whose name contains `query` (accents ignored), for the must-visit picker. */
+export function searchPlaces(
+  query: string,
+  {
+    city = "lisbon",
+    limit = 8,
+    signal,
+  }: { city?: string; limit?: number; signal?: AbortSignal } = {},
+  fetchImpl: typeof fetch = fetch,
+) {
+  const params = new URLSearchParams({ q: query, city, limit: String(limit) });
+  return request<PlacePage>(`/places?${params}`, { method: "GET", signal }, fetchImpl);
 }

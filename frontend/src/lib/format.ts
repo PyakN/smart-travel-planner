@@ -51,3 +51,21 @@ export const DAY_COLORS = [
 export function dayColor(day: number): string {
   return DAY_COLORS[(day - 1) % DAY_COLORS.length];
 }
+
+const CATEGORY_ICONS: Record<string, string> = {
+  museum: "🏛️",
+  gallery: "🖼️",
+  landmark: "🏰",
+  monument: "🗿",
+  viewpoint: "🌅",
+  religious: "⛪",
+  park: "🌳",
+  culture: "🎭",
+  market: "🧺",
+  attraction: "🎡",
+};
+
+/** Stand-in picture for places without a photo. */
+export function categoryIcon(slug: string): string {
+  return CATEGORY_ICONS[slug] ?? "📍";
+}

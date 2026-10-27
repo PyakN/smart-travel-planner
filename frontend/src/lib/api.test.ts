@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiError, createPlan, errorMessage, getPlan } from "./api";
+import { ApiError, createPlan, errorMessage, getPlan, searchPlaces } from "./api";
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(async () => new Response(JSON.stringify(body), { status }));
@@ -38,6 +38,15 @@ describe("getPlan", () => {
     await getPlan(3, fetchImpl);
     const [url] = fetchImpl.mock.calls[0] as unknown as [string];
     expect(url).toBe("/api/plans/3");
+  });
+});
+
+describe("searchPlaces", () => {
+  it("encodes the query", async () => {
+    const fetchImpl = fakeFetch(200, { items: [], total: 0 });
+    await searchPlaces("São Jorge & co", { limit: 5 }, fetchImpl);
+    const [url] = fetchImpl.mock.calls[0] as unknown as [string];
+    expect(url).toBe("/api/places?q=S%C3%A3o+Jorge+%26+co&city=lisbon&limit=5");
   });
 });
 

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import type { StartPoint } from "@/lib/types";
+import MustVisitPicker from "@/components/MustVisitPicker";
+import type { PlaceRef, StartPoint, TravelMode } from "@/lib/types";
 
 const EXAMPLES = [
   "2 days in Lisbon, first time here. Viewpoints, the castle, Belém and one great museum.",
@@ -19,6 +20,17 @@ const LOADING_STEPS = [
 
 const MAX_CHARS = 1000;
 
+const MODES: { mode: TravelMode; label: string }[] = [
+  { mode: "walk", label: "Walking" },
+  { mode: "transit", label: "Public transit" },
+];
+
+function modesHint(modes: TravelMode[]): string {
+  if (!modes.includes("transit")) return "Everything on foot, so the places stay close together.";
+  if (!modes.includes("walk")) return "Tram, metro or train for anything over 1 km.";
+  return "Walk, and take the tram or metro for legs over 2.5 km.";
+}
+
 export interface PlanFormProps {
   text: string;
   onTextChange: (text: string) => void;
@@ -27,6 +39,10 @@ export interface PlanFormProps {
   onTogglePicking: () => void;
   onClearStart: () => void;
   onToggleRoundTrip: () => void;
+  mustVisit: PlaceRef[];
+  onMustVisitChange: (places: PlaceRef[]) => void;
+  modes: TravelMode[];
+  onModesChange: (modes: TravelMode[]) => void;
   loading: boolean;
   onSubmit: () => void;
 }
@@ -51,6 +67,10 @@ export default function PlanForm({
   onTogglePicking,
   onClearStart,
   onToggleRoundTrip,
+  mustVisit,
+  onMustVisitChange,
+  modes,
+  onModesChange,
   loading,
   onSubmit,
 }: PlanFormProps) {
@@ -131,6 +151,36 @@ export default function PlanForm({
           </label>
         )}
       </div>
+
+      <MustVisitPicker value={mustVisit} onChange={onMustVisitChange} disabled={loading} />
+
+      <fieldset className="rounded-lg border border-zinc-200 bg-white p-3 text-sm">
+        <legend className="px-1 text-zinc-700">Getting around</legend>
+        <div className="flex flex-wrap gap-x-5 gap-y-1">
+          {MODES.map(({ mode, label }) => {
+            const checked = modes.includes(mode);
+            return (
+              <label key={mode} className="flex items-center gap-2 text-zinc-700">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  // At least one mode stays on.
+                  disabled={loading || (checked && modes.length === 1)}
+                  onChange={() =>
+                    onModesChange(
+                      checked
+                        ? modes.filter((m) => m !== mode)
+                        : MODES.map((m) => m.mode).filter((m) => m === mode || modes.includes(m)),
+                    )
+                  }
+                />
+                {label}
+              </label>
+            );
+          })}
+        </div>
+        <p className="mt-1 text-xs text-zinc-500">{modesHint(modes)}</p>
+      </fieldset>
 
       <button
         type="submit"

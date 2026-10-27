@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import PlanForm from "@/components/PlanForm";
 import PlanResult from "@/components/PlanResult";
 import { ApiError, createPlan, getPlan } from "@/lib/api";
-import type { PlanResponse, StartPoint } from "@/lib/types";
+import type { PlaceRef, PlanResponse, StartPoint, TravelMode } from "@/lib/types";
 
 // Leaflet touches `window`, so the map only renders in the browser.
 const RouteMap = dynamic(() => import("@/components/RouteMap"), {
@@ -27,6 +27,8 @@ export default function Planner() {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [text, setText] = useState("");
   const [start, setStart] = useState<StartPoint | null>(null);
+  const [mustVisit, setMustVisit] = useState<PlaceRef[]>([]);
+  const [modes, setModes] = useState<TravelMode[]>(["walk", "transit"]);
   const [picking, setPicking] = useState(false);
   const [selectedDay, setSelectedDay] = useState(1);
   const [highlightedStop, setHighlightedStop] = useState<number | null>(null);
@@ -42,6 +44,8 @@ export default function Planner() {
         if (cancelled) return;
         setPlan(saved);
         setText(saved.request_text);
+        setMustVisit(saved.must_visit);
+        setModes(saved.modes);
         setSelectedDay(1);
         setStatus({ kind: "idle" });
       })
@@ -57,7 +61,12 @@ export default function Planner() {
     setStatus({ kind: "loading" });
     setPicking(false);
     try {
-      const created = await createPlan({ text: text.trim(), start });
+      const created = await createPlan({
+        text: text.trim(),
+        start,
+        must_visit: mustVisit.map((p) => p.place_id),
+        modes,
+      });
       setPlan(created);
       setSelectedDay(1);
       setStatus({ kind: "idle" });
@@ -110,6 +119,10 @@ export default function Planner() {
             onTogglePicking={() => setPicking((p) => !p)}
             onClearStart={() => setStart(null)}
             onToggleRoundTrip={() => setStart((s) => (s ? { ...s, round_trip: !s.round_trip } : s))}
+            mustVisit={mustVisit}
+            onMustVisitChange={setMustVisit}
+            modes={modes}
+            onModesChange={setModes}
             loading={status.kind === "loading"}
             onSubmit={submit}
           />

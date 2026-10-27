@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { categoryLabel, dayColor, formatDistance, formatDuration, travelLabel } from "./format";
+import {
+  categoryIcon,
+  categoryLabel,
+  dayColor,
+  formatDistance,
+  formatDuration,
+  travelLabel,
+} from "./format";
 import type { PlannedStop } from "./types";
 
 function stop(overrides: Partial<PlannedStop>): PlannedStop {
@@ -58,5 +65,12 @@ describe("labels and colours", () => {
   it("cycles day colours", () => {
     expect(dayColor(1)).toBe(dayColor(8));
     expect(dayColor(1)).not.toBe(dayColor(2));
+  });
+});
+
+describe("categoryIcon", () => {
+  it("has an icon per category and a fallback", () => {
+    expect(categoryIcon("viewpoint")).toBe("🌅");
+    expect(categoryIcon("beach")).toBe("📍");
   });
 });
