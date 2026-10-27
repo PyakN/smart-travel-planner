@@ -181,6 +181,45 @@ class TripWeather:
         return sum(fine) / len(fine) if fine else 1.0
 
 
+def hhmm(minute: int) -> str:
+    minute %= MINUTES_PER_DAY
+    return f"{minute // 60:02d}:{minute % 60:02d}"
+
+
+def describe_day(day: DayWeather, start_min: int, end_min: int) -> str:
+    """The weather of the sightseeing hours in a line, for the LLM: "Wed 28 Oct: moderate
+    rain 10:30-19:30 (up to 91%); 16-17 °C; daylight 07:03-17:37"."""
+    daylight = f"daylight {hhmm(day.sunrise_min)}-{hhmm(day.sunset_min)}"
+    label = f"{day.date:%a} {day.date.day} {day.date:%b}"
+    steps = [
+        (minute, step)
+        for minute, step in day.steps
+        if minute - STEP_MIN // 2 < end_min and minute + STEP_MIN // 2 > start_min
+    ]
+    if not steps:
+        return f"{label}: no forecast yet; {daylight}"
+    # Bad spells: runs of steps bad for outdoor sights, told by the worst step of each.
+    spells: list[tuple[int, int, WeatherStep, float]] = []
+    for minute, step in steps:
+        if step.outdoor_badness < BAD_WEATHER:
+            continue
+        begin = max(start_min, minute - STEP_MIN // 2)
+        end = min(end_min, minute + STEP_MIN // 2)
+        if spells and spells[-1][1] == begin:
+            first, _, worst, pop = spells[-1]
+            worse = step if step.outdoor_badness > worst.outdoor_badness else worst
+            spells[-1] = (first, end, worse, max(pop, step.pop))
+        else:
+            spells.append((begin, end, step, step.pop))
+    weather = ", ".join(
+        f"{worst.description} {hhmm(begin)}-{hhmm(end)}"
+        + (f" (up to {round(pop * 100)}%)" if worst.condition in WET else "")
+        for begin, end, worst, pop in spells
+    )
+    temps = [round(step.temp_c) for _, step in steps]
+    return f"{label}: {weather or 'dry'}; {min(temps)}-{max(temps)} °C; {daylight}"
+
+
 def trip_weather(forecast: Forecast, start: date, days: int, tz: ZoneInfo) -> TripWeather:
     return TripWeather(
         tuple(day_weather(forecast, start + timedelta(days=i), tz) for i in range(days))

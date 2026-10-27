@@ -10,6 +10,7 @@ from app.services.place_selection import (
     NOTE_MAX_CHARS,
     PARSE_SYSTEM,
     PlanningError,
+    limit_outdoor,
     parse_trip_request,
     select_places,
     validate_notes,
@@ -81,6 +82,34 @@ class TestValidateSelection:
     def test_backfill_limited_by_pool(self) -> None:
         places, _ = validate_selection([999] * 3, CANDIDATES[:2], target=3)
         assert ids(places) == [1, 2]
+
+
+def place(i: int, category: str, outdoor: bool, name: str | None = None) -> Candidate:
+    return Candidate(i, name or f"Place {i}", category, 10 - i, None, 38.7, -9.1, outdoor=outdoor)
+
+
+class TestLimitOutdoor:
+    VIEWS = [place(i, "viewpoint", outdoor=True) for i in (1, 2, 3)]
+    INDOOR = [place(i, "museum", outdoor=False) for i in (4, 5)]
+
+    def test_within_the_limit_nothing_changes(self) -> None:
+        places, swaps = limit_outdoor(self.VIEWS, self.VIEWS + self.INDOOR, limit=3)
+        assert (ids(places), swaps) == ([1, 2, 3], [])
+
+    def test_least_important_outdoor_places_go_first(self) -> None:
+        chosen = [self.VIEWS[0], self.INDOOR[1], *self.VIEWS[1:]]
+        places, swaps = limit_outdoor(chosen, self.VIEWS + self.INDOOR, limit=1)
+        # The best-ranked indoor candidate left takes the place of the last outdoor pick.
+        assert ids(places) == [1, 5, 2, 4]
+        assert [(a.id, b.id) for a, b in swaps] == [(3, 4)]  # only one indoor place left
+
+    def test_never_brings_in_a_namesake(self) -> None:
+        twin = place(6, "museum", outdoor=False, name="Place 9")
+        places, swaps = limit_outdoor(
+            self.VIEWS, [twin, *self.INDOOR], limit=1, taken_names=["Place 9"]
+        )
+        assert ids(places) == [1, 5, 4]
+        assert {b.id for _, b in swaps} == {4, 5}
 
 
 def test_notes_are_kept_for_selected_places_only() -> None:

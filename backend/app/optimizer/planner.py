@@ -211,6 +211,11 @@ def visit_minutes(category: str) -> int:
     return VISIT_MIN.get(category, DEFAULT_VISIT_MIN)
 
 
+def day_hours(pace: Pace) -> tuple[int, int]:
+    """The sightseeing hours of a day at this pace, in minutes since midnight."""
+    return DAY_START_MIN, DAY_START_MIN + DAY_BUDGET_MIN[pace]
+
+
 Routes = Mapping[tuple[int, int], TransitRoute | None]
 
 

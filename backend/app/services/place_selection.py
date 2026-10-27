@@ -5,18 +5,19 @@ The LLM never invents places: it may only return ids from the candidate list, an
 """
 
 import json
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ingest.cities import CITIES, resolve_city
+from app.ingest.cities import CITIES, City, resolve_city
 from app.ingest.osm import normalize_name
 from app.llm.service import LLMService
 from app.optimizer.geometry import LatLon
-from app.optimizer.planner import ALL_MODES, TravelMode
+from app.optimizer.planner import ALL_MODES, TravelMode, day_hours
 from app.repositories.candidates import Candidate, find_candidates, get_candidates
 from app.schemas.trip import MAX_REQUEST_CHARS, PlaceNote, PlaceSelection, TripRequest
+from app.services.weather_service import TripWeather, describe_day
 
 MIN_POOL, MAX_POOL, POOL_PER_STOP = 30, 100, 3
 NOTE_MAX_CHARS = 160
@@ -74,6 +75,13 @@ SELECT_SYSTEM = """You choose places for a walking trip.
 """
 
 
+WEATHER_PROMPT = """Weather in the sightseeing hours (outdoor places are marked "outdoor"; they
+only suit dry daylight):"""
+
+# The weather of a trip's days in a city, by number of days; None without a forecast.
+WeatherLookup = Callable[[City, int], Awaitable[TripWeather | None]]
+
+
 class PlanningError(Exception):
     """The request cannot be planned; the message is safe to show to the user."""
 
@@ -88,6 +96,9 @@ class SelectionResult:
     warnings: list[str] = field(default_factory=list)
     must_visit: list[Candidate] = field(default_factory=list)
     notes: dict[int, str] = field(default_factory=dict)  # place id -> why it suits the traveller
+    weather: TripWeather | None = None
+    # Outdoor picks the weather had no room for, and the indoor places that replaced them.
+    weather_swaps: list[tuple[Candidate, Candidate]] = field(default_factory=list)
 
 
 def validate_selection(
@@ -135,6 +146,34 @@ def validate_selection(
     return chosen, warnings
 
 
+def limit_outdoor(
+    places: Sequence[Candidate],
+    candidates: Sequence[Candidate],
+    limit: int,
+    taken_names: Iterable[str] = (),
+) -> tuple[list[Candidate], list[tuple[Candidate, Candidate]]]:
+    """Swap the least important outdoor places for the best-ranked indoor candidates left,
+    until at most `limit` places are outdoor. Returns the places and the (outdoor, indoor)
+    swaps; places keep their rank, so a swap takes the place of what it replaces."""
+    places = list(places)
+    excess = sum(p.outdoor for p in places) - limit
+    if excess <= 0:
+        return places, []
+    chosen = {p.id for p in places}
+    names = [*taken_names, *(p.name for p in places)]
+    spare = without_names([c for c in candidates if c.id not in chosen], names)
+    indoor = [c for c in spare if not c.outdoor]
+    swaps = []
+    for i in reversed(range(len(places))):
+        if excess == 0 or not indoor:
+            break
+        if places[i].outdoor:
+            swaps.append((places[i], indoor[0]))
+            places[i] = indoor.pop(0)
+            excess -= 1
+    return places, swaps
+
+
 def without_names(candidates: Sequence[Candidate], names: Iterable[str]) -> list[Candidate]:
     """Candidates named unlike any of `names` (and unlike each other), accents ignored."""
     taken = {normalize_name(n) for n in names}
@@ -165,9 +204,21 @@ async def parse_trip_request(llm: LLMService, text: str) -> TripRequest:
     )
 
 
-def candidate_line(c: Candidate) -> str:
+def _category(c: Candidate, exposure: bool) -> str:
+    return f"{c.category}, {'outdoor' if c.outdoor else 'indoor'}" if exposure else c.category
+
+
+def candidate_line(c: Candidate, exposure: bool = False) -> str:
+    """`exposure` adds whether the place is outdoor, for weather-aware selection."""
     distance = f" | {c.distance_m / 1000:.1f} km" if c.distance_m is not None else ""
-    return f"{c.id} | {c.name} | {c.category}{distance}" + (f" | {c.hint}" if c.hint else "")
+    hint = f" | {c.hint}" if c.hint else ""
+    return f"{c.id} | {c.name} | {_category(c, exposure)}{distance}{hint}"
+
+
+@dataclass(frozen=True)
+class _WeatherNote:
+    weather: TripWeather
+    max_outdoor: int  # outdoor places the LLM may still choose
 
 
 def _selection_prompt(
@@ -175,16 +226,31 @@ def _selection_prompt(
     candidates: Sequence[Candidate],
     target: int,
     must_visit: Sequence[Candidate] = (),
+    weather: _WeatherNote | None = None,
 ) -> str:
+    exposure = weather is not None
     columns = "id | name | category"
     if any(c.distance_m is not None for c in candidates):
         columns += " | distance"
     lines = [f"Trip request: {json.dumps(trip.model_dump(), ensure_ascii=False)}"]
     if must_visit:
         lines.append("Must-visit places (already in the plan):")
-        lines.extend(f"- {m.id} | {m.name} | {m.category}" for m in must_visit)
+        lines.extend(f"- {m.id} | {m.name} | {_category(m, exposure)}" for m in must_visit)
+    if weather is not None:
+        start, end = day_hours(trip.pace)
+        lines.append(WEATHER_PROMPT)
+        lines.extend(
+            f"- Day {number}, {describe_day(day, start, end)}"
+            for number, day in enumerate(weather.weather.days, start=1)
+        )
+        if (most := weather.max_outdoor) < target:
+            lines.append(
+                f"Choose at most {most} outdoor {'place' if most == 1 else 'places'}. For the "
+                "rest prefer indoor places that suit the request: museums, galleries, churches, "
+                "theatres, markets."
+            )
     lines += [f"Number of places to choose: {target}", "", f"Candidates ({columns} | hint):"]
-    lines.extend(map(candidate_line, candidates))
+    lines.extend(candidate_line(c, exposure) for c in candidates)
     return "\n".join(lines)
 
 
@@ -201,7 +267,12 @@ async def select_places(
     must_visit: Sequence[int] = (),
     start: LatLon | None = None,
     modes: Collection[TravelMode] = ALL_MODES,
+    weather: WeatherLookup | None = None,
+    weather_aware: bool = False,
 ) -> SelectionResult:
+    """`weather` gives the trip's weather, returned with the result. When the selection is
+    `weather_aware`, the LLM also sees it with each candidate's exposure, and outdoor picks
+    are capped at the share of the sightseeing hours that are dry and light."""
     text = text.strip()
     if not text:
         raise PlanningError("Describe the trip you want.")
@@ -218,6 +289,7 @@ async def select_places(
     must = await get_candidates(session, must_visit, city=city)
     if len(must) < len(set(must_visit)):
         raise PlanningError(f"Some must-visit places are not in {resolved.name}.")
+    forecast = await weather(resolved, trip.days) if weather else None
     target = max(0, trip.stops_target - len(must))
     if target == 0:
         return SelectionResult(
@@ -227,7 +299,13 @@ async def select_places(
             rationale="Your must-visit places fill the whole trip.",
             candidates_considered=0,
             must_visit=must,
+            weather=forecast,
         )
+    note = None
+    if weather_aware and forecast is not None:
+        share = forecast.outdoor_share(*day_hours(trip.pace))
+        outdoor_must = sum(m.outdoor for m in must)
+        note = _WeatherNote(forecast, max(0, round(share * (len(must) + target)) - outdoor_must))
 
     anchors = ([start] if start else []) + [LatLon(m.lat, m.lon) for m in must]
     pool = max(MIN_POOL, min(MAX_POOL, target * POOL_PER_STOP))
@@ -246,14 +324,17 @@ async def select_places(
     if not candidates:
         if not must:
             raise PlanningError("No places match this request.")
-        return SelectionResult(trip, city, must, "", 0, must_visit=must)
+        return SelectionResult(trip, city, must, "", 0, must_visit=must, weather=forecast)
 
     selection = await llm.generate(
         system=SELECT_SYSTEM,
-        prompt=_selection_prompt(trip, candidates, target, must),
+        prompt=_selection_prompt(trip, candidates, target, must, note),
         schema=PlaceSelection,
     )
     places, warnings = validate_selection(selection.place_ids, candidates, target)
+    swaps: list[tuple[Candidate, Candidate]] = []
+    if note is not None:
+        places, swaps = limit_outdoor(places, candidates, note.max_outdoor, [m.name for m in must])
     places = must + places
     return SelectionResult(
         trip=trip,
@@ -264,4 +345,6 @@ async def select_places(
         warnings=warnings,
         must_visit=must,
         notes=validate_notes(selection.notes, {p.id for p in places}),
+        weather=forecast,
+        weather_swaps=swaps,
     )

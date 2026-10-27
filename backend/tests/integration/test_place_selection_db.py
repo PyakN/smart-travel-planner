@@ -5,13 +5,16 @@ from typing import Any
 
 import pytest
 
+from app.ingest.cities import City
 from app.llm.service import LLMService
 from app.optimizer.geometry import LatLon
-from app.schemas.trip import PlaceSelection
+from app.schemas.trip import PlaceNote, PlaceSelection
 from app.services.place_selection import PlanningError, SelectionResult, select_places
+from app.services.weather_service import TripWeather, parse_forecast, trip_weather
 from tests.fakes import FakeProvider
 from tests.integration.conftest import SessionFactory
 from tests.test_trip_schema import trip
+from tests.test_weather_service import WEDNESDAY, fixture
 
 
 def run(
@@ -102,6 +105,62 @@ def test_must_visit_places_can_fill_the_trip(
     result = run(db_session, provider, "Just these", must_visit=must + must[:2])  # repeats ignored
     assert [p.id for p in result.places] == must  # a relaxed day holds 4 stops
     assert len(provider.calls) == 1  # nothing left to choose: no selection call
+
+
+async def rainy_wednesday(city: City, days: int) -> TripWeather:
+    """Dry only until 10:30: a sixth of a relaxed day's sightseeing hours."""
+    return trip_weather(parse_forecast(fixture()), WEDNESDAY, days, city.tz)
+
+
+def queue_four_outdoor_picks(place_ids: dict[str, int]) -> FakeProvider:
+    picks = ["Miradouro de Santa Luzia", "Castelo de São Jorge", "Praça do Comércio"]
+    return FakeProvider().queue(
+        trip(city=None, days=1, pace="relaxed", interests=["viewpoint"]),
+        PlaceSelection(
+            place_ids=[place_ids[name] for name in (*picks, "Torre de Belém")],
+            notes=[PlaceNote(place_id=place_ids["Torre de Belém"], note="Iconic.")],
+            rationale="Views.",
+        ),
+    )
+
+
+def test_weather_aware_selection_makes_room_for_the_rain(
+    db_session: SessionFactory, place_ids: dict[str, int]
+) -> None:
+    provider = queue_four_outdoor_picks(place_ids)
+    result = run(db_session, provider, "A slow day", weather=rainy_wednesday, weather_aware=True)
+
+    prompt = str(provider.calls[1]["prompt"])
+    assert (
+        "- Day 1, Wed 28 Oct: moderate rain 10:30-15:30 (up to 91%); 16-17 °C; "
+        "daylight 07:03-17:37" in prompt
+    )
+    assert "Choose at most 1 outdoor place. For the rest prefer indoor places" in prompt
+    luzia = place_ids["Miradouro de Santa Luzia"]
+    gulbenkian = place_ids["Museu Calouste Gulbenkian"]
+    lines = prompt.splitlines()
+    assert f"{luzia} | Miradouro de Santa Luzia | viewpoint, outdoor" in lines
+    assert f"{gulbenkian} | Museu Calouste Gulbenkian | museum, indoor" in lines
+
+    # The LLM chose four outdoor places; the only indoor one takes the least important's slot.
+    assert [p.name for p in result.places][-1] == "Museu Calouste Gulbenkian"
+    assert [(a.name, b.name) for a, b in result.weather_swaps] == [
+        ("Torre de Belém", "Museu Calouste Gulbenkian")
+    ]
+    assert place_ids["Torre de Belém"] not in result.notes  # its note left with it
+    assert result.weather is not None and result.weather.days[0].date == WEDNESDAY
+
+
+def test_without_weather_awareness_the_weather_is_only_returned(
+    db_session: SessionFactory, place_ids: dict[str, int]
+) -> None:
+    provider = queue_four_outdoor_picks(place_ids)
+    result = run(db_session, provider, "A slow day", weather=rainy_wednesday)
+    prompt = str(provider.calls[1]["prompt"])
+    assert "outdoor" not in prompt and "Weather" not in prompt
+    assert [p.name for p in result.places][-1] == "Torre de Belém"
+    assert result.weather_swaps == []
+    assert result.weather is not None
 
 
 def test_unknown_must_visit_place_is_rejected(

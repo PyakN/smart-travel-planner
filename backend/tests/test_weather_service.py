@@ -21,6 +21,7 @@ from app.services.weather_service import (
     condition,
     create_weather_provider,
     day_weather,
+    describe_day,
     parse_forecast,
     trip_weather,
 )
@@ -176,6 +177,22 @@ def test_outdoor_share_of_the_sightseeing_hours() -> None:
     # An evening past sunset is dark however dry it is.
     assert (
         trip_weather(forecast(), THURSDAY, 1, LISBON_TZ).outdoor_share(17 * 60, 19 * 60) == 37 / 120
+    )
+
+
+def test_describe_day() -> None:
+    wednesday, thursday = trip_weather(forecast(), WEDNESDAY, 2, LISBON_TZ).days
+    nine_thirty, half_past_seven = 9 * 60 + 30, 19 * 60 + 30
+    assert describe_day(wednesday, nine_thirty, half_past_seven) == (
+        "Wed 28 Oct: moderate rain 10:30-16:30 (up to 91%); 16-17 °C; daylight 07:03-17:37"
+    )
+    assert describe_day(thursday, 0, 9 * 60) == (
+        "Thu 29 Oct: fog 01:30-07:30; 14-17 °C; daylight 07:03-17:37"
+    )
+    assert describe_day(thursday, nine_thirty, half_past_seven).startswith("Thu 29 Oct: dry; ")
+    later = day_weather(forecast(), date(2026, 11, 3), LISBON_TZ)
+    assert describe_day(later, nine_thirty, half_past_seven) == (
+        "Tue 3 Nov: no forecast yet; daylight 07:03-17:37"
     )
 
 
