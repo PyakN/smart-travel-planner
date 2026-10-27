@@ -1,6 +1,7 @@
 import asyncio
 import random
 from collections.abc import Collection, Sequence
+from dataclasses import replace
 from math import inf
 
 import pytest
@@ -191,6 +192,45 @@ def test_budget_drops_least_important_stops() -> None:
     assert result.days[0].total_min <= 6 * 60
     assert result.warnings == ["dropped 1 stop(s) to fit 6 h days"]
     assert len(plan(stops, pace="relaxed").days[0].visits) == 5  # budget off
+
+
+def test_must_visit_stops_are_trimmed_last() -> None:
+    categories = ["museum", "museum", "museum", "landmark", "landmark"]
+    stops = [stop(i, 38.71 + i * 0.001, -9.14, c) for i, c in enumerate(categories)]
+    stops[4] = replace(stops[4], required=True)  # the stop trimmed in the test above
+    result = plan(stops, pace="relaxed", enforce_budget=True)
+    assert [s.priority for s in result.dropped] == [3]
+    assert stops[4].id in ids(result)[0]
+
+
+def two_neighbourhoods(required: bool) -> list[Stop]:
+    # Four museums 100 m apart fill a 6 h day and a bit; four parks 1.5 km away leave room.
+    museums = [
+        replace(stop(i, 38.710 + 0.0009 * i, -9.140, "museum"), required=required) for i in range(4)
+    ]
+    parks = [stop(4 + i, 38.710 + 0.001 * i, -9.123, "park") for i in range(4)]
+    return museums + parks
+
+
+def test_must_visit_moves_to_a_day_with_room() -> None:
+    # Without the flag the day of museums sheds one; with it the museum moves to the parks.
+    optional = plan(two_neighbourhoods(False), days=2, pace="relaxed", enforce_budget=True)
+    assert [s.category for s in optional.dropped] == ["museum"]
+
+    result = plan(two_neighbourhoods(True), days=2, pace="relaxed", enforce_budget=True)
+    planned = {i for day in ids(result) for i in day}
+    assert {s.id for s in two_neighbourhoods(True)[:4]} <= planned
+    assert all(not s.required for s in result.dropped)
+    assert all(day.total_min <= 6 * 60 for day in result.days)
+    assert "must-visit" not in " ".join(result.warnings)
+
+
+def test_must_visit_that_fits_nowhere_is_reported() -> None:
+    # Five 90-minute must-visit museums cannot share one 6 h day.
+    stops = [replace(stop(i, 38.71 + i * 0.0005, -9.14, "museum"), required=True) for i in range(5)]
+    result = plan(stops, pace="relaxed", enforce_budget=True)
+    assert len(result.dropped) == 2
+    assert "2 must-visit stop(s) do not fit any day" in result.warnings
 
 
 def test_more_days_than_stops() -> None:

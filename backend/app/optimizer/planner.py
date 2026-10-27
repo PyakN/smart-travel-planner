@@ -55,6 +55,9 @@ class Stop:
     category: str
     # Selection rank: 0 is the most important. Budget trimming drops the largest first.
     priority: int
+    # Must-visit: trimmed only once a day has nothing optional left, then moved to
+    # another day that can make room for it.
+    required: bool = False
 
 
 @dataclass(frozen=True)
@@ -224,13 +227,58 @@ def _schedule(problem: _Problem, order: Sequence[int]) -> tuple[list[Visit], int
 def _fit_budget(
     problem: _Problem, order: list[int], budget_min: int
 ) -> tuple[list[int], list[int]]:
-    """Drop the least important stops until the day fits; returns (order, dropped)."""
+    """Drop the least important stops until the day fits; returns (order, dropped).
+
+    Optional stops go first; must-visit ones only when nothing optional is left.
+    """
     dropped: list[int] = []
     while len(order) > 1 and _schedule(problem, order)[1] > budget_min:
-        worst = max(order, key=lambda i: problem.rank[i])
+        worst = max(order, key=lambda i: (not problem.stops[i].required, problem.rank[i]))
         dropped.append(worst)
         order = problem.solve_day([i for i in order if i != worst])
     return order, dropped
+
+
+def _make_room(
+    problem: _Problem, order: Sequence[int], stop: int, budget_min: int
+) -> tuple[list[int], list[int]] | None:
+    """Add `stop` to a day, dropping its least important optional stops until it fits."""
+    new_order = problem.solve_day([*order, stop])
+    removed: list[int] = []
+    while _schedule(problem, new_order)[1] > budget_min:
+        optional = [i for i in new_order if not problem.stops[i].required]
+        if not optional:
+            return None
+        worst = max(optional, key=lambda i: problem.rank[i])
+        removed.append(worst)
+        new_order = problem.solve_day([i for i in new_order if i != worst])
+    return new_order, removed
+
+
+def _place_required(
+    problem: _Problem, day_orders: list[list[int]], dropped: list[int], budget_min: int
+) -> list[int]:
+    """Give each dropped must-visit stop the day that loses the fewest optional stops for it.
+
+    Updates `day_orders` in place; returns the new dropped list.
+    """
+    dropped = list(dropped)
+    for stop in sorted(
+        (i for i in dropped if problem.stops[i].required), key=lambda i: problem.rank[i]
+    ):
+        options = []
+        for d, order in enumerate(day_orders):
+            placed = _make_room(problem, order, stop, budget_min)
+            if placed is not None:
+                new_order, removed = placed
+                added = problem.cost(new_order) - problem.cost(order)
+                options.append((len(removed), added, d, new_order, removed))
+        if options:
+            _, _, d, new_order, removed = min(options, key=lambda o: (o[0], o[1], o[2]))
+            day_orders[d] = new_order
+            dropped.remove(stop)
+            dropped.extend(removed)
+    return dropped
 
 
 def _cheapest_insertion(problem: _Problem, order: Sequence[int], stop: int) -> float:
@@ -320,8 +368,11 @@ async def plan_route(
             fitted.append(order)
             dropped.extend(removed)
         day_orders = fitted
+        dropped = _place_required(problem, day_orders, dropped, budget)
         if dropped:
             warnings.append(f"dropped {len(dropped)} stop(s) to fit {budget // 60} h days")
+        if missed := sum(stops[i].required for i in dropped):
+            warnings.append(f"{missed} must-visit stop(s) do not fit any day")
 
     # Day 1 holds the most important stop, and so on.
     day_orders.sort(key=lambda order: min(problem.rank[i] for i in order))
