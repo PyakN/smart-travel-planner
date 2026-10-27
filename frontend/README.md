@@ -28,10 +28,11 @@ npm run build        # production build
 | Path                                 | What                                                                                                                   |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
 | `src/components/Planner.tsx`         | Page state: request, plan, selected day, `?plan=<id>` share links                                                      |
-| `src/components/PlanForm.tsx`        | Request text, examples, optional start point (click the map), must-visit places, travel modes                          |
+| `src/components/PlanForm.tsx`        | Request text, examples, optional start point (click the map), must-visit places, travel modes, first day and weather   |
 | `src/components/MustVisitPicker.tsx` | Place search (`GET /places?q=`) with keyboard navigation; picked places as chips                                       |
 | `src/components/PlanResult.tsx`      | Summary, day tabs, stop cards with travel legs; tick stops to replace them, edit summary with Undo                     |
-| `src/components/StopCard.tsx`        | One stop: Wikimedia photo (credited) or a category icon, AI note, description, opening hours, links                    |
+| `src/components/StopCard.tsx`        | One stop: time slot, forecast, Wikimedia photo (credited) or a category icon, AI note, description, hours, links       |
+| `src/components/DayWeather.tsx`      | A day's weather header: condition, temperatures, chance of rain, daylight and 3-hourly slots (OpenWeatherMap)          |
 | `src/components/RouteMap.tsx`        | Leaflet map, client-only. The selected day is drawn in colour (walking solid, tram/metro dotted); other days are muted |
 | `src/lib/api.ts`                     | Typed client for `POST /plan`, `GET /plans/{id}`, `POST /plans/{id}/replace` and `GET /places`, with readable errors   |
 | `src/lib/types.ts`                   | Mirrors `backend/app/schemas/plan.py`                                                                                  |

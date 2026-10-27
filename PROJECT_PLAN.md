@@ -114,14 +114,17 @@
 **Result:** checked live (Gemini + OSRM) and in a browser (Playwright, desktop and phone). A 2-day trip from a hotel at Rossio with Jerónimos and the castle as must-visits keeps both and fills the rest around them, in ~6 s; replacing two stops takes ~2.5 s and keeps day 2 within its 8 h. 604 of 2,143 Lisbon places have a photo and 414 a description. The live runs found three problems, each with a regression test: a same-name twin of a must-visit place was picked (fixed); the LLM chose two 90-minute museums for 130 free minutes (the prompt now states the free time and visit lengths, a misfit is reported, and the filler fills the gap, but the LLM can still choose that way); and the free-time filler gave up after one candidate (fixed).
 
 ## Phase 6c. Weather-aware routing
-- [ ] Weather service: OpenWeatherMap 5 day / 3 hour forecast (`OPENWEATHER_API_KEY`) with temperature, chance of precipitation, rain/snow, fog, visibility, sunrise and sunset; cached, and a failure means a plan without weather
-- [ ] Indoor or outdoor places, from the category and OSM tags: palaces, monasteries and covered markets are indoor; viewpoints, parks, statues, castle walls and open-air markets are outdoor
-- [ ] Optimizer (soft time windows): an outdoor visit in rain, snow, fog, poor visibility or the dark costs like extra travel time. Days are matched to trip dates, each day is reordered, and outdoor stops trade days with indoor stops while that pays off
-- [ ] Selection: the LLM sees the forecast and which candidates are outdoor; a guard swaps the least important outdoor picks for the best-ranked indoor candidates when dry daylight cannot hold them
-- [ ] API: `start_date` and `weather_aware` in `POST /plan`; every day and stop carries its forecast; replacing stops keeps the weather
-- [ ] Frontend: first-day date, an "Optimize route based on weather conditions" checkbox, a weather header per day and the forecast on every stop card
+- [x] Weather service: OpenWeatherMap 5 day / 3 hour forecast (`OPENWEATHER_API_KEY`) with temperature, chance of precipitation, rain/snow, fog, visibility, sunrise and sunset; cached, and a failure means a plan without weather
+- [x] Indoor or outdoor places, from the category and OSM tags: palaces, monasteries and covered markets are indoor; viewpoints, parks, statues, castle walls and open-air markets are outdoor
+- [x] Optimizer (soft time windows): an outdoor visit in rain, snow, fog, poor visibility or the dark costs like extra travel time. Days are matched to trip dates, each day is reordered, and outdoor stops trade days with indoor stops while that pays off
+- [x] Selection: the LLM sees the forecast and which candidates are outdoor; a guard swaps the least important outdoor picks for the best-ranked indoor candidates when dry daylight cannot hold them
+- [x] API: `start_date` and `weather_aware` in `POST /plan`; every day and stop carries its forecast; replacing stops keeps the weather
+- [x] Frontend: first-day date, an "Optimize route based on weather conditions" checkbox, a weather header per day and the forecast on every stop card
+- [ ] (later) Let a day start later or pause when rain is about to pass: days always start at 09:30
+- [ ] (later) Prefer indoor swaps of a similar visit length: wet days pick more 90-minute museums, so more stops get trimmed
 
 **DoD:** with the checkbox off, plans are what they were. With it on, a rainy afternoon gets the museums and the dry morning the viewpoints, outdoor stops end by sunset, and a wet day swaps outdoor picks for indoor places that suit the request.
+**Result:** checked live in a browser (Gemini + OSRM + HERE, Playwright, desktop and phone), with OpenWeatherMap replaced by a local server for a rainy day (dry until 10:30, rain until 16:30): no key was available. Without the checkbox, 3 of 5 stops were outdoors in the rain and the plan said so; with it, the LLM chose museums for the rain, the castle got the dry 09:30 slot, and no outdoor stop met rain (5.7 → 3.4 km). It also showed the trimming problem above: 2 stops dropped instead of 1. On random 1–7 day trips, outdoor visits meet 80–100% less bad weather for 5–20% more travel, and a week of 56 stops takes ~50 ms longer to plan.
 
 ## Phase 7. Quality and reliability
 - [ ] E2E tests (Playwright)

@@ -65,7 +65,7 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 | `GET /places` | Search: `q` (name contains, accents ignored), `city`, `category` (repeatable), `bbox=west,south,east,north`, or `lat`+`lon`+`radius_m` (sorted by distance); `limit` / `offset` |
 | `GET /places/{id}` | One place |
 | `GET /categories` | Categories with place counts (optional `city`) |
-| `POST /plan` | **Plan a trip from text**: `{"text", "start"?: {"lat", "lon", "round_trip"}, "must_visit"?: [place ids], "modes"?: ["walk", "transit"]}` → days with ordered, timed stops (photo, description, personal note, opening hours) and map geometry. Saved; returns `id` |
+| `POST /plan` | **Plan a trip from text**: `{"text", "start"?: {"lat", "lon", "round_trip"}, "must_visit"?: [place ids], "modes"?: ["walk", "transit"], "start_date"?: "YYYY-MM-DD", "weather_aware"?: bool}` → dated days with ordered, timed stops (photo, description, personal note, opening hours, forecast) and map geometry. Saved; returns `id` |
 | `GET /plans/{id}` | A saved plan |
 | `POST /plans/{id}/replace` | **Replace stops of a day**: `{"day", "place_ids"}` → a new saved version (`parent_id` = this plan), with an `edit` listing what was replaced, added and adjusted |
 
@@ -106,7 +106,7 @@ The LLM never invents places. A request goes through four steps:
 3. **Select:** the LLM fills the slots the must-visit places leave, picking ids from that candidate list (it sees the distances), and writes a one-sentence note per place on why it suits the traveller.
 4. **Guard:** a deterministic check drops any id that isn't a candidate, and places with the same name as one already chosen (OSM maps some sights twice).
 
-Configure it in `.env`: `LLM_PROVIDER`, the matching API key, and optionally `LLM_MODEL` and `LLM_FALLBACK_MODEL`. For real public transport routes, also set `HERE_API_KEY` (see [Route optimizer](#route-optimizer)).
+Configure it in `.env`: `LLM_PROVIDER`, the matching API key, and optionally `LLM_MODEL` and `LLM_FALLBACK_MODEL`. For real public transport routes, also set `HERE_API_KEY` (see [Route optimizer](#route-optimizer)); for the weather, `OPENWEATHER_API_KEY` (see [Weather](#weather)).
 
 ```bash
 cd backend
@@ -124,6 +124,7 @@ python evals/selection_eval.py     # live eval against the real LLM + DB (costs 
 - **Transit:** legs over 2.5 km (e.g. the centre to Belém) are ridden by metro, tram, bus or train when that is faster than walking. Walking-only trips ride nothing; transit-only trips ride every leg over 1 km. The optimizer minimises total travel time; each stop says how to get there (`travel_mode`), and the map geometry is split into walking and transit segments.
 - **Real timetables:** with `HERE_API_KEY` set, ride times and routes come from the HERE Public Transit API v8 (midday on the next weekday). HERE has no transit matrix, so the plan is made with estimated ride times (10 min overhead + 15 km/h), the real routes of the legs it rides are fetched, and the plan is made again until it only rides known routes (at most 3 rounds; answers are cached in memory). A ridden leg is drawn along the line and its stop lists the rides (`rides`: line, colour, where to get on and off, stops, direction). Without a key, or when HERE fails, rides keep the estimate; `transit_source` in the response says which (`here`, `estimate`, `mixed`).
 - **Must-visit stops** are trimmed last and, if their day overflows, moved to the day that loses the fewest optional stops.
+- **Weather** (weather-aware plans only): outdoor stops are kept out of rain, fog and darkness; see [Weather](#weather).
 
 Results against LLM-only ordering are in [docs/benchmark.md](docs/benchmark.md): **55% less walking than the selection order, and on par with an itinerary the LLM arranged itself, with zero route crossings.**
 
@@ -131,6 +132,22 @@ Results against LLM-only ordering are in [docs/benchmark.md](docs/benchmark.md):
 cd backend
 python evals/route_benchmark.py    # live benchmark (LLM + OSRM)
 ```
+
+## Weather
+
+Set `OPENWEATHER_API_KEY` (a free OpenWeatherMap key is enough; new keys can take a couple of hours to activate). `app/services/weather_service.py` fetches the [5 day / 3 hour forecast](https://openweathermap.org/forecast5) for the city (temperature, chance of rain or snow, fog, visibility, sunrise and sunset), caches it for 30 minutes, and maps it to the trip's days in the city's time zone. Without a key, or when OpenWeatherMap fails, plans simply have no weather.
+
+**Every plan shows it.** Days have a date (`start_date`, tomorrow by default) and a forecast for their sightseeing hours; each stop says whether it is `outdoor` and gets the forecast at its arrival, with a `warning` when rain, fog or darkness spoils an outdoor visit. Days past the forecast's 5-day reach have no weather.
+
+**Weather-aware plans** (`"weather_aware": true`, the "Optimize route based on weather conditions" checkbox) use it to plan:
+
+- **Indoor or outdoor:** from the category and OSM tags. Museums, galleries, churches, theatres, palaces, monasteries, market halls and the aquarium are indoor; viewpoints, parks, statues, castle walls, aqueducts, open-air markets and most attractions are outdoor.
+- **Bad minutes:** each minute of a day gets a badness from 0 to 1 for outdoor sights: rain, drizzle, snow and thunderstorms by their chance, fog (visibility under 1 km) as 1, haze or mist as 0.5, and darkness outside sunrise to sunset as 1.
+- **Selection:** the LLM sees each day's weather and which candidates are outdoor, and may pick at most as many outdoor places as the dry, light share of the sightseeing hours allows. A guard enforces it: the least important outdoor picks give their slot to the best-ranked indoor candidates left, which come from the same interest- and distance-ranked pool. Must-visit places are never swapped, and every swap is listed (`weather_swaps`).
+- **Routing** (soft time windows): the plan is made for travel time as before, then an outdoor visit costs up to 45 more minutes of travel for its share of bad minutes. Days are matched to the dates that suit them, each day is reordered, and outdoor stops caught in bad weather move to another day, alone or in exchange for an indoor stop, while that pays off. Days keep to their time budget, and dry, light days keep the plain plan. On random trips, outdoor visits meet 80–100% less bad weather for 5–20% more travel.
+- **Replacing stops** fetches the latest forecast for the day; the LLM sees it and the day is ordered around it.
+
+Limits: days still start at 09:30 and never wait for rain to pass; and the forecast's 3-hour steps blur the exact hour a shower starts.
 
 ## Everyday commands
 
