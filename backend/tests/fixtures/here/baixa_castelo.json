@@ -1,0 +1,230 @@
+{
+ "routes": [
+  {
+   "id": "R0",
+   "sections": [
+    {
+     "id": "R0-S0",
+     "type": "pedestrian",
+     "travelSummary": {
+      "duration": 300,
+      "length": 291
+     },
+     "departure": {
+      "time": "2026-10-28T12:01:00Z",
+      "place": {
+       "type": "place",
+       "location": {
+        "lat": 38.711,
+        "lng": -9.137
+       }
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:06:00Z",
+      "place": {
+       "name": "R. Madalena",
+       "type": "station",
+       "location": {
+        "lat": 38.709887,
+        "lng": -9.135032
+       },
+       "id": "71370_2295",
+       "code": "5603"
+      }
+     },
+     "polyline": "BGuu36pCty1tRthB6M3NgFzU8GrJ4DwCgKsE8QoG8akDwMgF0P_EwChKkE",
+     "transport": {
+      "mode": "pedestrian"
+     }
+    },
+    {
+     "id": "R0-S1",
+     "type": "transit",
+     "travelSummary": {
+      "duration": 240,
+      "length": 879
+     },
+     "departure": {
+      "time": "2026-10-28T12:06:00Z",
+      "place": {
+       "name": "R. Madalena",
+       "type": "station",
+       "location": {
+        "lat": 38.709887,
+        "lng": -9.135032
+       },
+       "id": "71370_2295",
+       "code": "5603"
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:10:00Z",
+      "place": {
+       "name": "S. Tomé",
+       "type": "station",
+       "location": {
+        "lat": 38.714387,
+        "lng": -9.130704
+       },
+       "id": "71370_593",
+       "code": "13815"
+      }
+     },
+     "polyline": "BH8i0qiX_wznuF0sEn4B0_C0xE0FgjB32IgmW7Lsd7Lo2CgZkkC4iDsvCsiBgmC89B46Q40Ew_NsnBk2D4kC02E80D81F41Bg8B8gDkpC8iC8kBozB0Fg7E3XgwCoQwvBsT8mFslCksDoqDssB4SopB7Vw_D3qEsxB31BsnB3S4mBwC8lD4rBgmC4Ns9UrsBghCjN06Cj6Bo4BokBsiB3I8VrO",
+     "transport": {
+      "mode": "bus",
+      "name": "10B",
+      "category": "Bus",
+      "headsign": "Campo Cebolas",
+      "shortName": "10B",
+      "longName": "Campo Cebolas / circulação Graça"
+     },
+     "intermediateStops": [
+      {
+       "departure": {
+        "time": "2026-10-28T12:07:00Z",
+        "place": {
+         "name": "Sé",
+         "type": "station",
+         "location": {
+          "lat": 38.709764,
+          "lng": -9.133763
+         },
+         "id": "71370_585",
+         "code": "13801"
+        }
+       },
+       "offset": 4
+      },
+      {
+       "departure": {
+        "time": "2026-10-28T12:08:00Z",
+        "place": {
+         "name": "Limoeiro",
+         "type": "station",
+         "location": {
+          "lat": 38.71033,
+          "lng": -9.131624
+         },
+         "id": "71370_587",
+         "code": "13803"
+        }
+       },
+       "offset": 11
+      },
+      {
+       "departure": {
+        "time": "2026-10-28T12:08:00Z",
+        "place": {
+         "name": "Miradouro Sta. Luzia",
+         "type": "station",
+         "location": {
+          "lat": 38.711584,
+          "lng": -9.13057
+         },
+         "id": "71370_589",
+         "code": "13805"
+        }
+       },
+       "offset": 21
+      },
+      {
+       "departure": {
+        "time": "2026-10-28T12:09:00Z",
+        "place": {
+         "name": "Lg. Portas Sol",
+         "type": "station",
+         "location": {
+          "lat": 38.712431,
+          "lng": -9.130515
+         },
+         "id": "71370_595",
+         "code": "13811"
+        }
+       },
+       "offset": 26
+      }
+     ],
+     "agency": {
+      "id": "71370_6b86b27",
+      "name": "Carris",
+      "website": "http://www.carris.pt"
+     }
+    },
+    {
+     "id": "R0-S2",
+     "type": "pedestrian",
+     "travelSummary": {
+      "duration": 480,
+      "length": 456
+     },
+     "departure": {
+      "time": "2026-10-28T12:10:00Z",
+      "place": {
+       "name": "S. Tomé",
+       "type": "station",
+       "location": {
+        "lat": 38.714387,
+        "lng": -9.130704
+       },
+       "id": "71370_593",
+       "code": "13815"
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:18:00Z",
+      "place": {
+       "type": "place",
+       "location": {
+        "lat": 38.7139,
+        "lng": -9.1335
+       }
+      }
+     },
+     "polyline": "BGyg-6pC9uptR1BevCUvCAzFvC0FvH_E7GnG7GnGnGjDjDU3IUnGTjDnBvCjD7BnLnB7BT7B7BUrEoBToLUgFUgP7BsJrEoG7GwC3I8BnLAnL_EnsC7BzFnG3IjDjD_J_EjFrB",
+     "transport": {
+      "mode": "pedestrian"
+     }
+    }
+   ]
+  },
+  {
+   "id": "R1",
+   "sections": [
+    {
+     "id": "R1-S0",
+     "type": "pedestrian",
+     "travelSummary": {
+      "duration": 1225,
+      "length": 1152
+     },
+     "departure": {
+      "time": "2026-10-28T12:00:00Z",
+      "place": {
+       "type": "place",
+       "location": {
+        "lat": 38.7110151,
+        "lng": -9.1369346
+       }
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:20:25Z",
+      "place": {
+       "type": "place",
+       "location": {
+        "lat": 38.7139881,
+        "lng": -9.1340324
+       }
+      }
+     },
+     "polyline": "BGuu36pCty1tRiJtDoGsYkIoa4I3DsOzFsTjIsE7BofvMoGkc8BsJ3DkITsJnBgF7BA7BUoBwHoBsEU4DAkDvCkI_TkhBjDgFjD0FzU8LzF4IvHkNnB0FjDwW7BsJjDkXnGoL0KoBwgB8B4DgK8BkDnBrOA3DoB3D8QTgFoB7BnGTjD7BzFzFsEjIkDnGvC7G_EjIrJTrE4IvMgPrTwMnL8LjDsnBU4hBoG0IsC",
+     "transport": {
+      "mode": "pedestrian"
+     }
+    }
+   ]
+  }
+ ]
+}

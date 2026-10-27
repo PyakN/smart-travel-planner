@@ -1,0 +1,257 @@
+{
+ "routes": [
+  {
+   "id": "R0",
+   "sections": [
+    {
+     "id": "R0-S0",
+     "type": "pedestrian",
+     "travelSummary": {
+      "duration": 960,
+      "length": 984
+     },
+     "departure": {
+      "time": "2026-10-28T12:03:00Z",
+      "place": {
+       "type": "place",
+       "location": {
+        "lat": 38.7155,
+        "lng": -9.1365
+       }
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:19:00Z",
+      "place": {
+       "name": "Chiado",
+       "type": "station",
+       "location": {
+        "lat": 38.710427,
+        "lng": -9.142072
+       },
+       "id": "71370_78",
+       "code": "10514"
+      }
+     },
+     "polyline": "BG-og7pC_10tR-F7QvMnG4D3InQjI7G_EvMnL3DvCvHjDvHT3DUvCU3DoB3IwC7GU3DTrEnG7BnB_ET_OoG7G8B_E7BjD3D3DvMvCrJvCnGzFzK_EvH7BzFjD7LUrJrE3DnBvCrEnQzFrY3DjN_sBnBrlCT7B7LnBnL7BvMvCnQjDvWrEzZ7BvM7BvM_Evb_EvRrEgPxBiD",
+     "transport": {
+      "mode": "pedestrian"
+     }
+    },
+    {
+     "id": "R0-S1",
+     "type": "transit",
+     "travelSummary": {
+      "duration": 840,
+      "length": 1680
+     },
+     "departure": {
+      "time": "2026-10-28T12:19:00Z",
+      "place": {
+       "name": "Chiado",
+       "type": "station",
+       "location": {
+        "lat": 38.710427,
+        "lng": -9.142072
+       },
+       "id": "71370_78",
+       "code": "10514"
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:33:00Z",
+      "place": {
+       "name": "Estrela (Basílica)",
+       "type": "station",
+       "location": {
+        "lat": 38.713722,
+        "lng": -9.160229
+       },
+       "id": "71370_1705",
+       "code": "8112"
+      }
+     },
+     "polyline": "BHgw-qiXzt8ruFsT7fo9B_zF8a32Ig4D7yE4N_xBTz6C3Sv9E36BruP3Iv2Fo9B77M0nEnvc4In7CoLj7DkhBztV8f7vNjmB_mJ_Y70IrsB3tP3S7vDn7Cz8LzUrkFsJ_0C8LjmBsEnQ4pCr1E0sE3qEk1BvxFskFvgL4jF_9KkhL3pb8kB37DkgE7vNkc3qE8zB7_Ksd31L0FvjC8pBzrH0oB32Dk4Mrtc46BzlF4_B77H",
+     "transport": {
+      "mode": "bus",
+      "name": "28E",
+      "category": "Bus",
+      "headsign": "Campo Ourique (Prazeres)",
+      "shortName": "28E",
+      "longName": "Martim Moniz - Campo Ourique (Prazeres)"
+     },
+     "intermediateStops": [
+      {
+       "departure": {
+        "time": "2026-10-28T12:21:00Z",
+        "place": {
+         "name": "Pç. Luis Camões (B. Alto)",
+         "type": "station",
+         "location": {
+          "lat": 38.710791,
+          "lng": -9.14359
+         },
+         "id": "71370_76",
+         "code": "10512"
+        }
+       },
+       "offset": 7
+      },
+      {
+       "departure": {
+        "time": "2026-10-28T12:22:00Z",
+        "place": {
+         "name": "Calhariz (Bica)",
+         "type": "station",
+         "location": {
+          "lat": 38.710804,
+          "lng": -9.145319
+         },
+         "id": "71370_74",
+         "code": "10510"
+        }
+       },
+       "offset": 10
+      },
+      {
+       "departure": {
+        "time": "2026-10-28T12:23:00Z",
+        "place": {
+         "name": "Sta. Catarina",
+         "type": "station",
+         "location": {
+          "lat": 38.711016,
+          "lng": -9.146928
+         },
+         "id": "71370_2055",
+         "code": "9906"
+        }
+       },
+       "offset": 12
+      },
+      {
+       "departure": {
+        "time": "2026-10-28T12:25:00Z",
+        "place": {
+         "name": "Cç. Combro",
+         "type": "station",
+         "location": {
+          "lat": 38.711032,
+          "lng": -9.149835
+         },
+         "id": "71370_2054",
+         "code": "9904"
+        }
+       },
+       "offset": 17
+      },
+      {
+       "departure": {
+        "time": "2026-10-28T12:26:00Z",
+        "place": {
+         "name": "R. Poiais S. Bento",
+         "type": "station",
+         "location": {
+          "lat": 38.710772,
+          "lng": -9.151864
+         },
+         "id": "71370_1443",
+         "code": "6724"
+        }
+       },
+       "offset": 23
+      },
+      {
+       "departure": {
+        "time": "2026-10-28T12:27:00Z",
+        "place": {
+         "name": "R. S. Bento / Cç. Estrela",
+         "type": "station",
+         "location": {
+          "lat": 38.711486,
+          "lng": -9.153188
+         },
+         "id": "71370_2710",
+         "code": "6722"
+        }
+       },
+       "offset": 28
+      },
+      {
+       "departure": {
+        "time": "2026-10-28T12:29:00Z",
+        "place": {
+         "name": "Cç. Estrela / R. Borges Carneiro",
+         "type": "station",
+         "location": {
+          "lat": 38.712383,
+          "lng": -9.155346
+         },
+         "id": "71370_2708",
+         "code": "6720"
+        }
+       },
+       "offset": 31
+      },
+      {
+       "departure": {
+        "time": "2026-10-28T12:30:00Z",
+        "place": {
+         "name": "Cç. Estrela / R. Dr. Teófilo Braga",
+         "type": "station",
+         "location": {
+          "lat": 38.712764,
+          "lng": -9.157431
+         },
+         "id": "71370_2706",
+         "code": "6718"
+        }
+       },
+       "offset": 35
+      }
+     ],
+     "agency": {
+      "id": "71370_6b86b27",
+      "name": "Carris",
+      "website": "http://www.carris.pt"
+     }
+    },
+    {
+     "id": "R0-S2",
+     "type": "pedestrian",
+     "travelSummary": {
+      "duration": 60,
+      "length": 61
+     },
+     "departure": {
+      "time": "2026-10-28T12:33:00Z",
+      "place": {
+       "name": "Estrela (Basílica)",
+       "type": "station",
+       "location": {
+        "lat": 38.713722,
+        "lng": -9.160229
+       },
+       "id": "71370_1705",
+       "code": "8112"
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:34:00Z",
+      "place": {
+       "type": "place",
+       "location": {
+        "lat": 38.7139,
+        "lng": -9.16
+       }
+      }
+     },
+     "polyline": "BGw386pC_ijvRoB7G4N4DlE-R",
+     "transport": {
+      "mode": "pedestrian"
+     }
+    }
+   ]
+  }
+ ]
+}

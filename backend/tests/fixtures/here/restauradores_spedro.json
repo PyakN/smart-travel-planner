@@ -1,0 +1,51 @@
+{
+ "notices": [
+  {
+   "title": "Departure and arrival locations are too close",
+   "code": "departureArrivalTooClose"
+  },
+  {
+   "title": "Transit route between origin and destination is not possible given current input parameters",
+   "code": "noTransitRouteFound"
+  }
+ ],
+ "routes": [
+  {
+   "id": "R0",
+   "sections": [
+    {
+     "id": "R0-S0",
+     "type": "pedestrian",
+     "travelSummary": {
+      "duration": 668,
+      "length": 624
+     },
+     "departure": {
+      "time": "2026-10-28T12:00:00Z",
+      "place": {
+       "type": "place",
+       "location": {
+        "lat": 38.7157637,
+        "lng": -9.1414792
+       }
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:11:08Z",
+      "place": {
+       "type": "place",
+       "location": {
+        "lat": 38.7153864,
+        "lng": -9.1446414
+       }
+      }
+     },
+     "polyline": "BGo3g7pCtu-tR0V5SwHjIwMnQnBzFjDrEvRAzFwCsOrT3DnGvM3SrJ_JzFjDjXjInLnGzFjDzPvH3mB3S3I7GoLnGwMoB0tB7a8M9G",
+     "transport": {
+      "mode": "pedestrian"
+     }
+    }
+   ]
+  }
+ ]
+}

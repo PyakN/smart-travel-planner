@@ -1,0 +1,278 @@
+{
+ "routes": [
+  {
+   "id": "R0",
+   "sections": [
+    {
+     "id": "R0-S0",
+     "type": "pedestrian",
+     "travelSummary": {
+      "duration": 120,
+      "length": 115
+     },
+     "departure": {
+      "time": "2026-10-28T12:13:00Z",
+      "place": {
+       "type": "place",
+       "location": {
+        "lat": 38.7139,
+        "lng": -9.1378
+       }
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:15:00Z",
+      "place": {
+       "name": "Rossio",
+       "type": "station",
+       "location": {
+        "lat": 38.71384,
+        "lng": -9.138957
+       },
+       "id": "71396_77",
+       "url": "https://www.metrolisboa.pt/informacao/planear-a-viagem/diagrama-e-mapa-de-rede/rossio/"
+      }
+     },
+     "polyline": "BG6o96pClq3tRhBtG3DnV8GUjDjSpGra",
+     "transport": {
+      "mode": "pedestrian"
+     }
+    },
+    {
+     "id": "R0-S1",
+     "type": "transit",
+     "travelSummary": {
+      "duration": 180,
+      "length": 1171
+     },
+     "departure": {
+      "time": "2026-10-28T12:15:00Z",
+      "place": {
+       "name": "Rossio",
+       "type": "station",
+       "location": {
+        "lat": 38.71384,
+        "lng": -9.138957
+       },
+       "id": "71396_77",
+       "url": "https://www.metrolisboa.pt/informacao/planear-a-viagem/diagrama-e-mapa-de-rede/rossio/"
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:18:00Z",
+      "place": {
+       "name": "Cais do Sodré",
+       "type": "station",
+       "location": {
+        "lat": 38.706154,
+        "lng": -9.145029
+       },
+       "id": "71396_29",
+       "url": "https://www.metrolisboa.pt/informacao/planear-a-viagem/diagrama-e-mapa-de-rede/cais-do-sodre/"
+      }
+     },
+     "polyline": "BHoggtiX_w-puFn_F75N7uGrqHr7GroDr_JnfjuR89BrtNvCv6InB3kW4rB_pK31Bz-F37D_lHvzEn7HjkH7qI7hKroDz6CvsFjsI7yE_7QnxCjgJ7uB_oInQntY",
+     "transport": {
+      "mode": "subway",
+      "name": "Vd",
+      "category": "Subway, Metro",
+      "color": "#009933",
+      "headsign": "Cais Do Sodré",
+      "shortName": "Vd",
+      "longName": "Verde"
+     },
+     "intermediateStops": [
+      {
+       "departure": {
+        "time": "2026-10-28T12:16:00Z",
+        "place": {
+         "name": "Baixa / Chiado",
+         "type": "station",
+         "location": {
+          "lat": 38.71067,
+          "lng": -9.139091
+         },
+         "id": "71396_57",
+         "url": "https://www.metrolisboa.pt/informacao/planear-a-viagem/diagrama-e-mapa-de-rede/baixa-chiado/"
+        }
+       },
+       "offset": 6
+      }
+     ],
+     "agency": {
+      "id": "71396_a5713dc",
+      "name": "Metropolitano de Lisboa, E.P.E.",
+      "website": "https://www.metrolisboa.pt"
+     },
+     "attributions": [
+      {
+       "id": "54a660d3bd5a6af7f3a703c8433f5c8f",
+       "href": "https://www.metrolisboa.pt",
+       "text": "Information for public transit provided by Metropolitano de Lisboa",
+       "type": "disclaimer"
+      }
+     ]
+    },
+    {
+     "id": "R0-S2",
+     "type": "pedestrian",
+     "travelSummary": {
+      "duration": 120,
+      "length": 120
+     },
+     "departure": {
+      "time": "2026-10-28T12:18:00Z",
+      "place": {
+       "name": "Cais do Sodré",
+       "type": "station",
+       "location": {
+        "lat": 38.706154,
+        "lng": -9.145029
+       },
+       "id": "71396_29",
+       "url": "https://www.metrolisboa.pt/informacao/planear-a-viagem/diagrama-e-mapa-de-rede/cais-do-sodre/"
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:20:00Z",
+      "place": {
+       "name": "Cais do Sodre",
+       "type": "station",
+       "location": {
+        "lat": 38.706142,
+        "lng": -9.145374
+       },
+       "id": "113155_7864"
+      }
+     },
+     "polyline": "BGunu6pC9rluRKtKIjL",
+     "transport": {
+      "mode": "pedestrian"
+     }
+    },
+    {
+     "id": "R0-S3",
+     "type": "transit",
+     "travelSummary": {
+      "duration": 420,
+      "length": 4775
+     },
+     "departure": {
+      "time": "2026-10-28T12:20:00Z",
+      "place": {
+       "name": "Cais do Sodre",
+       "type": "station",
+       "location": {
+        "lat": 38.706142,
+        "lng": -9.145374
+       },
+       "id": "113155_7864"
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:27:00Z",
+      "place": {
+       "name": "Belem",
+       "type": "station",
+       "location": {
+        "lat": 38.696168,
+        "lng": -9.197623
+       },
+       "id": "113155_7867"
+      }
+     },
+     "polyline": "BHwjkoiXz58tuFwlBr5lBkkH39lBoaj0J0Uzn0C3nD3lYzKjuCzgF_tSrzer3kCzsEv-Lr6ErlRn9Gv0f7iCv9T8antvCAn5rB7a3kMriG3ubriGjrQn1F34Mv0BzkDz2O3iczsE7hKztf3-gC7a7iCvyMvgf_6J3iczjLz8pBvzEvtWroX7mxEvmI7n3C",
+     "transport": {
+      "mode": "cityTrain",
+      "name": "Linha de Cascais",
+      "category": "Suburban Railway",
+      "color": "#FFA500",
+      "textColor": "#FFFFFF",
+      "headsign": "Cascais",
+      "shortName": "Linha de Cascais"
+     },
+     "intermediateStops": [
+      {
+       "departure": {
+        "time": "2026-10-28T12:22:00Z",
+        "place": {
+         "name": "Santos",
+         "type": "station",
+         "location": {
+          "lat": 38.706155,
+          "lng": -9.155312
+         },
+         "id": "113155_7865"
+        }
+       },
+       "offset": 5
+      },
+      {
+       "departure": {
+        "time": "2026-10-28T12:25:00Z",
+        "place": {
+         "name": "Alcantara -  Mar",
+         "type": "station",
+         "location": {
+          "lat": 38.702351,
+          "lng": -9.174021
+         },
+         "id": "113155_7866"
+        }
+       },
+       "duration": 60,
+       "offset": 19
+      }
+     ],
+     "agency": {
+      "id": "71401_73a4c14",
+      "name": "CP - Comboios de Portugal",
+      "website": "http://www.cp.pt"
+     },
+     "attributions": [
+      {
+       "id": "074bfa5195c32b76d063fbd3c2a8caa1",
+       "href": "http://www.cp.pt",
+       "text": "Information for public transit provided by CP - Comboios de Portugal",
+       "type": "disclaimer"
+      }
+     ]
+    },
+    {
+     "id": "R0-S4",
+     "type": "pedestrian",
+     "travelSummary": {
+      "duration": 600,
+      "length": 572
+     },
+     "departure": {
+      "time": "2026-10-28T12:27:00Z",
+      "place": {
+       "name": "Belem",
+       "type": "station",
+       "location": {
+        "lat": 38.696168,
+        "lng": -9.197623
+       },
+       "id": "113155_7867"
+      }
+     },
+     "arrival": {
+      "time": "2026-10-28T12:37:00Z",
+      "place": {
+       "type": "place",
+       "location": {
+        "lat": 38.6967,
+        "lng": -9.203
+       }
+      }
+     },
+     "polyline": "BG-m65pCtisxRNlFnGnnC8GnBoLvCvCnL3DrTnG7kB4NrE8LrE7BjNwC3I4D_E_EjSUrOjD_TwHnBjDrd8G7B0FvCoBjXwBjrB",
+     "transport": {
+      "mode": "pedestrian"
+     }
+    }
+   ]
+  }
+ ]
+}

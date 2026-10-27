@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     osrm_base_url: str = "https://routing.openstreetmap.de/routed-foot"
     osrm_timeout_s: float = 10.0
 
+    # Public transport: real routes and timetables from HERE when a key is set; otherwise
+    # ride times are a fixed-speed estimate (app.optimizer.planner).
+    transit_provider: Literal["here", "estimate"] = "here"
+    here_api_key: SecretStr | None = None
+    here_transit_url: str = "https://transit.router.hereapi.com/v8/routes"
+    here_timeout_s: float = 8.0
+
 
 @lru_cache
 def get_settings() -> Settings:
