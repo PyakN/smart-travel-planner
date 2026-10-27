@@ -42,6 +42,13 @@ def test_notable_places_rank_first(db_session: SessionFactory) -> None:
     assert "Museu de Serralves" not in names(found)  # Porto
 
 
+def test_candidates_say_whether_they_are_outdoors(db_session: SessionFactory) -> None:
+    outdoor = {c.name: c.outdoor for c in candidates(db_session)}
+    assert outdoor["Miradouro de Santa Luzia"] is True
+    assert outdoor["Castelo de São Jorge"] is True
+    assert outdoor["Museu Calouste Gulbenkian"] is False
+
+
 def test_interest_boost(db_session: SessionFactory) -> None:
     assert names(candidates(db_session, interests=["viewpoint"]))[:2] == [
         "Torre de Belém",
