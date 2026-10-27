@@ -1,13 +1,15 @@
 """Candidate generation: rank a city's places for a trip before the LLM picks from them."""
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import ColumnElement, Float, case, func, or_, select
+from geoalchemy2 import Geography
+from sqlalchemy import ColumnElement, Float, case, cast, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Category, Place
+from app.optimizer.geometry import LatLon
 from app.repositories.search import name_matches
 
 # Score weights. Notability (Wikidata/Wikipedia) keeps 700 street-art pieces from
@@ -16,6 +18,10 @@ WEIGHT_WIKIDATA = 2.0
 WEIGHT_WIKIPEDIA = 1.0
 WEIGHT_INTEREST = 2.5
 WEIGHT_KEYWORD = 4.0
+# Closeness to an anchor (the hotel, a must-visit place): the full weight at the anchor,
+# fading linearly to nothing at the proximity radius.
+WEIGHT_PROXIMITY = 3.0
+DEFAULT_PROXIMITY_RADIUS_M = 2500.0
 HINT_MAX_CHARS = 80
 
 
@@ -28,6 +34,8 @@ class Candidate:
     hint: str | None
     lat: float
     lon: float
+    # Metres to the nearest anchor; None when the search had no anchors.
+    distance_m: float | None = None
 
 
 def _hint(name: str, tags: dict[str, str]) -> str | None:
@@ -40,6 +48,37 @@ def _as_score(condition: ColumnElement[bool], weight: float) -> ColumnElement[An
     return case((condition, weight), else_=0.0)
 
 
+def _geography(point: LatLon) -> ColumnElement[Any]:
+    return cast(func.ST_SetSRID(func.ST_MakePoint(point.lon, point.lat), 4326), Geography)
+
+
+def _select(score: ColumnElement[Any], distance: ColumnElement[Any]) -> Any:
+    point = func.geometry(Place.geom)
+    return select(
+        Place.id,
+        Place.name,
+        Category.slug.label("category"),
+        Place.tags,
+        score.label("score"),
+        func.ST_Y(point).label("lat"),
+        func.ST_X(point).label("lon"),
+        distance.label("distance_m"),
+    ).join(Category)
+
+
+def _to_candidate(row: Any) -> Candidate:
+    return Candidate(
+        id=row["id"],
+        name=row["name"],
+        category=row["category"],
+        score=row["score"],
+        hint=_hint(row["name"], row["tags"]),
+        lat=row["lat"],
+        lon=row["lon"],
+        distance_m=row["distance_m"],
+    )
+
+
 async def find_candidates(
     session: AsyncSession,
     *,
@@ -47,6 +86,9 @@ async def find_candidates(
     interests: Sequence[str] = (),
     avoid: Sequence[str] = (),
     keywords: Sequence[str] = (),
+    anchors: Sequence[LatLon] = (),
+    proximity_radius_m: float = DEFAULT_PROXIMITY_RADIUS_M,
+    exclude_ids: Collection[int] = (),
     limit: int = 60,
 ) -> list[Candidate]:
     keyword_match = name_matches(keywords)
@@ -55,39 +97,33 @@ async def find_candidates(
         + _as_score(Place.tags.has_key("wikipedia"), WEIGHT_WIKIPEDIA)
         + _as_score(Category.slug.in_(interests), WEIGHT_INTEREST)
         + _as_score(keyword_match, WEIGHT_KEYWORD)
-    ).cast(Float)
+    )
+    distance: ColumnElement[Any] = null()
+    if anchors:
+        distance = func.least(*(func.ST_Distance(Place.geom, _geography(a)) for a in anchors))
+        closeness = func.greatest(0.0, 1.0 - distance / proximity_radius_m)
+        score = score + WEIGHT_PROXIMITY * closeness
+    score = score.cast(Float)
 
     conditions = [Place.city == city]
     if avoid:
         # An explicitly named place survives even if its category is avoided.
         conditions.append(or_(Category.slug.not_in(avoid), keyword_match))
+    if exclude_ids:
+        conditions.append(Place.id.not_in(exclude_ids))
 
-    point = func.geometry(Place.geom)
-    stmt = (
-        select(
-            Place.id,
-            Place.name,
-            Category.slug.label("category"),
-            Place.tags,
-            score.label("score"),
-            func.ST_Y(point).label("lat"),
-            func.ST_X(point).label("lon"),
-        )
-        .join(Category)
-        .where(*conditions)
-        .order_by(score.desc(), Place.id)
-        .limit(limit)
-    )
-    rows = (await session.execute(stmt)).mappings()
-    return [
-        Candidate(
-            id=row["id"],
-            name=row["name"],
-            category=row["category"],
-            score=row["score"],
-            hint=_hint(row["name"], row["tags"]),
-            lat=row["lat"],
-            lon=row["lon"],
-        )
-        for row in rows
-    ]
+    # Ties go to the closer place, then to the lower id (stable results).
+    order_by = [score.desc(), *([distance] if anchors else []), Place.id]
+    stmt = _select(score, distance).where(*conditions).order_by(*order_by).limit(limit)
+    return [_to_candidate(row) for row in (await session.execute(stmt)).mappings()]
+
+
+async def get_candidates(
+    session: AsyncSession, place_ids: Sequence[int], *, city: str
+) -> list[Candidate]:
+    """The given places of a city, in the given order; unknown ids are left out."""
+    if not place_ids:
+        return []
+    stmt = _select(cast(0.0, Float), null()).where(Place.city == city, Place.id.in_(place_ids))
+    found = {c.id: c for c in map(_to_candidate, (await session.execute(stmt)).mappings())}
+    return [found[i] for i in dict.fromkeys(place_ids) if i in found]
