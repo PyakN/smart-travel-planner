@@ -46,6 +46,7 @@ export default function Planner() {
         if (cancelled) return;
         setPlan(saved);
         setText(saved.request_text);
+        setStart(saved.start);
         setMustVisit(saved.must_visit);
         setModes(saved.modes);
         setSelectedDay(saved.edit?.day ?? 1);

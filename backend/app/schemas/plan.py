@@ -127,6 +127,7 @@ class PlanResponse(BaseModel):
     # Defaults keep plans saved before these fields existed readable.
     modes: list[TravelMode] = Field(default_factory=lambda: list(ALL_MODES))
     must_visit: list[PlaceRef] = Field(default_factory=list)
+    start: StartIn | None = None
     # Set on versions made by replacing stops: the plan this one was made from, and how.
     parent_id: int | None = None
     edit: PlanEdit | None = None

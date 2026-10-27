@@ -116,6 +116,7 @@ def test_plan_end_to_end(
 def test_hotel_round_trip(client: TestClient, llm: FakeProvider, place_ids: dict[str, int]) -> None:
     queue_relaxed_day(llm, place_ids)
     plan = post_plan(client, start={**ROSSIO, "round_trip": True}).json()
+    assert plan["start"] == {**ROSSIO, "round_trip": True}  # reopened plans show the hotel
     [day] = plan["days"]
     hotel = [ROSSIO["lon"], ROSSIO["lat"]]
     assert day["segments"][0]["geometry"][0] == day["segments"][-1]["geometry"][-1] == hotel

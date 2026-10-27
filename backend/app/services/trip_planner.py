@@ -261,6 +261,7 @@ async def plan_trip(
             timings_ms=watch.total(),
             modes=list(modes),
             must_visit=[PlaceRef(place_id=p.id, name=p.name) for p in selection.must_visit],
+            start=start,
         ),
     )
 

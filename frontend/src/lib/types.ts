@@ -127,6 +127,7 @@ export interface PlanResponse {
   timings_ms: Record<string, number>;
   modes: TravelMode[];
   must_visit: PlaceRef[];
+  start: StartPoint | null;
   /** Set on versions made by replacing stops. */
   parent_id: number | null;
   edit: PlanEdit | null;
