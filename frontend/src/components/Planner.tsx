@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import PlanForm from "@/components/PlanForm";
 import PlanResult from "@/components/PlanResult";
 import { ApiError, createPlan, getPlan, replaceStops } from "@/lib/api";
-import { DEFAULT_DAY_END, DEFAULT_DAY_START, cityNow, localDate, startingNow } from "@/lib/format";
+import { DEFAULT_DAY_END, DEFAULT_DAY_START, cityDate, cityNow, startingNow } from "@/lib/format";
 import type { PlaceRef, PlanResponse, StartPoint, TravelMode } from "@/lib/types";
 
 // Leaflet touches `window`, so the map only renders in the browser.
@@ -24,7 +24,7 @@ function describe(error: unknown): string {
 
 /** A saved plan's first day, unless it is past: then tomorrow, for planning it again. */
 function upcoming(startDate: string | null): string {
-  return startDate && startDate >= localDate(0) ? startDate : localDate(1);
+  return startDate && startDate >= cityDate(0) ? startDate : cityDate(1);
 }
 
 export default function Planner() {
@@ -35,7 +35,7 @@ export default function Planner() {
   const [start, setStart] = useState<StartPoint | null>(null);
   const [mustVisit, setMustVisit] = useState<PlaceRef[]>([]);
   const [modes, setModes] = useState<TravelMode[]>(["walk", "transit"]);
-  const [startDate, setStartDate] = useState(() => localDate(1));
+  const [startDate, setStartDate] = useState(() => cityDate(1));
   const [weatherAware, setWeatherAware] = useState(false);
   // The start the traveller picked; null for the default: 09:30, or now for a trip today.
   const [pickedStart, setPickedStart] = useState<string | null>(null);

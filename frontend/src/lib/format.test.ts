@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   categoryIcon,
   categoryLabel,
+  cityDate,
   cityNow,
   clockMinutes,
   clockTime,
@@ -22,7 +23,6 @@ import {
   freeTimeLabel,
   hasWeather,
   hoursHint,
-  localDate,
   rideBadge,
   rideDetails,
   rideName,
@@ -258,10 +258,12 @@ describe("weather", () => {
     expect(formatDate("2027-01-01")).toBe("Fri 1 Jan");
   });
 
-  it("counts days from the browser's today", () => {
-    const evening = new Date(2026, 11, 31, 23, 30); // local time
-    expect(localDate(0, evening)).toBe("2026-12-31");
-    expect(localDate(1, evening)).toBe("2027-01-01");
+  it("counts days from the city's today, not the browser's", () => {
+    const newYearsEve = new Date(Date.UTC(2026, 11, 31, 23, 30)); // 23:30 in Lisbon
+    expect(cityDate(0, newYearsEve)).toBe("2026-12-31");
+    expect(cityDate(1, newYearsEve)).toBe("2027-01-01");
+    // Already the 1st in Kyiv, still the 31st in Lisbon.
+    expect(cityDate(0, newYearsEve, "Europe/Kyiv")).toBe("2027-01-01");
   });
 
   it("finds outdoor stops the weather spoils", () => {

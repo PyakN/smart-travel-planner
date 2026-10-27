@@ -317,11 +317,15 @@ export function formatDate(isoDate: string): string {
   });
 }
 
-/** "YYYY-MM-DD" of the day `days` after today, in the browser's time zone. */
-export function localDate(days = 0, now: Date = new Date()): string {
-  const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
+/**
+ * "YYYY-MM-DD" of the day `days` after today in the city: trip dates are the city's, so
+ * "today" is Lisbon's today wherever the traveller's browser is.
+ */
+export function cityDate(days = 0, now: Date = new Date(), timeZone = CITY_TIME_ZONE): string {
+  const [year, month, day] = cityNow(timeZone, now).date.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
 }
 
 /** Outdoor stops that rain, fog or darkness still spoil. */

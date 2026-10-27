@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import MustVisitPicker from "@/components/MustVisitPicker";
-import { CITY_NAME, clockTime, hoursHint, localDate } from "@/lib/format";
+import { CITY_NAME, cityDate, clockTime, hoursHint } from "@/lib/format";
 import type { PlaceRef, StartPoint, TravelMode } from "@/lib/types";
 
 const EXAMPLES = [
@@ -37,7 +37,7 @@ const FORECAST_DAYS = 5;
 
 function weatherHint(weatherAware: boolean, startDate: string): string {
   if (!weatherAware) return "Off: the plan ignores the weather, and no forecast is fetched.";
-  if (startDate > localDate(FORECAST_DAYS - 1)) {
+  if (startDate > cityDate(FORECAST_DAYS - 1)) {
     return "No forecast that far ahead yet: the plan will go without it.";
   }
   return "Rain, snow, fog and poor visibility within your hours (and only those) send outdoor stops to drier hours, or swap them for museums, churches and market halls.";
@@ -231,7 +231,7 @@ export default function PlanForm({
           <input
             type="date"
             value={startDate}
-            min={localDate(0)}
+            min={cityDate(0)}
             required
             disabled={loading}
             onChange={(event) => onStartDateChange(event.target.value)}
