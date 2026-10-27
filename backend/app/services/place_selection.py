@@ -5,12 +5,13 @@ The LLM never invents places: it may only return ids from the candidate list, an
 """
 
 import json
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingest.cities import CITIES, resolve_city
+from app.ingest.osm import normalize_name
 from app.llm.service import LLMService
 from app.optimizer.geometry import LatLon
 from app.optimizer.planner import ALL_MODES, TravelMode
@@ -92,25 +93,32 @@ class SelectionResult:
 def validate_selection(
     place_ids: Sequence[int], candidates: Sequence[Candidate], target: int
 ) -> tuple[list[Candidate], list[str]]:
-    """Keep known, unique ids up to `target`; backfill what had to be dropped from the ranking."""
+    """Keep known, unique places up to `target`; backfill what was dropped from the ranking.
+
+    Places with the same name count as duplicates: OSM often maps one sight twice (the
+    monastery and its museum wing, both "Mosteiro dos Jerónimos").
+    """
     by_id = {c.id: c for c in candidates}
     chosen: list[Candidate] = []
     seen: set[int] = set()
+    names: set[str] = set()
     unknown = duplicates = 0
     for place_id in place_ids:
-        if place_id in seen:
+        place = by_id.get(place_id)
+        if place_id in seen or (place and normalize_name(place.name) in names):
             duplicates += 1
-        elif place_id not in by_id:
+        elif place is None:
             unknown += 1
         else:
-            chosen.append(by_id[place_id])
+            chosen.append(place)
             seen.add(place_id)
+            names.add(normalize_name(place.name))
 
     warnings: list[str] = []
     if unknown:
         warnings.append(f"dropped {unknown} id(s) not in the candidate list")
     if duplicates:
-        warnings.append(f"dropped {duplicates} duplicate id(s)")
+        warnings.append(f"dropped {duplicates} duplicate place(s)")
     if len(chosen) > target:
         warnings.append(f"trimmed selection from {len(chosen)} to {target}")
         chosen = chosen[:target]
@@ -120,11 +128,23 @@ def validate_selection(
     missing = target - len(chosen)
     backfill = missing if not chosen else min(unknown + duplicates, missing)
     if backfill > 0:
-        extra = [c for c in candidates if c.id not in seen][:backfill]
+        extra = without_names([c for c in candidates if c.id not in seen], names)[:backfill]
         chosen.extend(extra)
         if extra:
             warnings.append(f"backfilled {len(extra)} place(s) from the ranking")
     return chosen, warnings
+
+
+def without_names(candidates: Sequence[Candidate], names: Iterable[str]) -> list[Candidate]:
+    """Candidates named unlike any of `names` (and unlike each other), accents ignored."""
+    taken = {normalize_name(n) for n in names}
+    kept = []
+    for c in candidates:
+        key = normalize_name(c.name)
+        if key not in taken:
+            kept.append(c)
+            taken.add(key)
+    return kept
 
 
 def validate_notes(notes: Sequence[PlaceNote], place_ids: Collection[int]) -> dict[int, str]:
@@ -222,6 +242,7 @@ async def select_places(
         exclude_ids=[m.id for m in must],
         limit=pool,
     )
+    candidates = without_names(candidates, [m.name for m in must])
     if not candidates:
         if not must:
             raise PlanningError("No places match this request.")

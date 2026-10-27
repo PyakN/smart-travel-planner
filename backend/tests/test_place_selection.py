@@ -14,6 +14,7 @@ from app.services.place_selection import (
     select_places,
     validate_notes,
     validate_selection,
+    without_names,
 )
 from tests.fakes import FakeProvider
 from tests.test_trip_schema import trip
@@ -43,7 +44,26 @@ class TestValidateSelection:
     def test_duplicates_are_dropped(self) -> None:
         places, warnings = validate_selection([2, 2, 2], CANDIDATES, target=1)
         assert ids(places) == [2]
-        assert "dropped 2 duplicate id(s)" in warnings
+        assert "dropped 2 duplicate place(s)" in warnings
+
+    def test_same_name_counts_as_duplicate(self) -> None:
+        twins = [
+            Candidate(1, "Mosteiro dos Jerónimos", "landmark", 9, None, lat=38.70, lon=-9.21),
+            Candidate(2, "mosteiro dos jeronimos", "museum", 8, None, lat=38.70, lon=-9.21),
+            Candidate(3, "Torre de Belém", "landmark", 7, None, lat=38.69, lon=-9.22),
+        ]
+        places, warnings = validate_selection([1, 2], twins, target=2)
+        assert ids(places) == [1, 3]  # the twin is dropped, the backfill skips it too
+        assert "dropped 1 duplicate place(s)" in warnings
+
+    def test_without_names(self) -> None:
+        twins = [
+            Candidate(1, "Sé de Lisboa", "religious", 9, None, lat=38.71, lon=-9.13),
+            Candidate(2, "Se de Lisboa", "religious", 8, None, lat=38.71, lon=-9.13),
+            Candidate(3, "Castelo", "landmark", 7, None, lat=38.71, lon=-9.13),
+        ]
+        assert ids(without_names(twins, [])) == [1, 3]
+        assert ids(without_names(twins, ["SÉ DE LISBOA"])) == [3]
 
     def test_trimmed_to_target(self) -> None:
         places, warnings = validate_selection([1, 2, 3, 4, 5], CANDIDATES, target=2)

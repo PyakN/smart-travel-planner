@@ -49,6 +49,7 @@ from app.services.place_selection import (
     proximity_radius_m,
     validate_notes,
     validate_selection,
+    without_names,
 )
 from app.services.trip_planner import (
     Stopwatch,
@@ -175,7 +176,10 @@ async def replace_stops(
         exclude_ids=sorted(planned | rejected),
         limit=REPLACE_POOL,
     )
-    fitting = [c for c in pool if visit_minutes(c.category) <= free_min]
+    planned_names = [s.name for d in plan.days for s in d.stops]
+    fitting = [
+        c for c in without_names(pool, planned_names) if visit_minutes(c.category) <= free_min
+    ]
     chosen: list[Candidate] = []
     notes: dict[int, str] = {}
     warnings: list[str] = []
