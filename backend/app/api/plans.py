@@ -1,5 +1,7 @@
 import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -13,26 +15,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["plans"])
 
 
-@router.post("/plan", status_code=status.HTTP_201_CREATED)
-async def create_plan(
-    body: PlanRequest,
-    session: SessionDep,
-    llm: LLMDep,
-    distances: DistancesDep,
-    settings: SettingsDep,
-) -> PlanResponse:
+@asynccontextmanager
+async def planning_errors(timeout_s: float) -> AsyncIterator[None]:
+    """Run planning work under a deadline and turn its failures into clear HTTP errors."""
     try:
-        async with asyncio.timeout(settings.plan_timeout_s):
-            return await plan_trip(
-                session=session,
-                llm=llm,
-                distances=distances,
-                text=body.text,
-                start=body.start,
-                default_city=settings.default_city,
-                must_visit=body.must_visit,
-                modes=body.modes,
-            )
+        async with asyncio.timeout(timeout_s):
+            yield
     except PlanningError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     except LLMBudgetExceededError as exc:
@@ -51,6 +39,27 @@ async def create_plan(
         raise HTTPException(
             status.HTTP_504_GATEWAY_TIMEOUT, "Planning took too long. Try a shorter trip."
         ) from exc
+
+
+@router.post("/plan", status_code=status.HTTP_201_CREATED)
+async def create_plan(
+    body: PlanRequest,
+    session: SessionDep,
+    llm: LLMDep,
+    distances: DistancesDep,
+    settings: SettingsDep,
+) -> PlanResponse:
+    async with planning_errors(settings.plan_timeout_s):
+        return await plan_trip(
+            session=session,
+            llm=llm,
+            distances=distances,
+            text=body.text,
+            start=body.start,
+            default_city=settings.default_city,
+            must_visit=body.must_visit,
+            modes=body.modes,
+        )
 
 
 @router.get("/plans/{plan_id}")

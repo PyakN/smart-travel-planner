@@ -1,9 +1,14 @@
-"""The full pipeline behind POST /plan: select places, optimize the route, save it."""
+"""The full pipeline behind POST /plan: select places, optimize the route, save it.
+
+The helpers that turn optimizer output into a saved PlanResponse are shared with plan
+editing (app.services.plan_editing).
+"""
 
 import asyncio
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +40,7 @@ def _clock(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
-class _Stopwatch:
+class Stopwatch:
     def __init__(self) -> None:
         self.started = self.lap_started = time.perf_counter()
         self.laps: dict[str, int] = {}
@@ -68,7 +73,7 @@ def _day_legs(day: DayPlan, start: StartIn | None) -> list[tuple[LatLon, LatLon,
     ]
 
 
-async def _segments(
+async def day_segments(
     day: DayPlan, start: StartIn | None, distances: DistanceProvider
 ) -> list[RouteSegment]:
     """Consecutive walking legs become one street-following path; transit legs stay straight."""
@@ -105,7 +110,7 @@ def _photo(details: PlaceDetails | None) -> StopPhoto | None:
     )
 
 
-def _planned_stop(
+def planned_stop(
     visit: Visit, name: str, note: str | None, details: PlaceDetails | None
 ) -> PlannedStop:
     leg = visit.leg
@@ -129,6 +134,45 @@ def _planned_stop(
     )
 
 
+def planned_day(
+    day: DayPlan, number: int, stops: list[PlannedStop], segments: list[RouteSegment]
+) -> PlannedDay:
+    return PlannedDay(
+        day=number,
+        stops=stops,
+        distance_m=round(day.distance_m),
+        walking_m=round(day.walking_m),
+        transit_legs=day.transit_legs,
+        duration_min=day.total_min,
+        self_intersections=day.self_intersections,
+        segments=segments,
+    )
+
+
+async def save_plan(
+    session: AsyncSession,
+    *,
+    city: str,
+    text: str,
+    params: dict[str, Any],
+    build: Callable[[int], PlanResponse],
+) -> PlanResponse:
+    """Store a new plan: `build` makes the response once the plan id is known."""
+    saved = Route(city=city, request_text=text, params=params)
+    session.add(saved)
+    await session.flush()  # assigns saved.id
+    response = build(saved.id)
+    session.add_all(
+        RouteStop(route_id=saved.id, place_id=stop.place_id, day=day.day, position=position)
+        for day in response.days
+        for position, stop in enumerate(day.stops, start=1)
+    )
+    saved.total_distance_m = response.total_distance_m
+    saved.result = response.model_dump(mode="json")
+    await session.commit()
+    return response
+
+
 async def plan_trip(
     *,
     session: AsyncSession,
@@ -140,7 +184,7 @@ async def plan_trip(
     must_visit: Sequence[int] = (),
     modes: Sequence[TravelMode] = ALL_MODES,
 ) -> PlanResponse:
-    watch = _Stopwatch()
+    watch = Stopwatch()
     selection = await select_places(
         llm,
         session,
@@ -168,15 +212,16 @@ async def plan_trip(
     )
     watch.lap("optimization")
 
-    segments = await asyncio.gather(*(_segments(d, start, distances) for d in route.days))
+    segments = await asyncio.gather(*(day_segments(d, start, distances) for d in route.days))
     watch.lap("geometry")
     details = await place_details(session, [v.stop.id for d in route.days for v in d.visits])
 
     days = [
-        PlannedDay(
-            day=day.day,
-            stops=[
-                _planned_stop(
+        planned_day(
+            day,
+            day.day,
+            [
+                planned_stop(
                     v,
                     places[v.stop.id].name,
                     selection.notes.get(v.stop.id),
@@ -184,54 +229,38 @@ async def plan_trip(
                 )
                 for v in day.visits
             ],
-            distance_m=round(day.distance_m),
-            walking_m=round(day.walking_m),
-            transit_legs=day.transit_legs,
-            duration_min=day.total_min,
-            self_intersections=day.self_intersections,
-            segments=day_segments,
+            segments_of_day,
         )
-        for day, day_segments in zip(route.days, segments, strict=True)
+        for day, segments_of_day in zip(route.days, segments, strict=True)
     ]
-
-    saved = Route(
+    params = {
+        "trip": selection.trip.model_dump(mode="json"),
+        "start": start.model_dump() if start else None,
+        "must_visit": [p.id for p in selection.must_visit],
+        "modes": list(modes),
+    }
+    return await save_plan(
+        session,
         city=selection.city,
-        request_text=text,
-        params={
-            "trip": selection.trip.model_dump(mode="json"),
-            "start": start.model_dump() if start else None,
-            "must_visit": [p.id for p in selection.must_visit],
-            "modes": list(modes),
-        },
-        total_distance_m=route.total_distance_m,
+        text=text,
+        params=params,
+        build=lambda plan_id: PlanResponse(
+            id=plan_id,
+            request_text=text,
+            city=selection.city,
+            trip=selection.trip,
+            rationale=selection.rationale,
+            days=days,
+            total_distance_m=round(route.total_distance_m),
+            distance_source=route.distance_source,
+            strategy=route.strategy,
+            dropped=[PlaceRef(place_id=s.id, name=places[s.id].name) for s in route.dropped],
+            warnings=selection.warnings + route.warnings,
+            timings_ms=watch.total(),
+            modes=list(modes),
+            must_visit=[PlaceRef(place_id=p.id, name=p.name) for p in selection.must_visit],
+        ),
     )
-    session.add(saved)
-    await session.flush()  # assigns saved.id
-    session.add_all(
-        RouteStop(route_id=saved.id, place_id=stop.place_id, day=day.day, position=position)
-        for day in days
-        for position, stop in enumerate(day.stops, start=1)
-    )
-
-    response = PlanResponse(
-        id=saved.id,
-        request_text=text,
-        city=selection.city,
-        trip=selection.trip,
-        rationale=selection.rationale,
-        days=days,
-        total_distance_m=round(route.total_distance_m),
-        distance_source=route.distance_source,
-        strategy=route.strategy,
-        dropped=[PlaceRef(place_id=s.id, name=places[s.id].name) for s in route.dropped],
-        warnings=selection.warnings + route.warnings,
-        timings_ms=watch.total(),
-        modes=list(modes),
-        must_visit=[PlaceRef(place_id=p.id, name=p.name) for p in selection.must_visit],
-    )
-    saved.result = response.model_dump(mode="json")
-    await session.commit()
-    return response
 
 
 async def get_plan(session: AsyncSession, plan_id: int) -> PlanResponse | None:
