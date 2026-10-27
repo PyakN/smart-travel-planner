@@ -194,7 +194,7 @@ async def run_case(name: str, text: str) -> Row:
         pace=pace,
         provider=HaversineProvider(),
         enforce_budget=False,
-        transit=False,
+        modes=("walk",),
     )
     routings["C"] = plan_days(plan_c, places)
     started = time.perf_counter()
@@ -204,7 +204,7 @@ async def run_case(name: str, text: str) -> Row:
         pace=pace,
         provider=StaticProvider(walking),
         enforce_budget=False,
-        transit=False,
+        modes=("walk",),
     )
     optimizer_ms = (time.perf_counter() - started) * 1000
     routings["D"] = plan_days(plan_d, places)

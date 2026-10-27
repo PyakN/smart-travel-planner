@@ -1,8 +1,9 @@
 """Turn selected stops into an optimized, scheduled multi-day plan.
 
-The objective is total travel time. Legs up to TRANSIT_MIN_DISTANCE_M are walked; longer
-ones (e.g. the centre to Belem) are taken by tram/metro/train. With transit off, time is
-proportional to walking distance, so the plan is simply the shortest walk.
+The objective is total travel time. With walking and transit allowed, legs up to
+TRANSIT_MIN_DISTANCE_M are walked and longer ones (e.g. the centre to Belem) are taken by
+tram/metro/train; travellers who prefer transit ride from TRANSIT_FIRST_MIN_DISTANCE_M.
+Walking only makes time proportional to walking distance, so the plan is the shortest walk.
 
 Three ways of splitting stops into days are tried and the cheapest total wins:
 balanced k-means, one long tour cut into days ("route first, cluster second"), and
@@ -10,7 +11,7 @@ the selection order cut into days. Every day is then ordered by the TSP solver, 
 with the selection order, so the plan is never worse than the selection order itself.
 """
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from math import ceil, inf
 from typing import Literal
@@ -25,6 +26,8 @@ WALKING_M_PER_MIN = 4000 / 60  # 4 km/h: Lisbon is hilly
 # Longer legs use public transport: a fixed overhead (walk to the stop, wait) plus
 # ~15 km/h door to door, which is typical for Lisbon's trams, metro and trains.
 TRANSIT_MIN_DISTANCE_M = 2500
+# Transit without walking: ride anything longer than a short stroll.
+TRANSIT_FIRST_MIN_DISTANCE_M = 1000
 TRANSIT_OVERHEAD_MIN = 10
 TRANSIT_M_PER_MIN = 15000 / 60
 DAY_START_MIN = 9 * 60 + 30
@@ -62,6 +65,7 @@ class StartPoint:
 
 
 TravelMode = Literal["walk", "transit"]
+ALL_MODES: tuple[TravelMode, ...] = ("walk", "transit")
 
 
 @dataclass(frozen=True)
@@ -71,8 +75,17 @@ class Leg:
     minutes: float
 
 
-def travel_leg(distance_m: float, transit: bool) -> Leg:
-    if transit and distance_m > TRANSIT_MIN_DISTANCE_M:
+def transit_threshold_m(modes: Collection[TravelMode]) -> float:
+    """Legs longer than this are ridden; `inf` when the traveller only walks."""
+    if not modes:
+        raise ValueError("at least one travel mode is needed")
+    if "transit" not in modes:
+        return inf
+    return TRANSIT_MIN_DISTANCE_M if "walk" in modes else TRANSIT_FIRST_MIN_DISTANCE_M
+
+
+def travel_leg(distance_m: float, transit_from_m: float = TRANSIT_MIN_DISTANCE_M) -> Leg:
+    if distance_m > transit_from_m:
         minutes = TRANSIT_OVERHEAD_MIN + distance_m / TRANSIT_M_PER_MIN
         return Leg("transit", distance_m, minutes)
     return Leg("walk", distance_m, distance_m / WALKING_M_PER_MIN)
@@ -126,10 +139,14 @@ class _Problem:
     """
 
     def __init__(
-        self, distance: Matrix, stops: Sequence[Stop], start: StartPoint | None, transit: bool
+        self,
+        distance: Matrix,
+        stops: Sequence[Stop],
+        start: StartPoint | None,
+        transit_from_m: float,
     ) -> None:
         self.distance = distance
-        self.legs = [[travel_leg(d, transit) for d in row] for row in distance]
+        self.legs = [[travel_leg(d, transit_from_m) for d in row] for row in distance]
         self.matrix = [[leg.minutes for leg in row] for row in self.legs]
         self.stops = stops
         self.start = len(stops) if start else None
@@ -269,10 +286,11 @@ async def plan_route(
     provider: DistanceProvider,
     start: StartPoint | None = None,
     enforce_budget: bool = True,
-    transit: bool = True,
+    modes: Collection[TravelMode] = ALL_MODES,
 ) -> RoutePlan:
     if not stops:
         raise ValueError("no stops to plan")
+    transit_from_m = transit_threshold_m(modes)
     warnings: list[str] = []
     if days > len(stops):
         warnings.append(f"only {len(stops)} stops for {days} days; using {len(stops)} days")
@@ -282,7 +300,7 @@ async def plan_route(
         [LatLon(start.lat, start.lon)] if start else []
     )
     distances = await provider.matrix(points)
-    problem = _Problem(distances.matrix, stops, start, transit)
+    problem = _Problem(distances.matrix, stops, start, transit_from_m)
 
     budget = DAY_BUDGET_MIN[pace]
     candidates = {

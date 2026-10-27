@@ -1,6 +1,7 @@
 import asyncio
 import random
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
+from math import inf
 
 import pytest
 
@@ -8,14 +9,19 @@ from app.optimizer.days import day_sizes
 from app.optimizer.distance import HaversineProvider, haversine_matrix
 from app.optimizer.geometry import LatLon
 from app.optimizer.planner import (
+    ALL_MODES,
     DAY_START_MIN,
+    TRANSIT_FIRST_MIN_DISTANCE_M,
     TRANSIT_M_PER_MIN,
+    TRANSIT_MIN_DISTANCE_M,
     TRANSIT_OVERHEAD_MIN,
     WALKING_M_PER_MIN,
     RoutePlan,
     StartPoint,
     Stop,
+    TravelMode,
     plan_route,
+    transit_threshold_m,
     travel_leg,
 )
 from app.optimizer.tsp import path_cost
@@ -34,7 +40,7 @@ def plan(
     pace: Pace = "intense",
     start: StartPoint | None = None,
     enforce_budget: bool = False,
-    transit: bool = False,  # distance guarantees below are about walking
+    modes: Collection[TravelMode] = ("walk",),  # distance guarantees below are about walking
 ) -> RoutePlan:
     return asyncio.run(
         plan_route(
@@ -44,7 +50,7 @@ def plan(
             provider=HaversineProvider(),
             start=start,
             enforce_budget=enforce_budget,
-            transit=transit,
+            modes=modes,
         )
     )
 
@@ -207,18 +213,36 @@ CENTRE = [(38.7075, -9.1364), (38.7116, -9.1301), (38.7139, -9.1335)]
 
 
 def test_travel_leg_modes() -> None:
-    assert travel_leg(2000, transit=True).mode == "walk"
-    leg = travel_leg(7000, transit=True)
+    assert travel_leg(2000).mode == "walk"
+    leg = travel_leg(7000)
     assert leg.mode == "transit"
     assert leg.minutes == pytest.approx(TRANSIT_OVERHEAD_MIN + 7000 / TRANSIT_M_PER_MIN)
-    assert leg.minutes < travel_leg(7000, transit=False).minutes
-    assert travel_leg(7000, transit=False).mode == "walk"
+    assert leg.minutes < travel_leg(7000, inf).minutes
+    assert travel_leg(7000, inf).mode == "walk"
+    assert travel_leg(1500, TRANSIT_FIRST_MIN_DISTANCE_M).mode == "transit"
+
+
+@pytest.mark.parametrize(
+    ("modes", "expected"),
+    [
+        (("walk",), inf),
+        (("walk", "transit"), TRANSIT_MIN_DISTANCE_M),
+        (("transit",), TRANSIT_FIRST_MIN_DISTANCE_M),
+    ],
+)
+def test_transit_threshold(modes: tuple[TravelMode, ...], expected: float) -> None:
+    assert transit_threshold_m(modes) == expected
+
+
+def test_no_travel_mode_is_an_error() -> None:
+    with pytest.raises(ValueError):
+        plan([stop(0, 38.71, -9.14)], modes=())
 
 
 def test_long_legs_use_transit() -> None:
     stops = [stop(i, lat, lon, "landmark") for i, (lat, lon) in enumerate([*CENTRE, BELEM_TOWER])]
     hotel = StartPoint(ROSSIO.lat, ROSSIO.lon)
-    by_transit = plan(stops, start=hotel, transit=True)
+    by_transit = plan(stops, start=hotel, modes=ALL_MODES)
     on_foot = plan(stops, start=hotel)
 
     [day] = by_transit.days
@@ -236,9 +260,20 @@ def test_transit_keeps_far_places_on_a_feasible_day() -> None:
     centre = [stop(i, lat, lon, "landmark") for i, (lat, lon) in enumerate(CENTRE)]
     stops = centre + belem
     hotel = StartPoint(ROSSIO.lat, ROSSIO.lon, round_trip=True)
-    result = plan(stops, days=2, pace="relaxed", start=hotel, transit=True, enforce_budget=True)
+    result = plan(stops, days=2, pace="relaxed", start=hotel, modes=ALL_MODES, enforce_budget=True)
     assert result.dropped == []
     assert {frozenset(v.stop.id for v in d.visits) for d in result.days} == {
         frozenset(s.id for s in centre),
         frozenset(s.id for s in belem),
     }
+
+
+def test_transit_first_rides_medium_legs() -> None:
+    # One ~2.2 km leg (1.7 km straight line x 1.3 detour): walked when walking is allowed,
+    # ridden by transit-first travellers.
+    stops = [stop(i, 38.70 + 0.015 * i, -9.14, "landmark") for i in range(2)]
+    walk_and_ride = plan(stops, modes=ALL_MODES).days[0]
+    ride = plan(stops, modes=("transit",)).days[0]
+    assert walk_and_ride.transit_legs == 0
+    assert ride.transit_legs == 1
+    assert ride.walking_m == 0
