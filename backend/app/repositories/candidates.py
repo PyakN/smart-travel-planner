@@ -8,7 +8,7 @@ from geoalchemy2 import Geography
 from sqlalchemy import ColumnElement, Float, case, cast, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.catalog import is_outdoor
+from app.catalog import VisitHours, is_outdoor, visit_hours
 from app.db.models import Category, Place
 from app.optimizer.geometry import LatLon
 from app.repositories.search import name_matches
@@ -39,6 +39,8 @@ class Candidate:
     distance_m: float | None = None
     # Visited in the open air (app.catalog.is_outdoor).
     outdoor: bool = False
+    # When it can be visited (app.catalog.visit_hours).
+    hours: VisitHours = "any"
 
 
 def _hint(name: str, tags: dict[str, str]) -> str | None:
@@ -80,6 +82,7 @@ def _to_candidate(row: Any) -> Candidate:
         lon=row["lon"],
         distance_m=row["distance_m"],
         outdoor=is_outdoor(row["category"], row["tags"]),
+        hours=visit_hours(row["category"], row["tags"]),
     )
 
 
