@@ -39,6 +39,13 @@ export interface PlacePage {
   total: number;
 }
 
+export interface StopPhoto {
+  url: string;
+  /** Wikimedia Commons file page: author and licence. */
+  page_url: string | null;
+  credit: string | null;
+}
+
 export interface PlannedStop {
   place_id: number;
   name: string;
@@ -50,6 +57,14 @@ export interface PlannedStop {
   travel_mode: TravelMode | null;
   travel_min: number;
   distance_from_previous_m: number;
+  must_visit: boolean;
+  /** Why this place suits the traveller (from the AI). */
+  note: string | null;
+  description: string | null;
+  photo: StopPhoto | null;
+  /** OpenStreetMap opening_hours syntax, e.g. "Tu-Su 10:00-18:00". */
+  opening_hours: string | null;
+  website: string | null;
 }
 
 export interface RouteSegment {

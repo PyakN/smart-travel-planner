@@ -69,3 +69,35 @@ const CATEGORY_ICONS: Record<string, string> = {
 export function categoryIcon(slug: string): string {
   return CATEGORY_ICONS[slug] ?? "📍";
 }
+
+const WEEKDAYS: Record<string, string> = {
+  Mo: "Mon",
+  Tu: "Tue",
+  We: "Wed",
+  Th: "Thu",
+  Fr: "Fri",
+  Sa: "Sat",
+  Su: "Sun",
+  PH: "holidays",
+};
+
+/**
+ * OpenStreetMap opening hours, made easier to read:
+ * "Tu-Su 10:00-18:00; Jan 01,Dec 25 off" -> "Tue–Sun 10:00–18:00 · Jan 01, Dec 25 closed".
+ * Shown as written otherwise; the syntax is too rich to evaluate here.
+ */
+export function formatOpeningHours(raw: string): string {
+  if (raw.trim() === "24/7") return "Open 24/7";
+  return raw
+    .split(";")
+    .map((rule) =>
+      rule
+        .trim()
+        .replace(/\b(Mo|Tu|We|Th|Fr|Sa|Su|PH)\b/g, (day) => WEEKDAYS[day])
+        .replace(/(\w)-(\w)/g, "$1–$2")
+        .replace(/,(?=\S)/g, ", ")
+        .replace(/\b(off|closed)\b/g, "closed"),
+    )
+    .filter(Boolean)
+    .join(" · ");
+}

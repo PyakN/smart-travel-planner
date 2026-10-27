@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 
-import { categoryLabel, dayColor, formatDistance, formatDuration, travelLabel } from "@/lib/format";
+import StopCard from "@/components/StopCard";
+import { dayColor, formatDistance, formatDuration, travelLabel } from "@/lib/format";
 import type { PlannedDay, PlanResponse } from "@/lib/types";
 
 export interface PlanResultProps {
@@ -10,10 +11,6 @@ export interface PlanResultProps {
   selectedDay: number;
   onSelectDay: (day: number) => void;
   onHoverStop: (placeId: number | null) => void;
-}
-
-function osmLink(lat: number, lon: number): string {
-  return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=18/${lat}/${lon}`;
 }
 
 function ShareButton({ planId }: { planId: number }) {
@@ -57,32 +54,7 @@ function DayStops({
                 {travel}
               </div>
             )}
-            <div
-              onMouseEnter={() => onHoverStop(stop.place_id)}
-              onMouseLeave={() => onHoverStop(null)}
-              className="flex items-start gap-3 rounded-lg border border-zinc-200 bg-white p-3 shadow-sm transition hover:border-zinc-300"
-            >
-              <span
-                className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
-                style={{ background: color }}
-              >
-                {i + 1}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium text-zinc-900">{stop.name}</div>
-                <div className="text-xs text-zinc-500">
-                  {categoryLabel(stop.category)} · {stop.arrive}–{stop.leave}
-                </div>
-              </div>
-              <a
-                href={osmLink(stop.lat, stop.lon)}
-                target="_blank"
-                rel="noreferrer"
-                className="shrink-0 text-xs text-blue-600 hover:underline"
-              >
-                Map
-              </a>
-            </div>
+            <StopCard stop={stop} number={i + 1} color={color} onHover={onHoverStop} />
           </li>
         );
       })}

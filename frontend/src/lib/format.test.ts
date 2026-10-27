@@ -6,6 +6,7 @@ import {
   dayColor,
   formatDistance,
   formatDuration,
+  formatOpeningHours,
   travelLabel,
 } from "./format";
 import type { PlannedStop } from "./types";
@@ -22,6 +23,12 @@ function stop(overrides: Partial<PlannedStop>): PlannedStop {
     travel_mode: "walk",
     travel_min: 11,
     distance_from_previous_m: 716,
+    must_visit: false,
+    note: null,
+    description: null,
+    photo: null,
+    opening_hours: null,
+    website: null,
     ...overrides,
   };
 }
@@ -65,6 +72,22 @@ describe("labels and colours", () => {
   it("cycles day colours", () => {
     expect(dayColor(1)).toBe(dayColor(8));
     expect(dayColor(1)).not.toBe(dayColor(2));
+  });
+});
+
+describe("formatOpeningHours", () => {
+  it.each([
+    ["Tu-Su 10:00-18:00", "Tue–Sun 10:00–18:00"],
+    [
+      "We-Sa 10:00-18:00; Jan 01,May 01,Dec 24-25 off",
+      "Wed–Sat 10:00–18:00 · Jan 01, May 01, Dec 24–25 closed",
+    ],
+    ["Mo-Su 09:00-11:30, 15:00-16:00", "Mon–Sun 09:00–11:30, 15:00–16:00"],
+    ["Mo-Fr 10:00-17:00; PH closed", "Mon–Fri 10:00–17:00 · holidays closed"],
+    ["24/7", "Open 24/7"],
+    ["10:00-20:00;", "10:00–20:00"],
+  ])("%s", (raw, expected) => {
+    expect(formatOpeningHours(raw)).toBe(expected);
   });
 });
 
