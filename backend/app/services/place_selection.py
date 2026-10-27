@@ -37,6 +37,8 @@ CATEGORY_GUIDE = {
     "culture": "theatres, arts centres",
     "market": "markets",
     "attraction": "other attractions: zoos, aquariums, famous sights",
+    "nightlife": "bars, pubs, clubs, fado and live music venues",
+    "restaurant": "fado restaurants and well-known restaurants, for dinner",
 }
 
 PARSE_SYSTEM = f"""You convert a traveller's free-text request into a structured trip request.

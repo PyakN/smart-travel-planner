@@ -27,6 +27,9 @@ from app.catalog import is_outdoor
         ("attraction", {"tourism": "aquarium"}, False),
         ("attraction", {"tourism": "zoo"}, True),
         ("attraction", {"historic": "fountain", "building": "yes"}, True),
+        ("nightlife", {"amenity": "bar"}, False),
+        ("restaurant", {"amenity": "restaurant"}, False),
+        ("landmark", {"place": "square"}, True),
     ],
 )
 def test_is_outdoor(category: str, tags: dict[str, str], outdoor: bool) -> None:

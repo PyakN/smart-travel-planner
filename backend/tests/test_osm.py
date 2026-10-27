@@ -36,6 +36,15 @@ class TestCategorize:
     def test_unknown_tags(self) -> None:
         assert categorize({"amenity": "bench"}) is None
 
+    def test_evening_places(self) -> None:
+        assert categorize({"amenity": "pub"}) == "nightlife"
+        assert categorize({"amenity": "music_venue"}) == "nightlife"
+        assert categorize({"amenity": "restaurant", "historic": "building"}) == "restaurant"
+
+    def test_squares_are_landmarks_unless_something_else(self) -> None:
+        assert categorize({"place": "square"}) == "landmark"
+        assert categorize({"place": "square", "amenity": "marketplace"}) == "market"
+
 
 class TestParseElements:
     def test_node_and_way_center(self) -> None:
@@ -62,6 +71,29 @@ class TestParseElements:
             ]
         )
         assert records == []
+
+    def test_skips_closed_venues(self) -> None:
+        records = parse_elements(
+            [
+                node(1, 38.7, -9.1, name="Cervejaria Solmar (Fechada)", amenity="pub"),
+                node(2, 38.7, -9.1, name="Alma (closed)", amenity="restaurant", wikidata="Q1"),
+                node(3, 38.7, -9.1, name="Pensão Amor", amenity="bar"),
+            ]
+        )
+        assert [r.name for r in records] == ["Pensão Amor"]
+
+    def test_only_fado_and_well_known_restaurants(self) -> None:
+        records = parse_elements(
+            [
+                node(1, 38.7, -9.1, name="Tasca do Bairro", amenity="restaurant"),
+                node(2, 38.7, -9.1, name="Clube de Fado", amenity="restaurant"),
+                node(3, 38.7, -9.1, name="Tavares", amenity="restaurant", wikidata="Q10379683"),
+            ]
+        )
+        assert [(r.name, r.category) for r in records] == [
+            ("Clube de Fado", "restaurant"),
+            ("Tavares", "restaurant"),
+        ]
 
     def test_extracts_detail_tags(self) -> None:
         [place] = parse_elements(
@@ -107,7 +139,7 @@ def test_normalize_name() -> None:
 def test_build_query_covers_every_rule_and_bbox() -> None:
     query = build_query(CITIES["lisbon"].bbox)
     assert "(38.6913,-9.2298,38.7964,-9.0866)" in query
-    for key in ("tourism", "historic", "amenity", "leisure"):
+    for key in ("tourism", "historic", "amenity", "leisure", "place"):
         assert f'nwr["{key}"~' in query
-    assert "viewpoint" in query and "place_of_worship" in query
+    assert "viewpoint" in query and "place_of_worship" in query and "nightclub" in query
     assert query.endswith("out center tags;")

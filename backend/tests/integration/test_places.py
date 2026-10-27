@@ -3,6 +3,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from app.catalog import CATEGORY_SLUGS
+
 PRACA_DO_COMERCIO = {"lat": 38.7075, "lon": -9.1364}
 
 
@@ -112,4 +114,4 @@ def test_categories_with_counts(client: TestClient) -> None:
     assert counts["landmark"] == 3
     assert counts["museum"] == 1  # Serralves is in Porto
     assert counts["market"] == 0
-    assert len(counts) == 10
+    assert tuple(counts) == CATEGORY_SLUGS  # every category, even without places

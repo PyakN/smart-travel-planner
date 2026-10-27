@@ -60,6 +60,8 @@ VISIT_MIN: dict[str, int] = {
     "culture": 30,
     "market": 40,
     "attraction": 60,
+    "nightlife": 60,
+    "restaurant": 90,  # dinner, or fado with it
 }
 DEFAULT_VISIT_MIN = 30
 # An outdoor visit wholly in rain or the dark costs like this many more minutes of travel:

@@ -14,10 +14,14 @@ CategorySlug = Literal[
     "culture",
     "market",
     "attraction",
+    "nightlife",
+    "restaurant",
 ]
 CATEGORY_SLUGS: tuple[str, ...] = get_args(CategorySlug)
 
-INDOOR_CATEGORIES = frozenset({"museum", "gallery", "religious", "culture"})
+INDOOR_CATEGORIES = frozenset(
+    {"museum", "gallery", "religious", "culture", "nightlife", "restaurant"}
+)
 # Landmarks with a building to go into, unlike walls, ruins, gates and aqueducts. OSM maps
 # Lisbon's palaces as historic=castle with a castle_type.
 INDOOR_HISTORIC = frozenset({"monastery", "building"})

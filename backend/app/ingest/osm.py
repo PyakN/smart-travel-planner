@@ -1,5 +1,6 @@
 """Fetch points of interest from OpenStreetMap (Overpass API) and normalize them."""
 
+import re
 import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
@@ -16,13 +17,16 @@ OVERPASS_URLS = (
 USER_AGENT = "smart-travel-planner/0.1 (pet project; POI import)"
 
 # Ordered: the first matching rule wins, so specific categories go first
-# (a museum inside a palace is a museum; a monastery that is still a church is a landmark).
+# (a museum inside a palace is a museum; a monastery that is still a church is a landmark;
+# a restaurant in a historic building is a restaurant).
 CATEGORY_RULES: list[tuple[str, frozenset[str], str]] = [
     ("tourism", frozenset({"museum"}), "museum"),
     ("tourism", frozenset({"gallery"}), "gallery"),
     ("amenity", frozenset({"theatre", "arts_centre"}), "culture"),
     ("tourism", frozenset({"viewpoint"}), "viewpoint"),
     ("amenity", frozenset({"marketplace"}), "market"),
+    ("amenity", frozenset({"bar", "pub", "nightclub", "music_venue"}), "nightlife"),
+    ("amenity", frozenset({"restaurant"}), "restaurant"),
     (
         "historic",
         frozenset(
@@ -47,11 +51,14 @@ CATEGORY_RULES: list[tuple[str, frozenset[str], str]] = [
     ("tourism", frozenset({"artwork"}), "monument"),
     ("leisure", frozenset({"park", "garden"}), "park"),
     ("tourism", frozenset({"attraction", "zoo", "aquarium"}), "attraction"),
+    ("place", frozenset({"square"}), "landmark"),
 ]
 
 # Small memorials that are not worth a walk.
 SKIP_MEMORIAL_TYPES = frozenset({"plaque", "blue_plaque", "stolperstein"})
 SKIP_ACCESS = frozenset({"private", "no"})
+# Venues OSM still maps after they closed, named like "Alma (closed)", "Solmar (Fechada)".
+CLOSED_NAME = re.compile(r"\((closed|fechad[ao]s?|encerrad[ao]s?)\)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -113,9 +120,12 @@ def categorize(tags: dict[str, str]) -> str | None:
     return None
 
 
-def _is_worth_visiting(tags: dict[str, str]) -> bool:
-    if tags.get("access") in SKIP_ACCESS:
+def _is_worth_visiting(name: str, category: str, tags: dict[str, str]) -> bool:
+    if tags.get("access") in SKIP_ACCESS or CLOSED_NAME.search(name):
         return False
+    if category == "restaurant":
+        # Thousands of restaurants are mapped: only fado houses and well-known ones are sights.
+        return "wikidata" in tags or "fado" in normalize_name(name)
     return tags.get("memorial") not in SKIP_MEMORIAL_TYPES
 
 
@@ -124,10 +134,8 @@ def parse_elements(elements: list[dict[str, Any]]) -> list[PlaceRecord]:
     for element in elements:
         tags: dict[str, str] = element.get("tags", {})
         name = tags.get("name", "").strip()
-        if not name or not _is_worth_visiting(tags):
-            continue
         category = categorize(tags)
-        if category is None:
+        if not name or category is None or not _is_worth_visiting(name, category, tags):
             continue
         point = element if element["type"] == "node" else element.get("center")
         if not point or "lat" not in point or "lon" not in point:
