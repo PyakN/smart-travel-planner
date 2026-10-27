@@ -1,9 +1,14 @@
 """Turn selected stops into an optimized, scheduled multi-day plan.
 
 The objective is total travel time. With walking and transit allowed, legs up to
-TRANSIT_MIN_DISTANCE_M are walked and longer ones (e.g. the centre to Belem) are taken by
-tram/metro/train; travellers who prefer transit ride from TRANSIT_FIRST_MIN_DISTANCE_M.
+TRANSIT_MIN_DISTANCE_M are walked and longer ones (e.g. the centre to Belem) are ridden by
+metro, tram, bus or train; travellers who prefer transit ride from TRANSIT_FIRST_MIN_DISTANCE_M.
 Walking only makes time proportional to walking distance, so the plan is the shortest walk.
+
+Ride times start as a fixed-speed estimate. With a transit provider, the real routes of the
+legs the plan rides are then fetched and the plan is made again, until it only rides legs
+with known routes (or TRANSIT_ROUNDS runs out): a handful of requests per plan instead of a
+route for every pair of stops. A real route slower than walking turns the leg into a walk.
 
 Three ways of splitting stops into days are tried and the cheapest total wins:
 balanced k-means, one long tour cut into days ("route first, cluster second"), and
@@ -11,14 +16,16 @@ the selection order cut into days. Every day is then ordered by the TSP solver, 
 with the selection order, so the plan is never worse than the selection order itself.
 """
 
-from collections.abc import Collection, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from itertools import pairwise
 from math import ceil, inf
 from typing import Literal
 
 from app.optimizer.days import balanced_kmeans, day_sizes, split_sequence
-from app.optimizer.distance import DistanceProvider, DistanceSource, Matrix
+from app.optimizer.distance import DistanceProvider, DistanceSource, Matrix, symmetrize
 from app.optimizer.geometry import LatLon, count_self_intersections
+from app.optimizer.transit import TransitProvider, TransitRoute
 from app.optimizer.tsp import EPS, order_stops, path_cost
 from app.schemas.trip import Pace
 
@@ -30,6 +37,8 @@ TRANSIT_MIN_DISTANCE_M = 2500
 TRANSIT_FIRST_MIN_DISTANCE_M = 1000
 TRANSIT_OVERHEAD_MIN = 10
 TRANSIT_M_PER_MIN = 15000 / 60
+# Fetch-and-replan rounds for real transit routes; plans usually settle after one or two.
+TRANSIT_ROUNDS = 3
 DAY_START_MIN = 9 * 60 + 30
 DAY_BUDGET_MIN: dict[Pace, int] = {"relaxed": 6 * 60, "moderate": 8 * 60, "intense": 10 * 60}
 VISIT_MIN: dict[str, int] = {
@@ -74,8 +83,16 @@ ALL_MODES: tuple[TravelMode, ...] = ("walk", "transit")
 @dataclass(frozen=True)
 class Leg:
     mode: TravelMode
-    distance_m: float
+    distance_m: float  # on foot for walks; walks plus rides for real transit routes
     minutes: float
+    # The public transport route of a ridden leg; None for walks and estimated rides.
+    route: TransitRoute | None = None
+
+    @property
+    def walking_m(self) -> float:
+        if self.mode == "walk":
+            return self.distance_m
+        return self.route.walking_m if self.route else 0.0
 
 
 def transit_threshold_m(modes: Collection[TravelMode]) -> float:
@@ -87,11 +104,27 @@ def transit_threshold_m(modes: Collection[TravelMode]) -> float:
     return TRANSIT_MIN_DISTANCE_M if "walk" in modes else TRANSIT_FIRST_MIN_DISTANCE_M
 
 
-def travel_leg(distance_m: float, transit_from_m: float = TRANSIT_MIN_DISTANCE_M) -> Leg:
-    if distance_m > transit_from_m:
+def travel_leg(
+    distance_m: float,
+    transit_from_m: float = TRANSIT_MIN_DISTANCE_M,
+    route: TransitRoute | None = None,
+    *,
+    walking: bool = True,
+) -> Leg:
+    """Walk legs up to `transit_from_m`, ride longer ones.
+
+    Without a real `route` the ride is estimated from the distance. With one, the leg is
+    walked when the route rides nothing, or when walking is faster and the traveller walks.
+    """
+    walk = Leg("walk", distance_m, distance_m / WALKING_M_PER_MIN)
+    if distance_m <= transit_from_m:
+        return walk
+    if route is None:
         minutes = TRANSIT_OVERHEAD_MIN + distance_m / TRANSIT_M_PER_MIN
         return Leg("transit", distance_m, minutes)
-    return Leg("walk", distance_m, distance_m / WALKING_M_PER_MIN)
+    if not route.rides or (walking and walk.minutes <= route.minutes):
+        return walk
+    return Leg("transit", route.distance_m, route.minutes, route)
 
 
 @dataclass(frozen=True)
@@ -135,10 +168,15 @@ def visit_minutes(category: str) -> int:
     return VISIT_MIN.get(category, DEFAULT_VISIT_MIN)
 
 
+Routes = Mapping[tuple[int, int], TransitRoute | None]
+
+
 class _Problem:
     """Matrix indices: stops are 0..n-1, the start point (if any) is n.
 
-    `matrix` holds travel minutes (what the solvers minimise), `distance` metres.
+    `legs[a][b]` is how to get from a to b and `distance` is in metres on foot. `matrix`
+    holds the travel minutes the solvers minimise, averaged over both directions (they
+    need it symmetric). `routes` are the transit routes fetched so far, by (from, to).
     """
 
     def __init__(
@@ -146,15 +184,39 @@ class _Problem:
         distance: Matrix,
         stops: Sequence[Stop],
         start: StartPoint | None,
-        transit_from_m: float,
+        modes: Collection[TravelMode],
+        routes: Routes,
     ) -> None:
         self.distance = distance
-        self.legs = [[travel_leg(d, transit_from_m) for d in row] for row in distance]
-        self.matrix = [[leg.minutes for leg in row] for row in self.legs]
+        self.transit_from_m = transit_threshold_m(modes)
+        self.routes = routes
+        walking = "walk" in modes
+        n = len(distance)
+        self.legs = [[self._leg(a, b, walking) for b in range(n)] for a in range(n)]
+        self.matrix = symmetrize([[leg.minutes for leg in row] for row in self.legs])
         self.stops = stops
         self.start = len(stops) if start else None
         self.round_trip = bool(start and start.round_trip)
         self.rank = {i: stops[i].priority for i in range(len(stops))}
+
+    def _leg(self, a: int, b: int, walking: bool) -> Leg:
+        d = self.distance[a][b]
+        if (a, b) in self.routes:
+            return travel_leg(d, self.transit_from_m, self.routes[a, b], walking=walking)
+        if (b, a) in self.routes:
+            # The way back is a good guess for the time until this direction is fetched.
+            guess = travel_leg(d, self.transit_from_m, self.routes[b, a], walking=walking)
+            return replace(guess, route=None)
+        return travel_leg(d, self.transit_from_m)
+
+    def unknown_rides(self, day_orders: Sequence[Sequence[int]]) -> list[tuple[int, int]]:
+        """Legs of the plan long enough to ride whose route has not been asked for yet."""
+        legs = (leg for order in day_orders for leg in pairwise(self.path(order)))
+        return [
+            (a, b)
+            for a, b in dict.fromkeys(legs)
+            if self.distance[a][b] > self.transit_from_m and (a, b) not in self.routes
+        ]
 
     def path(self, order: Sequence[int]) -> list[int]:
         prefix = [self.start] if self.start is not None else []
@@ -220,7 +282,7 @@ def _schedule(problem: _Problem, order: Sequence[int]) -> tuple[list[Visit], int
         visits.append(Visit(problem.stops[i], leg, round(arrive), round(clock)))
         previous = i
     if problem.round_trip and order and problem.start is not None:
-        clock += problem.matrix[order[-1]][problem.start]
+        clock += problem.legs[order[-1]][problem.start].minutes
     return visits, round(clock - DAY_START_MIN)
 
 
@@ -326,31 +388,15 @@ def _rebalance(problem: _Problem, day_orders: list[list[int]], budget_min: int) 
     return days
 
 
-async def plan_route(
-    stops: Sequence[Stop],
-    *,
-    days: int,
-    pace: Pace,
-    provider: DistanceProvider,
-    start: StartPoint | None = None,
-    enforce_budget: bool = True,
-    modes: Collection[TravelMode] = ALL_MODES,
-) -> RoutePlan:
-    if not stops:
-        raise ValueError("no stops to plan")
-    transit_from_m = transit_threshold_m(modes)
-    warnings: list[str] = []
-    if days > len(stops):
-        warnings.append(f"only {len(stops)} stops for {days} days; using {len(stops)} days")
-        days = len(stops)
+@dataclass(frozen=True)
+class _Solution:
+    strategy: str
+    day_orders: list[list[int]]
+    dropped: list[int]
+    warnings: list[str]
 
-    points = [LatLon(s.lat, s.lon) for s in stops] + (
-        [LatLon(start.lat, start.lon)] if start else []
-    )
-    distances = await provider.matrix(points)
-    problem = _Problem(distances.matrix, stops, start, transit_from_m)
 
-    budget = DAY_BUDGET_MIN[pace]
+def _solve(problem: _Problem, days: int, budget: int, enforce_budget: bool) -> _Solution:
     candidates = {
         name: [problem.solve_day(group) for group in groups if group]
         for name, groups in _split_strategies(problem, days, budget).items()
@@ -361,6 +407,7 @@ async def plan_route(
     day_orders = _rebalance(problem, day_orders, budget)
 
     dropped: list[int] = []
+    warnings: list[str] = []
     if enforce_budget:
         fitted = []
         for order in day_orders:
@@ -371,11 +418,53 @@ async def plan_route(
         dropped = _place_required(problem, day_orders, dropped, budget)
         if dropped:
             warnings.append(f"dropped {len(dropped)} stop(s) to fit {budget // 60} h days")
-        if missed := sum(stops[i].required for i in dropped):
+        if missed := sum(problem.stops[i].required for i in dropped):
             warnings.append(f"{missed} must-visit stop(s) do not fit any day")
 
     # Day 1 holds the most important stop, and so on.
     day_orders.sort(key=lambda order: min(problem.rank[i] for i in order))
+    return _Solution(strategy, day_orders, dropped, warnings)
+
+
+async def plan_route(
+    stops: Sequence[Stop],
+    *,
+    days: int,
+    pace: Pace,
+    provider: DistanceProvider,
+    start: StartPoint | None = None,
+    enforce_budget: bool = True,
+    modes: Collection[TravelMode] = ALL_MODES,
+    transit: TransitProvider | None = None,
+) -> RoutePlan:
+    if not stops:
+        raise ValueError("no stops to plan")
+    transit_threshold_m(modes)  # fail on no modes before any routing request
+    warnings: list[str] = []
+    if days > len(stops):
+        warnings.append(f"only {len(stops)} stops for {days} days; using {len(stops)} days")
+        days = len(stops)
+
+    points = [LatLon(s.lat, s.lon) for s in stops] + (
+        [LatLon(start.lat, start.lon)] if start else []
+    )
+    distances = await provider.matrix(points)
+    budget = DAY_BUDGET_MIN[pace]
+
+    routes: dict[tuple[int, int], TransitRoute | None] = {}
+    for attempt in range(TRANSIT_ROUNDS + 1):
+        problem = _Problem(distances.matrix, stops, start, modes, routes)
+        solution = _solve(problem, days, budget, enforce_budget)
+        if transit is None or attempt == TRANSIT_ROUNDS:
+            break
+        unknown = problem.unknown_rides(solution.day_orders)
+        if not unknown:
+            break
+        found = await transit.routes([(points[a], points[b]) for a, b in unknown])
+        routes.update(zip(unknown, found, strict=True))
+
+    strategy, day_orders, dropped = solution.strategy, solution.day_orders, solution.dropped
+    warnings += solution.warnings
     plans = []
     for number, order in enumerate(day_orders, start=1):
         visits, total_min = _schedule(problem, order)
@@ -389,7 +478,7 @@ async def plan_route(
                 visits=visits,
                 return_leg=legs[-1] if problem.round_trip else None,
                 distance_m=sum(leg.distance_m for leg in legs),
-                walking_m=sum(leg.distance_m for leg in legs if leg.mode == "walk"),
+                walking_m=sum(leg.walking_m for leg in legs),
                 transit_legs=sum(leg.mode == "transit" for leg in legs),
                 total_min=total_min,
                 self_intersections=count_self_intersections(path_points, closed=problem.round_trip),

@@ -1,7 +1,7 @@
 import asyncio
 import random
-from collections.abc import Collection, Sequence
-from dataclasses import replace
+from collections.abc import Callable, Collection, Sequence
+from dataclasses import dataclass, field, replace
 from math import inf
 
 import pytest
@@ -16,6 +16,7 @@ from app.optimizer.planner import (
     TRANSIT_M_PER_MIN,
     TRANSIT_MIN_DISTANCE_M,
     TRANSIT_OVERHEAD_MIN,
+    TRANSIT_ROUNDS,
     WALKING_M_PER_MIN,
     RoutePlan,
     StartPoint,
@@ -25,6 +26,7 @@ from app.optimizer.planner import (
     transit_threshold_m,
     travel_leg,
 )
+from app.optimizer.transit import Ride, Section, TransitProvider, TransitRoute
 from app.optimizer.tsp import path_cost
 from app.schemas.trip import Pace
 
@@ -42,6 +44,7 @@ def plan(
     start: StartPoint | None = None,
     enforce_budget: bool = False,
     modes: Collection[TravelMode] = ("walk",),  # distance guarantees below are about walking
+    transit: TransitProvider | None = None,
 ) -> RoutePlan:
     return asyncio.run(
         plan_route(
@@ -52,6 +55,7 @@ def plan(
             start=start,
             enforce_budget=enforce_budget,
             modes=modes,
+            transit=transit,
         )
     )
 
@@ -317,3 +321,99 @@ def test_transit_first_rides_medium_legs() -> None:
     assert walk_and_ride.transit_legs == 0
     assert ride.transit_legs == 1
     assert ride.walking_m == 0
+
+
+def metro(minutes: float, walking_m: float = 300) -> TransitRoute:
+    """A walk to the station, then one ride: `minutes` door to door."""
+    a, b = LatLon(0, 0), LatLon(0, 0.01)
+    line = Ride("metro", "Azul", "Santa Apolónia", "#0000FF", "A", "B", 4, minutes - 5)
+    return TransitRoute(
+        (Section("walk", (a, a), walking_m, 5, None), Section("transit", (a, b), 6000, 0, line)),
+        minutes,
+    )
+
+
+@dataclass
+class FakeTransit:
+    answer: Callable[[LatLon, LatLon], TransitRoute | None]
+    calls: list[list[tuple[LatLon, LatLon]]] = field(default_factory=list)
+
+    async def routes(self, pairs: Sequence[tuple[LatLon, LatLon]]) -> list[TransitRoute | None]:
+        self.calls.append(list(pairs))
+        return [self.answer(a, b) for a, b in pairs]
+
+    @property
+    def asked(self) -> list[tuple[LatLon, LatLon]]:
+        return [pair for call in self.calls for pair in call]
+
+
+def on_foot_m(a: LatLon, b: LatLon) -> float:
+    return haversine_matrix([a, b])[0][1]
+
+
+def belem_trip(transit: TransitProvider | None) -> RoutePlan:
+    stops = [stop(i, lat, lon, "landmark") for i, (lat, lon) in enumerate([*CENTRE, BELEM_TOWER])]
+    hotel = StartPoint(ROSSIO.lat, ROSSIO.lon, round_trip=True)
+    return plan(stops, start=hotel, modes=ALL_MODES, transit=transit)
+
+
+def test_rides_take_real_times() -> None:
+    # Westbound (out to Belem) takes 25 minutes, eastbound (back) 30.
+    transit = FakeTransit(lambda a, b: metro(25 if b.lon < a.lon else 30))
+    [day] = belem_trip(transit).days
+    out = next(v.leg for v in day.visits if v.leg and v.leg.mode == "transit")
+    back = day.return_leg
+    assert day.transit_legs == 2
+    assert back is not None and back.mode == "transit"
+    assert (out.minutes, back.minutes) == (25, 30)
+    assert out.route is not None and back.route is not None
+    assert out.distance_m == back.distance_m == 300 + 6000
+    # Only long legs are asked for, each direction once, in at most two rounds.
+    assert all(on_foot_m(a, b) > TRANSIT_MIN_DISTANCE_M for a, b in transit.asked)
+    assert len(transit.asked) == len(set(transit.asked))
+    assert len(transit.calls) <= 2
+    walks = sum(v.leg.distance_m for v in day.visits if v.leg and v.leg.mode == "walk")
+    assert day.walking_m == pytest.approx(walks + 2 * 300)
+
+
+def test_a_slower_ride_is_walked() -> None:
+    transit = FakeTransit(lambda a, b: metro(24 * 60))
+    [day] = belem_trip(transit).days
+    assert day.transit_legs == 0
+    assert day.walking_m == pytest.approx(day.distance_m)
+
+
+def test_no_ride_answer_is_walked() -> None:
+    walk_only = TransitRoute((Section("walk", (), 7000, 90, None),), 90)
+    [day] = belem_trip(FakeTransit(lambda a, b: walk_only)).days
+    assert day.transit_legs == 0
+
+
+def test_transit_only_travellers_ride_slower_routes() -> None:
+    stops = [stop(i, 38.70 + 0.015 * i, -9.14, "landmark") for i in range(2)]  # ~2.2 km
+    transit = FakeTransit(lambda a, b: metro(60))  # walking takes ~33 min
+    [day] = plan(stops, modes=("transit",), transit=transit).days
+    leg = day.visits[1].leg
+    assert leg is not None and (leg.mode, leg.minutes) == ("transit", 60)
+
+
+def test_unknown_routes_keep_the_estimate() -> None:
+    transit = FakeTransit(lambda a, b: None)
+    [day] = belem_trip(transit).days
+    assert day.transit_legs == 2
+    assert all(v.leg.route is None for v in day.visits if v.leg)
+    assert len(transit.calls) == 1  # unknown is an answer: not asked again
+    assert day == belem_trip(None).days[0]
+
+
+def test_replanning_rounds_are_bounded() -> None:
+    # Six places 4+ km apart on foot: every ride the plan picks turns out slower than walking,
+    # so each round tries rides it has not asked about yet. The loop still stops.
+    ring = [stop(i, 38.72 + 0.03 * (i % 2), -9.20 + 0.035 * i) for i in range(6)]
+    points = [LatLon(s.lat, s.lon) for s in ring]
+    assert min(on_foot_m(a, b) for a in points for b in points if a != b) > 4000
+    transit = FakeTransit(lambda a, b: metro(24 * 60))
+    result = plan(ring, modes=ALL_MODES, transit=transit)
+    assert len(transit.calls) == TRANSIT_ROUNDS
+    assert len(transit.asked) == len(set(transit.asked))
+    assert sorted(v.stop.id for v in result.days[0].visits) == [s.id for s in ring]
