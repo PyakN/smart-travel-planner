@@ -9,9 +9,36 @@ import {
   formatDistance,
   formatDuration,
   formatOpeningHours,
+  rideBadge,
+  rideDetails,
+  rideName,
+  textColorOn,
+  transitCredits,
   travelLabel,
 } from "./format";
-import type { PlannedStop } from "./types";
+import type { PlannedStop, PlanResponse, TransitRide } from "./types";
+
+const GREEN_LINE: TransitRide = {
+  vehicle: "metro",
+  line: "Verde",
+  headsign: "Cais Do Sodré",
+  color: "#009933",
+  board: "Rossio",
+  alight: "Cais do Sodré",
+  stops: 2,
+  minutes: 3,
+  attributions: [{ text: "Metropolitano de Lisboa", url: "https://www.metrolisboa.pt" }],
+};
+const CASCAIS_LINE: TransitRide = {
+  ...GREEN_LINE,
+  vehicle: "train",
+  line: "Linha de Cascais",
+  headsign: "Cascais",
+  color: "#FFA500",
+  stops: 3,
+  minutes: 7,
+  attributions: [{ text: "CP - Comboios de Portugal", url: null }],
+};
 
 function stop(overrides: Partial<PlannedStop>): PlannedStop {
   return {
@@ -25,6 +52,7 @@ function stop(overrides: Partial<PlannedStop>): PlannedStop {
     travel_mode: "walk",
     travel_min: 11,
     distance_from_previous_m: 716,
+    rides: [],
     must_visit: false,
     note: null,
     description: null,
@@ -53,15 +81,61 @@ describe("formatDuration", () => {
 });
 
 describe("travelLabel", () => {
-  it("describes walking and transit legs", () => {
+  const ride = { travel_mode: "transit", travel_min: 24, distance_from_previous_m: 6753 } as const;
+
+  it("describes walks and real rides", () => {
     expect(travelLabel(stop({}))).toBe("Walk 11 min · 716 m");
-    expect(
-      travelLabel(stop({ travel_mode: "transit", travel_min: 37, distance_from_previous_m: 6784 })),
-    ).toBe("Tram / metro 37 min · 6.8 km");
+    expect(travelLabel(stop({ ...ride, rides: [GREEN_LINE, CASCAIS_LINE] }))).toBe(
+      "Metro + Train 24 min · 6.8 km",
+    );
+    expect(travelLabel(stop({ ...ride, rides: [GREEN_LINE, GREEN_LINE] }))).toBe(
+      "Metro 24 min · 6.8 km",
+    );
+  });
+
+  it("marks estimated ride times", () => {
+    expect(travelLabel(stop({ ...ride, travel_min: 37 }))).toBe("Tram / metro ~37 min · 6.8 km");
   });
 
   it("is empty for the first stop of a free-start day", () => {
     expect(travelLabel(stop({ travel_mode: null, travel_min: 0 }))).toBeNull();
+  });
+});
+
+describe("rides", () => {
+  it("names the line, the stops and the direction", () => {
+    expect(rideBadge(GREEN_LINE)).toBe("🚇 Verde");
+    expect(rideName(GREEN_LINE)).toBe("Metro Verde to Cais Do Sodré");
+    expect(rideDetails(GREEN_LINE)).toBe(
+      "Rossio → Cais do Sodré · 2 stops · towards Cais Do Sodré",
+    );
+    const bare = { ...GREEN_LINE, board: null, headsign: null, stops: 1 };
+    expect(rideName(bare)).toBe("Metro Verde");
+    expect(rideDetails(bare)).toBe("1 stop");
+  });
+
+  it("keeps badge text readable on any line colour", () => {
+    expect(textColorOn("#009933")).toBe("#ffffff"); // metro green
+    expect(textColorOn("#FFA500")).toBe("#18181b"); // train orange
+    expect(textColorOn("not a colour")).toBe("#ffffff");
+  });
+
+  it("credits each transit operator once", () => {
+    const segment = (r: TransitRide | null) => ({
+      mode: "transit" as const,
+      geometry: [],
+      ride: r,
+    });
+    const plan = {
+      days: [
+        { segments: [segment(GREEN_LINE), segment(null), segment(CASCAIS_LINE)] },
+        { segments: [segment(GREEN_LINE)] },
+      ],
+    } as unknown as PlanResponse;
+    expect(transitCredits(plan).map((c) => c.text)).toEqual([
+      "Metropolitano de Lisboa",
+      "CP - Comboios de Portugal",
+    ]);
   });
 });
 

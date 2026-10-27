@@ -11,12 +11,13 @@ import {
   Polyline,
   Popup,
   TileLayer,
+  Tooltip,
   useMap,
   useMapEvents,
 } from "react-leaflet";
 
-import { categoryLabel, dayColor } from "@/lib/format";
-import type { LonLat, PlanResponse, StartPoint } from "@/lib/types";
+import { categoryLabel, dayColor, rideName } from "@/lib/format";
+import type { LonLat, PlanResponse, RouteSegment, StartPoint } from "@/lib/types";
 
 const LISBON: L.LatLngTuple = [38.7223, -9.1393];
 const INACTIVE = "#94a3b8";
@@ -72,6 +73,26 @@ function FitToDay({ points, fitKey }: { points: L.LatLngTuple[]; fitKey: string 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, fitKey]);
   return null;
+}
+
+/** Where to get on and off a ride, with the stop names on hover. */
+function RideStops({ segment, color }: { segment: RouteSegment; color: string }) {
+  const { ride, geometry } = segment;
+  if (!ride || geometry.length < 2) return null;
+  const ends: [LonLat, string | null][] = [
+    [geometry[0], ride.board],
+    [geometry[geometry.length - 1], ride.alight],
+  ];
+  return ends.map(([point, name], i) => (
+    <CircleMarker
+      key={i}
+      center={toLatLng(point)}
+      radius={4}
+      pathOptions={{ color, weight: 2, fillColor: "white", fillOpacity: 1 }}
+    >
+      {name && <Tooltip>{name}</Tooltip>}
+    </CircleMarker>
+  ));
 }
 
 function PickStart({ enabled, onPick }: { enabled: boolean; onPick: RouteMapProps["onPick"] }) {
@@ -155,7 +176,12 @@ export default function RouteMap({
                 dashArray: seg.mode === "transit" ? "2 10" : undefined,
                 lineCap: "round",
               }}
-            />
+            >
+              {seg.ride && <Tooltip sticky>{rideName(seg.ride)}</Tooltip>}
+            </Polyline>
+          ))}
+          {active.segments.map((seg, i) => (
+            <RideStops key={`ride-stops-${i}`} segment={seg} color={dayColor(active.day)} />
           ))}
           {active.stops.map((s, i) => (
             <Marker

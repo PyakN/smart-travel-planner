@@ -27,8 +27,8 @@ const MODES: { mode: TravelMode; label: string }[] = [
 
 function modesHint(modes: TravelMode[]): string {
   if (!modes.includes("transit")) return "Everything on foot, so the places stay close together.";
-  if (!modes.includes("walk")) return "Tram, metro or train for anything over 1 km.";
-  return "Walk, and take the tram or metro for legs over 2.5 km.";
+  if (!modes.includes("walk")) return "Metro, tram, bus or train for anything over 1 km.";
+  return "Walk, and ride the metro, tram or bus when a leg over 2.5 km is faster that way.";
 }
 
 export interface PlanFormProps {

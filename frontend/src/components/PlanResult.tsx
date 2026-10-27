@@ -9,9 +9,13 @@ import {
   describeEdit,
   formatDistance,
   formatDuration,
+  rideBadge,
+  rideDetails,
+  textColorOn,
+  transitCredits,
   travelLabel,
 } from "@/lib/format";
-import type { PlanEdit, PlannedDay, PlanResponse } from "@/lib/types";
+import type { PlanEdit, PlannedDay, PlanResponse, TransitRide } from "@/lib/types";
 
 export interface PlanResultProps {
   plan: PlanResponse;
@@ -66,6 +70,27 @@ function EditSummary({ edit, onUndo }: { edit: PlanEdit; onUndo: PlanResultProps
   );
 }
 
+function Rides({ rides, color }: { rides: TransitRide[]; color: string }) {
+  return (
+    <ul className="space-y-0.5">
+      {rides.map((ride, i) => {
+        const background = ride.color ?? color;
+        return (
+          <li key={i} className="flex flex-wrap items-baseline gap-x-1.5">
+            <span
+              className="rounded px-1 py-px text-[11px] font-semibold"
+              style={{ background, color: textColorOn(background) }}
+            >
+              {rideBadge(ride)}
+            </span>
+            <span>{rideDetails(ride)}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function newStops(edit: PlanEdit | null, day: number): Set<number> {
   if (!edit || edit.day !== day) return new Set();
   const added = [...edit.added, ...edit.adjustments.flatMap((a) => (a.added ? [a.added] : []))];
@@ -95,12 +120,15 @@ function DayStops({
         return (
           <li key={stop.place_id}>
             {travel && (
-              <div className="flex items-center gap-2 py-1 pl-[13px] text-xs text-zinc-500">
+              <div className="flex items-stretch gap-2 py-1 pl-[13px] text-xs text-zinc-500">
                 <span
-                  className={`h-5 border-l-2 ${stop.travel_mode === "transit" ? "border-dotted" : ""}`}
+                  className={`min-h-5 border-l-2 ${stop.travel_mode === "transit" ? "border-dotted" : ""}`}
                   style={{ borderColor: color }}
                 />
-                {travel}
+                <div className="space-y-0.5 py-0.5">
+                  <div>{travel}</div>
+                  {stop.rides.length > 0 && <Rides rides={stop.rides} color={color} />}
+                </div>
               </div>
             )}
             <StopCard
@@ -158,7 +186,7 @@ export default function PlanResult({
             <p className="text-sm text-zinc-600">
               {formatDistance(walking)} on foot
               {transitLegs > 0 &&
-                ` · ${transitLegs} tram/metro ${transitLegs === 1 ? "ride" : "rides"}`}
+                ` · ${transitLegs} transit ${transitLegs === 1 ? "ride" : "rides"}`}
               {" · "}
               {plan.trip.pace} pace
             </p>
@@ -208,8 +236,9 @@ export default function PlanResult({
       <div>
         <p className="mb-2 text-xs text-zinc-500">
           {formatDistance(day.walking_m)} on foot
-          {day.transit_legs > 0 && ` + ${day.transit_legs} tram/metro`} · {day.stops[0]?.arrive}–
-          {day.stops.at(-1)?.leave} · tick stops to replace them
+          {day.transit_legs > 0 &&
+            ` + ${day.transit_legs} ${day.transit_legs === 1 ? "ride" : "rides"}`}{" "}
+          · {day.stops[0]?.arrive}–{day.stops.at(-1)?.leave} · tick stops to replace them
         </p>
         <DayStops
           day={day}
@@ -253,10 +282,30 @@ export default function PlanResult({
         </div>
       )}
 
-      <p className="text-[11px] text-zinc-400">
-        Plan #{plan.id} · distances: {plan.distance_source} · planned in{" "}
-        {((plan.timings_ms.total ?? 0) / 1000).toFixed(1)} s
-      </p>
+      <div className="space-y-0.5 text-[11px] text-zinc-400">
+        <p>
+          Plan #{plan.id} · distances: {plan.distance_source}
+          {plan.transit_source && ` · transit: ${plan.transit_source}`} · planned in{" "}
+          {((plan.timings_ms.total ?? 0) / 1000).toFixed(1)} s
+        </p>
+        {plan.transit_source && plan.transit_source !== "estimate" && (
+          <p>
+            Public transport routes © HERE
+            {transitCredits(plan).map((credit) => (
+              <span key={credit.text}>
+                {" · "}
+                {credit.url ? (
+                  <a href={credit.url} target="_blank" rel="noreferrer" className="hover:underline">
+                    {credit.text}
+                  </a>
+                ) : (
+                  credit.text
+                )}
+              </span>
+            ))}
+          </p>
+        )}
+      </div>
     </section>
   );
 }

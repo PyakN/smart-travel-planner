@@ -2,6 +2,8 @@
 // and backend/app/schemas/place.py (GET /places).
 
 export type TravelMode = "walk" | "transit";
+export type TransitVehicle =
+  "metro" | "tram" | "bus" | "train" | "ferry" | "funicular" | "cable_car" | "other";
 export type Pace = "relaxed" | "moderate" | "intense";
 /** [lon, lat], GeoJSON order. */
 export type LonLat = [number, number];
@@ -51,6 +53,28 @@ export interface StopPhoto {
   credit: string | null;
 }
 
+/** Data credit a transit operator requires next to its routes. */
+export interface Attribution {
+  text: string;
+  url: string | null;
+}
+
+export interface TransitRide {
+  vehicle: TransitVehicle;
+  /** "28E", "Verde" (metro), "Linha de Cascais". */
+  line: string;
+  /** Where the vehicle is going. */
+  headsign: string | null;
+  /** The line's own colour, "#RRGGBB". */
+  color: string | null;
+  board: string | null;
+  alight: string | null;
+  /** Number of stops ridden. */
+  stops: number;
+  minutes: number;
+  attributions: Attribution[];
+}
+
 export interface PlannedStop {
   place_id: number;
   name: string;
@@ -62,6 +86,8 @@ export interface PlannedStop {
   travel_mode: TravelMode | null;
   travel_min: number;
   distance_from_previous_m: number;
+  /** The rides of a transit leg; empty for walks and estimated rides. */
+  rides: TransitRide[];
   must_visit: boolean;
   /** Why this place suits the traveller (from the AI). */
   note: string | null;
@@ -74,7 +100,9 @@ export interface PlannedStop {
 
 export interface RouteSegment {
   mode: TravelMode;
+  /** Along the streets or the line; a straight line for an estimated ride. */
   geometry: LonLat[];
+  ride: TransitRide | null;
 }
 
 export interface PlannedDay {
@@ -121,6 +149,8 @@ export interface PlanResponse {
   days: PlannedDay[];
   total_distance_m: number;
   distance_source: string;
+  /** "here" (real timetables), "estimate" or "mixed"; null when nothing is ridden. */
+  transit_source: string | null;
   strategy: string;
   dropped: PlaceRef[];
   warnings: string[];

@@ -1,4 +1,12 @@
-import type { Adjustment, PlanEdit, PlannedStop } from "./types";
+import type {
+  Adjustment,
+  Attribution,
+  PlanEdit,
+  PlannedStop,
+  PlanResponse,
+  TransitRide,
+  TransitVehicle,
+} from "./types";
 
 export function formatDistance(meters: number): string {
   if (meters < 1000) return `${Math.round(meters)} m`;
@@ -30,11 +38,68 @@ export function categoryLabel(slug: string): string {
   return CATEGORY_LABELS[slug] ?? slug.charAt(0).toUpperCase() + slug.slice(1);
 }
 
-/** How the traveller reaches this stop, e.g. "Walk 11 min · 716 m". */
+const VEHICLES: Record<TransitVehicle, { label: string; icon: string }> = {
+  metro: { label: "Metro", icon: "🚇" },
+  tram: { label: "Tram", icon: "🚋" },
+  bus: { label: "Bus", icon: "🚌" },
+  train: { label: "Train", icon: "🚆" },
+  ferry: { label: "Ferry", icon: "⛴️" },
+  funicular: { label: "Funicular", icon: "🚞" },
+  cable_car: { label: "Cable car", icon: "🚡" },
+  other: { label: "Transit", icon: "🚏" },
+};
+
+/**
+ * How the traveller reaches this stop: "Walk 11 min · 716 m", "Metro + Train 24 min · 6.8 km",
+ * or "Tram / metro ~37 min · 6.8 km" when the ride time is an estimate.
+ */
 export function travelLabel(stop: PlannedStop): string | null {
   if (!stop.travel_mode) return null;
-  const mode = stop.travel_mode === "transit" ? "Tram / metro" : "Walk";
-  return `${mode} ${formatDuration(stop.travel_min)} · ${formatDistance(stop.distance_from_previous_m)}`;
+  const distance = formatDistance(stop.distance_from_previous_m);
+  if (stop.travel_mode === "walk") return `Walk ${formatDuration(stop.travel_min)} · ${distance}`;
+  if (stop.rides.length === 0)
+    return `Tram / metro ~${formatDuration(stop.travel_min)} · ${distance}`;
+  const vehicles = [...new Set(stop.rides.map((r) => VEHICLES[r.vehicle].label))].join(" + ");
+  return `${vehicles} ${formatDuration(stop.travel_min)} · ${distance}`;
+}
+
+/** Badge text for a ride, e.g. "🚋 28E". */
+export function rideBadge(ride: TransitRide): string {
+  return `${VEHICLES[ride.vehicle].icon} ${ride.line}`;
+}
+
+/** "Metro Verde to Cais do Sodré", for map tooltips. */
+export function rideName(ride: TransitRide): string {
+  const name = `${VEHICLES[ride.vehicle].label} ${ride.line}`;
+  return ride.headsign ? `${name} to ${ride.headsign}` : name;
+}
+
+/** "Rossio → Cais do Sodré · 2 stops · towards Cais Do Sodré". */
+export function rideDetails(ride: TransitRide): string {
+  const parts = [`${ride.stops} ${ride.stops === 1 ? "stop" : "stops"}`];
+  if (ride.board && ride.alight) parts.unshift(`${ride.board} → ${ride.alight}`);
+  if (ride.headsign) parts.push(`towards ${ride.headsign}`);
+  return parts.join(" · ");
+}
+
+/** Black or white, whichever reads better on a line colour such as "#FFA500". */
+export function textColorOn(background: string): string {
+  const hex = background.replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return "#ffffff";
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  // Perceived brightness (ITU-R BT.601 weights).
+  return 0.299 * r + 0.587 * g + 0.114 * b > 0.6 ? "#18181b" : "#ffffff";
+}
+
+/** The transit operators' data credits for every ride in the plan, once each. */
+export function transitCredits(plan: PlanResponse): Attribution[] {
+  const credits = new Map<string, Attribution>();
+  for (const day of plan.days) {
+    for (const segment of day.segments) {
+      for (const credit of segment.ride?.attributions ?? []) credits.set(credit.text, credit);
+    }
+  }
+  return [...credits.values()];
 }
 
 /** Distinct colours for up to seven days; repeats after that. */
