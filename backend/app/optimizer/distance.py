@@ -121,3 +121,32 @@ class OsrmProvider:
             for i, row in enumerate(raw)
         ]
         return symmetrize(filled)
+
+
+class PrefetchedProvider:
+    """Serves matrices for subsets of points fetched in one request up front.
+
+    For callers that try several combinations of the same stops (re-planning a day with
+    different replacements): one routing request instead of one per attempt. Requests for
+    points outside the prefetched set, and geometry, go to the wrapped provider.
+    """
+
+    def __init__(self, inner: DistanceProvider) -> None:
+        self.inner = inner
+        self._index: dict[LatLon, int] = {}
+        self._result: DistanceResult | None = None
+
+    async def prefetch(self, points: Sequence[LatLon]) -> None:
+        unique = list(dict.fromkeys(points))
+        self._result = await self.inner.matrix(unique)
+        self._index = {p: i for i, p in enumerate(unique)}
+
+    async def matrix(self, points: Sequence[LatLon]) -> DistanceResult:
+        if self._result is None or any(p not in self._index for p in points):
+            return await self.inner.matrix(points)
+        rows = [self._index[p] for p in points]
+        full = self._result.matrix
+        return DistanceResult([[full[i][j] for j in rows] for i in rows], self._result.source)
+
+    async def geometry(self, points: Sequence[LatLon]) -> list[LatLon]:
+        return await self.inner.geometry(points)

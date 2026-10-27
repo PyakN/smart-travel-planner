@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Sequence
 from typing import Any
 
 import httpx
@@ -7,8 +8,10 @@ import pytest
 from app.config import Settings
 from app.optimizer.distance import (
     DETOUR_FACTOR,
+    DistanceResult,
     HaversineProvider,
     OsrmProvider,
+    PrefetchedProvider,
     haversine_matrix,
     symmetrize,
 )
@@ -122,3 +125,33 @@ def test_osrm_skips_request_for_too_many_points() -> None:
     provider = osrm(handler)
     provider.max_points = 2
     assert asyncio.run(provider.matrix(POINTS)).source == "haversine"
+
+
+class CountingProvider(HaversineProvider):
+    def __init__(self) -> None:
+        self.requests: list[int] = []
+
+    async def matrix(self, points: Sequence[LatLon]) -> DistanceResult:
+        self.requests.append(len(points))
+        return await super().matrix(points)
+
+
+def test_prefetched_provider_serves_subsets_from_one_request() -> None:
+    inner = CountingProvider()
+    provider = PrefetchedProvider(inner)
+    elsewhere = LatLon(38.69, -9.21)
+
+    async def run() -> tuple[DistanceResult, DistanceResult, DistanceResult]:
+        await provider.prefetch([*POINTS, COMERCIO])  # duplicates are fetched once
+        subset = await provider.matrix([LUZIA, COMERCIO])
+        again = await provider.matrix([COMERCIO, LUZIA, CASTELO])
+        unknown = await provider.matrix([COMERCIO, elsewhere])
+        return subset, again, unknown
+
+    subset, again, unknown = asyncio.run(run())
+    full = haversine_matrix(POINTS)
+    assert subset.matrix == [[0.0, full[2][0]], [full[0][2], 0.0]]
+    assert again.matrix[2][0] == full[1][0]
+    assert subset.source == "haversine"
+    assert inner.requests == [3, 2]  # the prefetch, then the point outside it
+    assert unknown.matrix[0][1] > 0
