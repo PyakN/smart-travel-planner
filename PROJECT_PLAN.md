@@ -84,7 +84,8 @@
 - [x] Persist the route to `routes` / `route_stops` + full response; `GET /plans/{id}`
 - [x] End-to-end integration tests (LLM mocked)
 - [x] Transit for long legs: legs over 2.5 km become tram/metro/train (10 min + 15 km/h) and the optimizer minimises travel time. Live re-test: the Belém day is reached in 37 min instead of a 1 h 44 min walk, and no stops are dropped (2 were before)
-- [ ] (later) Real transit routing (GTFS / OpenTripPlanner) instead of the fixed-speed estimate
+- [x] Real transit routing: HERE Public Transit API (`HERE_API_KEY`) instead of the fixed-speed estimate. HERE has no transit matrix, so the optimizer plans with the estimate, fetches the real routes of the legs it rides, and plans again (at most 3 rounds, cached). Ridden legs are drawn along the line and list their rides (line, colour, stops, direction). Without a key, or when HERE fails, rides stay estimated. Live check: a 2-day trip from Rossio reaches Belém by metro Verde + Cascais line (42 min) and returns by bus 728 + metro, in 8.7 s end to end (~2 s more than before)
+- [ ] (later) Ask HERE for less walking (`pedestrian[maxDistance]`) for transit-only travellers: today they get HERE's fastest itinerary, which can be mostly walking with a 1-stop ride
 
 **DoD:** a single request returns a ready, optimized route.
 **Result:** a live 2-day Lisbon request returns in ~3.6 s (LLM 2.4 s, optimization 0.6 s, geometry 0.6 s), with OSRM distances and zero crossings.

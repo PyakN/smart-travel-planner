@@ -106,7 +106,7 @@ The LLM never invents places. A request goes through four steps:
 3. **Select:** the LLM fills the slots the must-visit places leave, picking ids from that candidate list (it sees the distances), and writes a one-sentence note per place on why it suits the traveller.
 4. **Guard:** a deterministic check drops any id that isn't a candidate, and places with the same name as one already chosen (OSM maps some sights twice).
 
-Configure it in `.env`: `LLM_PROVIDER`, the matching API key, and optionally `LLM_MODEL` and `LLM_FALLBACK_MODEL`.
+Configure it in `.env`: `LLM_PROVIDER`, the matching API key, and optionally `LLM_MODEL` and `LLM_FALLBACK_MODEL`. For real public transport routes, also set `HERE_API_KEY` (see [Route optimizer](#route-optimizer)).
 
 ```bash
 cd backend
@@ -121,7 +121,8 @@ python evals/selection_eval.py     # live eval against the real LLM + DB (costs 
 - **Order within a day:** a TSP solver (nearest neighbour + 2-opt + Or-opt).
 - **Split into days:** several strategies are tried and the shortest wins, with every day kept within the pace's time budget.
 - **Schedule:** arrival and departure times for each stop.
-- **Transit:** legs over 2.5 km (e.g. the centre to Belém) are taken by tram, metro or train: 10 min overhead + 15 km/h. The optimizer minimises total travel time; each stop says how to get there (`travel_mode`), and the map geometry is split into walking and transit segments. Walking-only trips ride nothing; transit-only trips ride every leg over 1 km.
+- **Transit:** legs over 2.5 km (e.g. the centre to Belém) are ridden by metro, tram, bus or train when that is faster than walking. Walking-only trips ride nothing; transit-only trips ride every leg over 1 km. The optimizer minimises total travel time; each stop says how to get there (`travel_mode`), and the map geometry is split into walking and transit segments.
+- **Real timetables:** with `HERE_API_KEY` set, ride times and routes come from the HERE Public Transit API v8 (midday on the next weekday). HERE has no transit matrix, so the plan is made with estimated ride times (10 min overhead + 15 km/h), the real routes of the legs it rides are fetched, and the plan is made again until it only rides known routes (at most 3 rounds; answers are cached in memory). A ridden leg is drawn along the line and its stop lists the rides (`rides`: line, colour, where to get on and off, stops, direction). Without a key, or when HERE fails, rides keep the estimate; `transit_source` in the response says which (`here`, `estimate`, `mixed`).
 - **Must-visit stops** are trimmed last and, if their day overflows, moved to the day that loses the fewest optional stops.
 
 Results against LLM-only ordering are in [docs/benchmark.md](docs/benchmark.md): **55% less walking than the selection order, and on par with an itinerary the LLM arranged itself, with zero route crossings.**
