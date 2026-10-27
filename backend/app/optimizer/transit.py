@@ -16,6 +16,7 @@ from typing import Any, Literal, Protocol
 
 import httpx
 
+from app.http_logging import hide_api_keys
 from app.optimizer import polyline
 from app.optimizer.geometry import LatLon
 
@@ -46,22 +47,7 @@ LISBON_TRAM_LINES = frozenset({"12E", "15E", "18E", "24E", "25E", "28E"})
 
 Pair = tuple[LatLon, LatLon]
 
-
-class _HideApiKey(logging.Filter):
-    """httpx logs request URLs (at INFO level), and HERE takes the key in the query."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.args, tuple):
-            record.args = tuple(
-                arg.copy_set_param("apiKey", "***")
-                if isinstance(arg, httpx.URL) and "apiKey" in arg.params
-                else arg
-                for arg in record.args
-            )
-        return True
-
-
-logging.getLogger("httpx").addFilter(_HideApiKey())
+hide_api_keys()
 
 
 @dataclass(frozen=True)
