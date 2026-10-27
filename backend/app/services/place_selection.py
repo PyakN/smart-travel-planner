@@ -39,7 +39,7 @@ from app.schemas.trip import (
     PlaceSelection,
     TripRequest,
 )
-from app.services.weather_service import TripWeather, describe_day, hhmm
+from app.services.weather_service import TripWeather, describe_day, hhmm, with_daylight
 
 MIN_POOL, MAX_POOL, POOL_PER_STOP = 30, 100, 3
 # Candidates open at night, for days that reach into the evening.
@@ -101,7 +101,7 @@ SELECT_SYSTEM = """You choose places for a walking trip.
 """
 
 
-WEATHER_PROMPT = """Weather in the sightseeing hours (outdoor places are marked "outdoor"; they
+WEATHER_PROMPT = """Weather in the days' hours (outdoor places are marked "outdoor"; they
 only suit dry daylight):"""
 
 HOURS_GUIDE = """When places can be visited (marked after the category): "day" closes at
@@ -428,7 +428,7 @@ def _selection_prompt(
         lines.append(WEATHER_PROMPT)
         days = zip(weather.weather.days, weather.windows, strict=True)
         lines.extend(
-            f"- Day {number}, {describe_day(day, *window.sightseeing(trip.pace))}"
+            f"- Day {number}, {describe_day(day, window.start_min, window.end_min)}"
             for number, (day, window) in enumerate(days, start=1)
         )
         if (most := weather.max_outdoor) < target:
@@ -474,9 +474,10 @@ async def select_places(
 ) -> SelectionResult:
     """`hours` gives the hours of the trip's days (by default 09:30 to 21:30), and with them
     how many places to choose and when they are visited. `weather` gives the trip's weather,
-    returned with the result. When the selection is `weather_aware`, the LLM also sees it
-    with each candidate's exposure, and outdoor picks are capped at the share of the
-    sightseeing hours that are dry and light."""
+    returned with the result. When the selection is `weather_aware`, the LLM also sees the
+    weather of the days' hours with each candidate's exposure, outdoor picks are capped at
+    the share of the sightseeing hours that are dry, and the days take the forecast's
+    daylight."""
     text = text.strip()
     if not text:
         raise PlanningError("Describe the trip you want.")
@@ -494,8 +495,10 @@ async def select_places(
     if len(must) < len(set(must_visit)):
         raise PlanningError(f"Some must-visit places are not in {resolved.name}.")
     windows = hours(resolved, trip.days) if hours else [DayWindow()] * trip.days
-    slots = [day_slots(w, trip.pace) for w in windows]
     forecast = await weather(resolved, trip.days) if weather else None
+    if weather_aware and forecast is not None:
+        windows = with_daylight(windows, forecast)
+    slots = [day_slots(w, trip.pace) for w in windows]
     target = max(0, sum(s.places for s in slots) - len(must))
     hours_warnings = evening_warnings(trip, slots)
     if target == 0:
@@ -512,7 +515,7 @@ async def select_places(
         )
     note = None
     if weather_aware and forecast is not None:
-        share = forecast.outdoor_share([w.sightseeing(trip.pace) for w in windows])
+        share = forecast.dry_share([s.busy for s in slots])
         outdoor_must = sum(m.outdoor for m in must)
         most = max(0, round(share * (len(must) + target)) - outdoor_must)
         note = _WeatherNote(forecast, most, windows)

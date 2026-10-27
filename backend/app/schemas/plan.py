@@ -43,8 +43,9 @@ class PlanRequest(BaseModel):
     )
     weather_aware: bool = Field(
         default=False,
-        description="Keep outdoor stops out of rain, snow, fog and darkness, and swap some for "
-        "indoor places when the forecast leaves too few dry daylight hours",
+        description="Plan with the forecast of the days' hours: keep outdoor stops out of rain, "
+        "snow and fog, swap some for indoor places when it leaves too few dry hours, and show "
+        "it. Without it, no forecast is fetched",
     )
     day_start: dt.time = Field(
         default=dt.time(9, 30), description="When each day starts, in the city's local time"

@@ -132,7 +132,7 @@ def test_weather_aware_selection_makes_room_for_the_rain(
 
     prompt = str(provider.calls[1]["prompt"])
     assert (
-        "- Day 1, Wed 28 Oct: moderate rain 10:30-15:30 (up to 91%); 16-17 °C; "
+        "- Day 1, Wed 28 Oct: moderate rain 10:30-16:30 (up to 91%); 15-17 °C; "
         "daylight 07:03-17:37" in prompt
     )
     assert "Choose at most 1 outdoor place. For the rest prefer indoor places" in prompt

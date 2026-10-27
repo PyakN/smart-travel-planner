@@ -197,7 +197,11 @@ def planned_stop(
     leg = visit.leg
     stop = visit.stop
     forecast = (
-        stop_forecast(weather, visit.arrive_min, visit.leave_min, stop.outdoor) if weather else None
+        stop_forecast(
+            weather, visit.arrive_min, visit.leave_min, stop.outdoor, stop.hours == "daylight"
+        )
+        if weather
+        else None
     )
     return PlannedStop(
         place_id=visit.stop.id,
@@ -337,8 +341,13 @@ def day_weather_of(weather: TripWeather | None, day: int) -> DayWeather | None:
     return weather.days[day - 1] if weather and day <= len(weather.days) else None
 
 
-def forecast_of(weather: DayWeather | None, window: DayWindow, pace: Pace) -> DayForecast | None:
-    return day_forecast(weather, *window.sightseeing(pace)) if weather else None
+def forecast_of(weather: DayWeather | None, window: DayWindow) -> DayForecast | None:
+    """The forecast of a day's hours, in the 3-hour steps they overlap."""
+    return day_forecast(weather, window.start_min, window.end_min) if weather else None
+
+
+def latest_end(windows: Sequence[DayWindow]) -> int:
+    return max(w.end_min for w in windows)
 
 
 def weather_warnings(weather: TripWeather | None, weather_aware: bool) -> list[str]:
@@ -396,9 +405,9 @@ async def plan_trip(
     hours: DailyHours = DEFAULT_HOURS,
     now: datetime | None = None,
 ) -> PlanResponse:
-    """`weather` gives every day and stop its forecast; `weather_aware` plans with it.
-    `hours` are the days' hours; a first day that is today starts at `now` (the current
-    time) or later."""
+    """`weather_aware` plans with the `weather` forecast and gives every day and stop its
+    forecast; other plans never ask for it. `hours` are the days' hours; a first day that
+    is today starts at `now` (the current time) or later."""
     watch = Stopwatch()
     selection = await select_places(
         llm,
@@ -408,7 +417,7 @@ async def plan_trip(
         must_visit=must_visit,
         start=LatLon(start.lat, start.lon) if start else None,
         modes=modes,
-        weather=weather_lookup(weather, start_date) if weather else None,
+        weather=weather_lookup(weather, start_date) if weather and weather_aware else None,
         weather_aware=weather_aware,
         hours=hours_lookup(hours, start_date, now),
     )
@@ -441,7 +450,7 @@ async def plan_trip(
         start=StartPoint(start.lat, start.lon, start.round_trip) if start else None,
         modes=modes,
         transit=transit,
-        conditions=outdoor_conditions(forecast) if weather_aware and forecast else None,
+        conditions=outdoor_conditions(forecast, latest_end(windows)) if forecast else None,
     )
     watch.lap("optimization")
 
@@ -469,7 +478,7 @@ async def plan_trip(
                 stops_of_day,
                 segments_of_day,
                 on=first + timedelta(days=day.day - 1),
-                weather=forecast_of(today, day.window, selection.trip.pace),
+                weather=forecast_of(today, day.window),
             )
         )
     weather_reason = "The forecast leaves too few dry daylight hours for it outdoors."

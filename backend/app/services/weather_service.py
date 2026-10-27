@@ -1,20 +1,22 @@
 """Weather for a trip's days: OpenWeatherMap's 5 day / 3 hour forecast.
 
-Weather-aware plans keep outdoor stops (viewpoints, parks, statues) out of hours with rain,
-snow, fog, poor visibility or darkness, and every plan shows the forecast for its days and
-stops.
+Only weather-aware plans use it: they keep outdoor stops (viewpoints, parks, statues) out
+of hours with rain, snow, fog or poor visibility, and show the forecast of their days' hours
+and stops. Darkness the optimizer keeps to itself (app.optimizer.planner.DayWindow); the
+forecast's daylight is shown with it, and weather-aware plans use it too.
 
 The forecast reaches five days ahead in three-hour steps; a moment takes the step whose
 three hours it falls in. Sunrise and sunset come with it for the current day. Later days
 reuse them shifted by whole days (they move a minute or two a day), so darkness is known on
 every trip day, also past the forecast's reach. Times are the city's local wall clock, in
-minutes since midnight like the optimizer's schedule.
+minutes since midnight like the optimizer's schedule; a day's hours may run past midnight,
+so the steps of the next morning count as its own.
 """
 
 import logging
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from math import inf
 from typing import Any, Literal, Protocol
@@ -26,7 +28,7 @@ from app.config import Settings
 from app.http_logging import hide_api_keys
 from app.ingest.cities import City
 from app.optimizer.geometry import LatLon
-from app.optimizer.planner import DayConditions
+from app.optimizer.planner import DayConditions, DayWindow
 from app.schemas.plan import DayForecast, ForecastSlot, StopForecast
 
 logger = logging.getLogger(__name__)
@@ -155,15 +157,14 @@ class DayWeather:
     def is_dark(self, minute: float) -> bool:
         return not self.sunrise_min <= minute < self.sunset_min
 
-    def outdoor_badness(self, minute: float) -> float:
-        """Bad weather or darkness at `minute`: 0 (fine for outdoor sights) to 1."""
-        if self.is_dark(minute):
-            return 1.0
+    def weather_badness(self, minute: float) -> float:
+        """Bad weather at `minute`, darkness aside: 0 (fine for outdoor sights) to 1."""
         step = self.at(minute)
         return step.outdoor_badness if step else 0.0
 
-    def minute_badness(self) -> list[float]:
-        return [self.outdoor_badness(minute) for minute in range(MINUTES_PER_DAY)]
+    def outdoor_badness(self, minute: float) -> float:
+        """Bad weather or darkness at `minute`: 0 (fine for outdoor sights) to 1."""
+        return 1.0 if self.is_dark(minute) else self.weather_badness(minute)
 
 
 def day_weather(forecast: Forecast, day: date, tz: ZoneInfo) -> DayWeather:
@@ -173,10 +174,11 @@ def day_weather(forecast: Forecast, day: date, tz: ZoneInfo) -> DayWeather:
 
     # Shifted in UTC, so the local clock follows daylight saving changes.
     shift = timedelta(days=(day - forecast.sunrise.astimezone(tz).date()).days)
+    # The next morning's steps too, for days that end after midnight.
     steps = tuple(
         (m, step)
         for step in forecast.steps
-        if -STEP_MIN <= (m := minute(step.time)) < MINUTES_PER_DAY + STEP_MIN
+        if -STEP_MIN <= (m := minute(step.time)) < 2 * MINUTES_PER_DAY
     )
     return DayWeather(day, minute(forecast.sunrise + shift), minute(forecast.sunset + shift), steps)
 
@@ -185,12 +187,13 @@ def day_weather(forecast: Forecast, day: date, tz: ZoneInfo) -> DayWeather:
 class TripWeather:
     days: tuple[DayWeather, ...]  # the trip's days in order
 
-    def outdoor_share(self, hours: Sequence[tuple[int, int]]) -> float:
-        """Share of the sightseeing hours, (start, end) for each day in order, that suit
-        outdoor sights: dry, clear enough and light."""
+    def dry_share(self, hours: Sequence[Sequence[tuple[int, int]]]) -> float:
+        """Share of the sightseeing hours, (start, end) spans for each day in order, whose
+        weather suits outdoor sights: dry and clear enough, darkness aside."""
         fine = [
-            day.outdoor_badness(minute) < BAD_WEATHER
-            for day, (start_min, end_min) in zip(self.days, hours, strict=True)
+            day.weather_badness(minute) < BAD_WEATHER
+            for day, spans in zip(self.days, hours, strict=True)
+            for start_min, end_min in spans
             for minute in range(start_min, end_min)
         ]
         return sum(fine) / len(fine) if fine else 1.0
@@ -269,12 +272,16 @@ def day_forecast(day: DayWeather, start_min: int, end_min: int) -> DayForecast |
     )
 
 
-def outdoor_warning(day: DayWeather, arrive_min: int, leave_min: int) -> str | None:
-    """What spoils an outdoor visit, if bad weather or darkness covers most of it."""
+def outdoor_warning(
+    day: DayWeather, arrive_min: int, leave_min: int, daylight: bool = True
+) -> str | None:
+    """What spoils an outdoor visit, if bad weather (or, for a sight that needs `daylight`,
+    darkness) covers most of it."""
     minutes = range(arrive_min, max(leave_min, arrive_min + 1))
-    if sum(map(day.outdoor_badness, minutes)) < BAD_WEATHER * len(minutes):
+    badness = day.outdoor_badness if daylight else day.weather_badness
+    if sum(map(badness, minutes)) < BAD_WEATHER * len(minutes):
         return None
-    if 2 * sum(map(day.is_dark, minutes)) >= len(minutes):
+    if daylight and 2 * sum(map(day.is_dark, minutes)) >= len(minutes):
         if arrive_min > (day.sunrise_min + day.sunset_min) / 2:
             return f"After sunset ({hhmm(day.sunset_min)})"
         return f"Before sunrise ({hhmm(day.sunrise_min)})"
@@ -291,19 +298,35 @@ def outdoor_warning(day: DayWeather, arrive_min: int, leave_min: int) -> str | N
 
 
 def stop_forecast(
-    day: DayWeather, arrive_min: int, leave_min: int, outdoor: bool
+    day: DayWeather, arrive_min: int, leave_min: int, outdoor: bool, daylight: bool = True
 ) -> StopForecast | None:
-    """The forecast at a stop's arrival; outdoor stops also say what spoils their visit."""
+    """The forecast at a stop's arrival; outdoor stops also say what spoils their visit
+    (darkness only for those that need `daylight`)."""
     found = day.slot(arrive_min)
     if found is None:
         return None
-    warning = outdoor_warning(day, arrive_min, leave_min) if outdoor else None
+    warning = outdoor_warning(day, arrive_min, leave_min, daylight) if outdoor else None
     return StopForecast(**forecast_slot(*found).model_dump(), warning=warning)
 
 
-def outdoor_conditions(weather: TripWeather) -> list[DayConditions]:
-    """The trip's weather as the optimizer takes it."""
-    return [DayConditions.from_minutes(day.minute_badness()) for day in weather.days]
+def outdoor_conditions(
+    weather: TripWeather, until_min: int = MINUTES_PER_DAY
+) -> list[DayConditions]:
+    """The trip's weather as the optimizer takes it, minute by minute until `until_min` (past
+    midnight for days that end late). Darkness is not in it: the optimizer keeps outdoor
+    sights that need daylight to it."""
+    return [
+        DayConditions.from_minutes([day.weather_badness(m) for m in range(until_min)])
+        for day in weather.days
+    ]
+
+
+def with_daylight(windows: Sequence[DayWindow], weather: TripWeather) -> list[DayWindow]:
+    """The days' hours with the forecast's daylight, so a plan agrees with its forecast."""
+    return [
+        replace(window, sunrise_min=day.sunrise_min, sunset_min=day.sunset_min)
+        for window, day in zip(windows, weather.days, strict=True)
+    ]
 
 
 def trip_weather(forecast: Forecast, start: date, days: int, tz: ZoneInfo) -> TripWeather:

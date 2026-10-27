@@ -13,8 +13,8 @@
    kind of place. Must-visit stops and the new replacements are never adjusted, and every
    adjustment is reported in the response.
 
-The edited day gets the latest forecast for its date. On weather-aware plans the LLM also
-sees that day's weather and which candidates are outdoor, and the day is ordered around it.
+On weather-aware plans the edited day gets the latest forecast for its date, the LLM sees
+that day's weather and which candidates are outdoor, and the day is ordered around it.
 
 The day keeps its hours. Replacements must be open when the removed stops were visited:
 places open at night only come for stops from 20:00 on, places closed at night only for
@@ -241,9 +241,8 @@ async def replace_stops(
     window = window_of(params, day)
     budget = window.budget(trip.pace)
     free_min = budget - target.duration_min + sum(visit_minutes(s.category) for s in removed)
-    forecast = await _day_weather(weather, plan, day)
-    today = forecast.days[0] if forecast else None
-    aware = forecast if plan.weather_aware else None
+    aware = await _day_weather(weather, plan, day) if plan.weather_aware else None
+    today = aware.days[0] if aware else None
 
     async def ranked(avoid: Sequence[str], only: Sequence[str] = ()) -> list[Candidate]:
         return await find_candidates(
@@ -283,7 +282,7 @@ async def replace_stops(
                 removed,
                 fitting,
                 free_min,
-                describe_day(aware.days[0], *window.sightseeing(trip.pace)) if aware else None,
+                describe_day(today, window.start_min, window.end_min) if today else None,
                 is_timed([day_slots(window, trip.pace)]),
             ),
             schema=PlaceSelection,
@@ -329,7 +328,7 @@ async def replace_stops(
             start=StartPoint(start.lat, start.lon, start.round_trip) if start else None,
             modes=plan.modes,
             transit=transit,
-            conditions=outdoor_conditions(aware) if aware else None,
+            conditions=outdoor_conditions(aware, window.end_min) if aware else None,
         )
 
     route = await optimize_day(stops)
@@ -409,7 +408,7 @@ async def replace_stops(
         ],
         await day_segments(current, start, distances),
         on=target.date,
-        weather=forecast_of(today, window, trip.pace) if today else target.weather,
+        weather=forecast_of(today, window) if today else target.weather,
     )
     watch.lap("geometry")
 

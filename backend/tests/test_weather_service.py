@@ -12,6 +12,7 @@ import pytest
 from app.config import Settings
 from app.ingest.cities import CITIES
 from app.optimizer.geometry import LatLon
+from app.optimizer.planner import DayWindow
 from app.services.weather_service import (
     Forecast,
     OpenWeatherProvider,
@@ -23,10 +24,12 @@ from app.services.weather_service import (
     day_forecast,
     day_weather,
     describe_day,
+    outdoor_conditions,
     outdoor_warning,
     parse_forecast,
     stop_forecast,
     trip_weather,
+    with_daylight,
 )
 
 # In the shape of OpenWeatherMap's 5 day / 3 hour forecast: Lisbon on Wed 28 Oct 2026
@@ -124,8 +127,8 @@ def test_outdoor_badness(overrides: dict[str, Any], badness: float) -> None:
 def test_a_day_in_local_minutes() -> None:
     day = day_weather(forecast(), WEDNESDAY, LISBON_TZ)
     assert (day.sunrise_min, day.sunset_min) == (7 * 60 + 3, 17 * 60 + 37)
-    # The day's eight steps and the first of the next day (it covers 22:30 to midnight).
-    assert [minute for minute, _ in day.steps] == [h * 60 for h in range(0, 25, 3)]
+    # The day's eight steps and the next day's, for hours that run past midnight.
+    assert [minute for minute, _ in day.steps] == [h * 60 for h in range(0, 48, 3)]
     assert day.has_forecast
 
     def described(hour: float) -> str | None:
@@ -167,18 +170,20 @@ def test_past_the_forecast_only_darkness_counts() -> None:
     assert day.outdoor_badness(20 * 60) == 1.0
 
 
-def test_outdoor_share_of_the_sightseeing_hours() -> None:
+def test_dry_share_of_the_sightseeing_hours() -> None:
     trip = trip_weather(forecast(), WEDNESDAY, 2, LISBON_TZ)
     assert [d.date for d in trip.days] == [WEDNESDAY, THURSDAY]
-    day = (9 * 60 + 30, 17 * 60 + 30)
+    day = [(9 * 60 + 30, 17 * 60 + 30)]
     # Wednesday: dry until 10:30 and from 16:30 (a 47% chance is not bad yet).
-    assert trip_weather(forecast(), WEDNESDAY, 1, LISBON_TZ).outdoor_share([day]) == 120 / 480
-    assert trip.outdoor_share([day, day]) == (120 + 480) / 960
-    # Each day has its own hours: Thursday only from 16:30.
-    assert trip.outdoor_share([day, (16 * 60 + 30, 17 * 60 + 30)]) == (120 + 60) / 540
-    # An evening past sunset is dark however dry it is.
+    assert trip_weather(forecast(), WEDNESDAY, 1, LISBON_TZ).dry_share([day]) == 120 / 480
+    assert trip.dry_share([day, day]) == (120 + 480) / 960
+    # Each day has its own hours, in one or more spans: Thursday only from 16:30.
+    assert trip.dry_share([day, [(16 * 60 + 30, 17 * 60 + 30)]]) == (120 + 60) / 540
+    afternoon_and_night = [(16 * 60, 17 * 60), (20 * 60, 21 * 60)]
+    assert trip.dry_share([afternoon_and_night, day]) == (30 + 60 + 480) / 600
+    # Darkness aside: a dry evening counts as dry (the optimizer keeps sights to daylight).
     thursday = trip_weather(forecast(), THURSDAY, 1, LISBON_TZ)
-    assert thursday.outdoor_share([(17 * 60, 19 * 60)]) == 37 / 120
+    assert thursday.dry_share([[(17 * 60, 19 * 60)]]) == 1.0
 
 
 def test_describe_day() -> None:
@@ -213,6 +218,35 @@ def test_outdoor_warning(day: date, hours: tuple[float, float], warning: str | N
     weather = day_weather(forecast(), day, LISBON_TZ)
     arrive, leave = (round(h * 60) for h in hours)
     assert outdoor_warning(weather, arrive, leave) == warning
+
+
+def test_lit_places_only_mind_the_weather() -> None:
+    # A square at night is fine when dry: only sights that need daylight mind the dark.
+    thursday = day_weather(forecast(), THURSDAY, LISBON_TZ)
+    assert outdoor_warning(thursday, 20 * 60, 20 * 60 + 45) == "After sunset (17:37)"
+    assert outdoor_warning(thursday, 20 * 60, 20 * 60 + 45, daylight=False) is None
+    assert thursday.weather_badness(20 * 60) == 0.0 < thursday.outdoor_badness(20 * 60)
+    wednesday = day_weather(forecast(), WEDNESDAY, LISBON_TZ)
+    rain = outdoor_warning(wednesday, 16 * 60, 16 * 60 + 20, daylight=False)
+    assert rain == "Moderate rain likely (91%)"
+
+
+def test_conditions_run_past_midnight() -> None:
+    trip = trip_weather(forecast(), WEDNESDAY, 1, LISBON_TZ)
+    [plain] = outdoor_conditions(trip)
+    [overnight] = outdoor_conditions(trip, 27 * 60)
+    assert len(plain.cumulative) == 24 * 60 + 1 and len(overnight.cumulative) == 27 * 60 + 1
+    # Rain at 16:00 counts, darkness at 22:00 does not; the fog after midnight does.
+    assert overnight.bad_share(16 * 60, 16 * 60 + 20) == pytest.approx(0.91)
+    assert overnight.bad_share(22 * 60, 23 * 60) == 0.0
+    assert overnight.bad_share(26 * 60, 27 * 60) > 0
+
+
+def test_plans_take_the_forecasts_daylight() -> None:
+    trip = trip_weather(forecast(), WEDNESDAY, 1, LISBON_TZ)
+    [window] = with_daylight([DayWindow(16 * 60, 27 * 60, 0, 0)], trip)
+    assert (window.start_min, window.end_min) == (16 * 60, 27 * 60)
+    assert (window.sunrise_min, window.sunset_min) == (7 * 60 + 3, 17 * 60 + 37)
 
 
 def test_showers_from_a_cloudy_step() -> None:

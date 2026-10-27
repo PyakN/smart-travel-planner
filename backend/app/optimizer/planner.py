@@ -166,10 +166,6 @@ class DayWindow:
         """Minutes of travel and visits at this pace: its share of the day's hours."""
         return round(DAY_BUDGET_MIN[pace] * self.length_min / FULL_DAY_MIN)
 
-    def sightseeing(self, pace: Pace) -> tuple[int, int]:
-        """The hours a day at this pace fills from its start, without breaks."""
-        return self.start_min, min(self.end_min, self.start_min + self.budget(pace))
-
     def opening(self, hours: VisitHours) -> tuple[float, float]:
         """When a visit with these hours may begin, and by when it must end."""
         if hours == "day":
