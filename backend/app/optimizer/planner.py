@@ -15,22 +15,33 @@ balanced k-means, one long tour cut into days ("route first, cluster second"), a
 the selection order cut into days. Every day is then ordered by the TSP solver, seeded
 with the selection order, so the plan is never worse than the selection order itself.
 
+Every trip day has its hours (DayWindow): from when to when, past midnight if need be, and
+its daylight. The pace is a share of those hours, so the default 09:30 to 21:30 day plans as
+it always did and a day that starts at 16:00 holds less; days with shorter hours get fewer
+stops when the trip is split. Stops have visit hours (app.catalog.visit_hours), which make
+this a routing problem with time windows: indoor sights close and evening places open at
+NIGHT_START_MIN, and outdoor sights need daylight. A visit that comes too early waits for
+the place to open (free time before it), and none may run past closing time or sunset: a
+day that breaks that is reordered by local search, and if that is not enough, its least
+important stop with such hours is dropped.
+
 Weather-aware plans get the conditions of every trip day: how bad each minute is for
-outdoor sights (rain, snow, fog, poor visibility, darkness). The plan is made as above,
-then an outdoor visit's share of bad minutes costs up to OUTDOOR_PENALTY_MIN more minutes
-of travel (soft time windows). The days are matched to the trip dates that suit them, each
-day is reordered, and outdoor stops caught in bad weather move to another day, alone or in
+outdoor sights (rain, snow, fog, poor visibility). The plan is made as above, then an
+outdoor visit's share of bad minutes costs up to OUTDOOR_PENALTY_MIN more minutes of travel
+(soft time windows). The days are matched to the trip dates that suit them, each day is
+reordered, and outdoor stops caught in bad weather move to another day, alone or in
 exchange for an indoor stop, while that lowers travel time plus penalty. No day goes over
-its time budget for it, and dry, light days keep the plan they had without weather.
+its time budget for it, and dry days keep the plan they had without weather.
 """
 
 from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import accumulate, pairwise, permutations
-from math import ceil, inf
+from math import ceil, floor, inf
 from typing import Literal
 
-from app.optimizer.days import balanced_kmeans, day_sizes, split_sequence
+from app.catalog import VisitHours
+from app.optimizer.days import balanced_kmeans, split_sequence
 from app.optimizer.distance import DistanceProvider, DistanceSource, Matrix, symmetrize
 from app.optimizer.geometry import LatLon, count_self_intersections
 from app.optimizer.transit import TransitProvider, TransitRoute
@@ -47,8 +58,16 @@ TRANSIT_OVERHEAD_MIN = 10
 TRANSIT_M_PER_MIN = 15000 / 60
 # Fetch-and-replan rounds for real transit routes; plans usually settle after one or two.
 TRANSIT_ROUNDS = 3
+MINUTES_PER_DAY = 24 * 60
 DAY_START_MIN = 9 * 60 + 30
+DAY_END_MIN = 21 * 60 + 30
+# The pace's sightseeing time (travel and visits) in a day of the default hours, 09:30 to
+# 21:30. Days with other hours get the same share of theirs: two thirds at a moderate pace;
+# the rest is for meals and rest.
+FULL_DAY_MIN = DAY_END_MIN - DAY_START_MIN
 DAY_BUDGET_MIN: dict[Pace, int] = {"relaxed": 6 * 60, "moderate": 8 * 60, "intense": 10 * 60}
+# Indoor sights close, and bars, fado houses and restaurants open, at 20:00.
+NIGHT_START_MIN = 20 * 60
 VISIT_MIN: dict[str, int] = {
     "museum": 90,
     "gallery": 60,
@@ -64,11 +83,18 @@ VISIT_MIN: dict[str, int] = {
     "restaurant": 90,  # dinner, or fado with it
 }
 DEFAULT_VISIT_MIN = 30
-# An outdoor visit wholly in rain or the dark costs like this many more minutes of travel:
-# worth a detour in the neighbourhood, not a trip across town.
+# An outdoor visit wholly in rain costs like this many more minutes of travel: worth a
+# detour in the neighbourhood, not a trip across town.
 OUTDOOR_PENALTY_MIN = 45
+# Each minute a visit runs past closing time or sunset costs like this many minutes of
+# travel, so local search gets rid of it first.
+LATE_PENALTY_MIN = 100
 # Outdoor stops moved between days per plan, at most.
 MAX_WEATHER_TRADES = 12
+
+
+class NothingFitsError(ValueError):
+    """None of the stops can be visited in the days' hours."""
 
 
 @dataclass(frozen=True)
@@ -82,8 +108,11 @@ class Stop:
     # Must-visit: trimmed only once a day has nothing optional left, then moved to
     # another day that can make room for it.
     required: bool = False
-    # Visited in the open air: weather-aware plans keep it out of rain and darkness.
+    # Visited in the open air: weather-aware plans keep it out of the rain.
     outdoor: bool = False
+    # When it can be visited: any time, by day (until NIGHT_START_MIN), in daylight, or at
+    # night (from NIGHT_START_MIN).
+    hours: VisitHours = "any"
 
 
 @dataclass(frozen=True)
@@ -112,6 +141,40 @@ class DayConditions:
         if end <= start:
             return 0.0
         return (self._sum_to(end) - self._sum_to(start)) / (end - start)
+
+
+@dataclass(frozen=True)
+class DayWindow:
+    """A trip day's hours in minutes since its midnight; `end_min` is past 24 * 60 when the
+    day ends after midnight. Outdoor sights that need daylight are visited between sunrise
+    and sunset, when those are known."""
+
+    start_min: int = DAY_START_MIN
+    end_min: int = DAY_END_MIN
+    sunrise_min: int | None = None
+    sunset_min: int | None = None
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.start_min < self.end_min <= self.start_min + MINUTES_PER_DAY:
+            raise ValueError(f"no such day hours: {self.start_min} to {self.end_min}")
+
+    @property
+    def length_min(self) -> int:
+        return self.end_min - self.start_min
+
+    def budget(self, pace: Pace) -> int:
+        """Minutes of travel and visits at this pace: its share of the day's hours."""
+        return round(DAY_BUDGET_MIN[pace] * self.length_min / FULL_DAY_MIN)
+
+    def opening(self, hours: VisitHours) -> tuple[float, float]:
+        """When a visit with these hours may begin, and by when it must end."""
+        if hours == "day":
+            return -inf, NIGHT_START_MIN
+        if hours == "night":
+            return NIGHT_START_MIN, inf
+        if hours == "daylight" and self.sunrise_min is not None and self.sunset_min is not None:
+            return self.sunrise_min, self.sunset_min
+        return -inf, inf
 
 
 @dataclass(frozen=True)
@@ -178,6 +241,8 @@ class Visit:
     leg: Leg | None  # from the previous stop or the start point; None for a free start
     arrive_min: int  # minutes since midnight
     leave_min: int
+    # Free time before setting off for it: the place opens later.
+    wait_min: int = 0
 
 
 @dataclass(frozen=True)
@@ -188,8 +253,9 @@ class DayPlan:
     distance_m: float  # all legs, including the way back for round trips
     walking_m: float
     transit_legs: int
-    total_min: int
+    total_min: int  # counted against the day's budget, as _DayCost.length
     self_intersections: int
+    window: DayWindow
 
 
 @dataclass(frozen=True)
@@ -214,8 +280,14 @@ def visit_minutes(category: str) -> int:
 
 
 def day_hours(pace: Pace) -> tuple[int, int]:
-    """The sightseeing hours of a day at this pace, in minutes since midnight."""
+    """The sightseeing hours of a default day at this pace, in minutes since midnight."""
     return DAY_START_MIN, DAY_START_MIN + DAY_BUDGET_MIN[pace]
+
+
+def duration_label(minutes: int) -> str:
+    """ "6 h", "3 h 40 min"."""
+    hours, rest = divmod(minutes, 60)
+    return f"{hours} h {rest} min" if rest else f"{hours} h"
 
 
 Routes = Mapping[tuple[int, int], TransitRoute | None]
@@ -224,12 +296,16 @@ Routes = Mapping[tuple[int, int], TransitRoute | None]
 @dataclass(frozen=True)
 class _DayCost:
     travel: float  # minutes, each leg in its own direction
-    bad: float  # outdoor visits' average badness, summed
-    length: int  # minutes from the start of the day to its end, as _schedule counts them
+    bad: float  # outdoor visits' average bad weather, summed
+    # The day against its budget: its travel and visits, or (if more) how long it runs from
+    # the start of its hours less the time they leave for meals and rest. Within the budget,
+    # the day keeps to the pace and ends by the end of its hours.
+    length: int
+    late: int  # minutes visits run past closing time or sunset
 
     @property
     def total(self) -> float:
-        return self.travel + OUTDOOR_PENALTY_MIN * self.bad
+        return self.travel + OUTDOOR_PENALTY_MIN * self.bad + LATE_PENALTY_MIN * self.late
 
 
 class _Problem:
@@ -238,7 +314,8 @@ class _Problem:
     `legs[a][b]` is how to get from a to b and `distance` is in metres on foot. `matrix`
     holds the travel minutes the solvers minimise, averaged over both directions (they
     need it symmetric). `routes` are the transit routes fetched so far, by (from, to).
-    `conditions` are the weather of the trip days, in date order, for weather-aware plans.
+    `windows` are the hours of the trip days in date order, and `conditions` their weather,
+    for weather-aware plans; `day` arguments index them (0 is the first trip day).
     """
 
     def __init__(
@@ -248,6 +325,8 @@ class _Problem:
         start: StartPoint | None,
         modes: Collection[TravelMode],
         routes: Routes,
+        windows: Sequence[DayWindow],
+        pace: Pace,
         conditions: Sequence[DayConditions] | None = None,
     ) -> None:
         self.distance = distance
@@ -263,6 +342,13 @@ class _Problem:
         self.rank = {i: stops[i].priority for i in range(len(stops))}
         self.conditions = conditions
         self.visit_min = [visit_minutes(s.category) for s in stops]
+        self.windows = list(windows)
+        self.budgets = [w.budget(pace) for w in self.windows]
+        # opening[day][i]: when stop i may be visited that day, as DayWindow.opening.
+        self.opening = [[w.opening(s.hours) for s in stops] for w in self.windows]
+        self.timed = any(o != (-inf, inf) for day in self.opening for o in day)
+        # Days with the same hours can take each other's stops as they are.
+        self.uniform = len({(w.start_min, w.end_min) for w in self.windows}) == 1
 
     def _leg(self, a: int, b: int, walking: bool) -> Leg:
         d = self.distance[a][b]
@@ -296,41 +382,79 @@ class _Problem:
         path = self.path(order)
         return [self.legs[a][b] for a, b in zip(path, path[1:], strict=False)]
 
-    def solve_day(self, group: Sequence[int]) -> list[int]:
+    def solve_day(self, group: Sequence[int], day: int) -> list[int]:
+        """The shortest order of a day's stops that keeps to their opening hours, if any
+        does: the TSP order, reordered when a visit runs late (weather aside)."""
+        if not group:
+            return []
         initial = sorted(group, key=lambda i: self.rank[i])
-        return order_stops(
+        order = order_stops(
             self.matrix, group, start=self.start, round_trip=self.round_trip, initial=initial
         )
+        if self.timed and self.day_cost(order, day, weather=False).late:
+            order = _reorder(self, order, day, weather=False)
+        return order
 
-    def weather_cost(self, order: Sequence[int], day: int) -> _DayCost:
-        """Travel and weather of a day in this order on trip day `day` (0 is the first).
-
-        The schedule is _schedule's; this is the lean version local search calls a lot.
-        """
-        conditions = self.conditions[day] if self.conditions else None
-        clock, travel, bad = float(DAY_START_MIN), 0.0, 0.0
+    def day_cost(
+        self,
+        order: Sequence[int],
+        day: int,
+        *,
+        weather: bool = True,
+        visits: list[Visit] | None = None,
+    ) -> _DayCost:
+        """Travel, weather and timing of a day in this order on trip day `day`; `visits`, if
+        given, collects its schedule. Local search calls this a lot, so it stays lean."""
+        window, opening = self.windows[day], self.opening[day]
+        conditions = self.conditions[day] if weather and self.conditions else None
+        clock = float(window.start_min)
+        travel = visiting = bad = 0.0
+        late = 0
         previous = self.start
         for i in order:
-            if previous is not None:
-                minutes = self.legs[previous][i].minutes
-                clock += minutes
-                travel += minutes
-            leave = clock + self.visit_min[i]
+            leg = self.legs[previous][i] if previous is not None else None
+            if leg is not None:
+                clock += leg.minutes
+                travel += leg.minutes
+            opens, closes = opening[i]
+            begin = max(clock, opens)  # wait for it to open
+            leave = begin + self.visit_min[i]
+            visiting += self.visit_min[i]
+            if leave > closes:
+                late += round(leave - closes)
             if conditions is not None and self.stops[i].outdoor:
-                bad += conditions.bad_share(clock, leave)
+                bad += conditions.bad_share(begin, leave)
+            if visits is not None:
+                # A day with a free start simply begins at its first stop.
+                wait = round(begin - clock) if previous is not None else 0
+                visits.append(Visit(self.stops[i], leg, round(begin), round(leave), wait))
             clock, previous = leave, i
         if self.round_trip and order and self.start is not None:
             minutes = self.legs[order[-1]][self.start].minutes
             clock += minutes
             travel += minutes
-        return _DayCost(travel, bad, round(clock - DAY_START_MIN))
+        slack = window.length_min - self.budgets[day]
+        length = max(travel + visiting, clock - window.start_min - slack)
+        return _DayCost(travel, bad, round(length), late)
+
+    def schedule(self, order: Sequence[int], day: int) -> tuple[list[Visit], _DayCost]:
+        visits: list[Visit] = []
+        cost = self.day_cost(order, day, visits=visits)
+        return visits, cost
+
+    def fits(self, cost: _DayCost, day: int) -> bool:
+        return cost.late == 0 and cost.length <= self.budgets[day]
+
+    def timed_stops(self, order: Sequence[int], day: int) -> list[int]:
+        """Stops of `order` that close (or lose the light) during trip day `day`."""
+        return [i for i in order if self.opening[day][i][1] < inf]
 
     def exposed(self, order: Sequence[int], day: int) -> list[int]:
-        """Outdoor stops of a day that meet bad weather or darkness."""
+        """Outdoor stops of a day that meet bad weather."""
         if not self.conditions:
             return []
         conditions = self.conditions[day]
-        visits = _schedule(self, order)[0]
+        visits = self.schedule(order, day)[0]
         return [
             i
             for i, v in zip(order, visits, strict=True)
@@ -338,87 +462,93 @@ class _Problem:
         ]
 
 
-def _split_by_time(
-    problem: _Problem, sequence: Sequence[int], days: int, budget_min: int
-) -> list[list[int]]:
-    """Contiguous days that each fit the time budget, sizes free down to half the average.
+def _split_by_time(problem: _Problem, sequence: Sequence[int], days: int) -> list[list[int]]:
+    """Contiguous days that each fit their time budget, sizes free down to half of what the
+    shortest day would hold by its share of the budgets.
 
     Dense areas can then fill a day while spread-out ones take fewer stops. Falls back
-    to equal-size days when no split fits the budget (trimming deals with it later).
+    to equal-size days when no split fits the budgets (trimming deals with it later).
     """
+    budgets = problem.budgets[:days]
 
-    def day_cost(chunk: Sequence[int]) -> float:
-        fits = _schedule(problem, chunk)[1] <= budget_min
+    def day_cost(chunk: Sequence[int], day: int) -> float:
+        fits = problem.day_cost(chunk, day, weather=False).length <= budgets[day]
         return problem.cost(chunk) if fits else inf
 
-    min_size = ceil(day_sizes(len(sequence), days)[0] / 2)
+    smallest = floor(len(sequence) * min(budgets) / sum(budgets))
+    min_size = ceil(smallest / 2)
     split = split_sequence(sequence, days, day_cost, min_size=min_size, max_size=len(sequence))
     if split is None:
-        split = split_sequence(sequence, days, problem.cost)
+        split = split_sequence(sequence, days, lambda chunk, _: problem.cost(chunk))
     assert split is not None  # balanced split is always feasible
     return split
 
 
-def _split_strategies(problem: _Problem, days: int, budget_min: int) -> dict[str, list[list[int]]]:
+def _capacities(problem: _Problem, days: int) -> list[int] | None:
+    """Stops per day for k-means, by each day's share of the budgets; None if all are equal."""
+    budgets = problem.budgets[:days]
+    if len(set(budgets)) == 1:
+        return None
+    n = len(problem.stops)
+    return [ceil(n * budget / sum(budgets)) for budget in budgets]
+
+
+def _split_strategies(problem: _Problem, days: int) -> dict[str, list[list[int]]]:
     n = len(problem.stops)
     by_priority = sorted(range(n), key=lambda i: problem.rank[i])
     whole_tour = order_stops(problem.matrix, range(n))
     points = [LatLon(s.lat, s.lon) for s in problem.stops]
     return {
-        "kmeans": balanced_kmeans(points, days),
-        "route-first": _split_by_time(problem, whole_tour, days, budget_min),
-        "selection-order": _split_by_time(problem, by_priority, days, budget_min),
+        "kmeans": balanced_kmeans(points, days, _capacities(problem, days)),
+        "route-first": _split_by_time(problem, whole_tour, days),
+        "selection-order": _split_by_time(problem, by_priority, days),
     }
 
 
-def _schedule(problem: _Problem, order: Sequence[int]) -> tuple[list[Visit], int]:
-    visits: list[Visit] = []
-    clock, previous = float(DAY_START_MIN), problem.start
-    for i in order:
-        leg = problem.legs[previous][i] if previous is not None else None
-        clock += leg.minutes if leg else 0.0
-        arrive = clock
-        clock += visit_minutes(problem.stops[i].category)
-        visits.append(Visit(problem.stops[i], leg, round(arrive), round(clock)))
-        previous = i
-    if problem.round_trip and order and problem.start is not None:
-        clock += problem.legs[order[-1]][problem.start].minutes
-    return visits, round(clock - DAY_START_MIN)
-
-
 def _fit_budget(
-    problem: _Problem, order: list[int], budget_min: int
-) -> tuple[list[int], list[int]]:
-    """Drop the least important stops until the day fits; returns (order, dropped).
+    problem: _Problem, order: list[int], day: int
+) -> tuple[list[int], list[int], list[int]]:
+    """Drop stops until the day fits; returns (order, dropped for time, dropped for hours).
 
-    Optional stops go first; must-visit ones only when nothing optional is left.
+    While a visit runs past closing time or sunset, the least important stop with such hours
+    goes; while the day is too long, the least important stop. Optional stops go first,
+    must-visit ones only when nothing optional is left.
     """
-    dropped: list[int] = []
-    while len(order) > 1 and _schedule(problem, order)[1] > budget_min:
-        worst = max(order, key=lambda i: (not problem.stops[i].required, problem.rank[i]))
+    over: list[int] = []
+    closed: list[int] = []
+    while order:
+        cost = problem.day_cost(order, day, weather=False)
+        if cost.late:
+            candidates, dropped = problem.timed_stops(order, day), closed
+        elif cost.length > problem.budgets[day] and len(order) > 1:
+            candidates, dropped = order, over
+        else:
+            break
+        worst = max(candidates, key=lambda i: (not problem.stops[i].required, problem.rank[i]))
         dropped.append(worst)
-        order = problem.solve_day([i for i in order if i != worst])
-    return order, dropped
+        order = problem.solve_day([i for i in order if i != worst], day)
+    return order, over, closed
 
 
 def _make_room(
-    problem: _Problem, order: Sequence[int], stop: int, budget_min: int
+    problem: _Problem, order: Sequence[int], stop: int, day: int
 ) -> tuple[list[int], list[int]] | None:
     """Add `stop` to a day, dropping its least important optional stops until it fits."""
-    new_order = problem.solve_day([*order, stop])
+    new_order = problem.solve_day([*order, stop], day)
     removed: list[int] = []
-    while _schedule(problem, new_order)[1] > budget_min:
-        optional = [i for i in new_order if not problem.stops[i].required]
+    while not problem.fits(cost := problem.day_cost(new_order, day, weather=False), day):
+        candidates = problem.timed_stops(new_order, day) if cost.late else new_order
+        optional = [i for i in candidates if not problem.stops[i].required]
         if not optional:
             return None
         worst = max(optional, key=lambda i: problem.rank[i])
         removed.append(worst)
-        new_order = problem.solve_day([i for i in new_order if i != worst])
+        new_order = problem.solve_day([i for i in new_order if i != worst], day)
     return new_order, removed
 
 
 def _place_required(
-    problem: _Problem, day_orders: list[list[int]], dropped: list[int], budget_min: int
+    problem: _Problem, day_orders: list[list[int]], dropped: list[int]
 ) -> list[int]:
     """Give each dropped must-visit stop the day that loses the fewest optional stops for it.
 
@@ -430,7 +560,7 @@ def _place_required(
     ):
         options = []
         for d, order in enumerate(day_orders):
-            placed = _make_room(problem, order, stop, budget_min)
+            placed = _make_room(problem, order, stop, d)
             if placed is not None:
                 new_order, removed = placed
                 added = problem.cost(new_order) - problem.cost(order)
@@ -450,14 +580,14 @@ def _cheapest_insertion(problem: _Problem, order: Sequence[int], stop: int) -> f
     )
 
 
-def _rebalance(problem: _Problem, day_orders: list[list[int]], budget_min: int) -> list[list[int]]:
+def _rebalance(problem: _Problem, day_orders: list[list[int]]) -> list[list[int]]:
     """Move stops between days while that cuts total travel time and every day fits.
 
     The initial splits keep days equal in stop count; real days are limited by time, so a
     dense neighbourhood can take more stops than a spread-out one.
     """
     days = [list(order) for order in day_orders]
-    duration = [_schedule(problem, order)[1] for order in days]
+    costs = [problem.day_cost(order, d, weather=False) for d, order in enumerate(days)]
     improved = True
     while improved:
         improved = False
@@ -471,14 +601,20 @@ def _rebalance(problem: _Problem, day_orders: list[list[int]], budget_min: int) 
                     # Cheap filter first, then re-solve both days and check exactly.
                     if b == a or _cheapest_insertion(problem, days[b], stop) >= gain - EPS:
                         continue
-                    new_a, new_b = problem.solve_day(without), problem.solve_day([*days[b], stop])
-                    dur_a, dur_b = _schedule(problem, new_a)[1], _schedule(problem, new_b)[1]
-                    if dur_b > budget_min or dur_a > max(budget_min, duration[a]):
+                    new_a, new_b = (
+                        problem.solve_day(without, a),
+                        problem.solve_day([*days[b], stop], b),
+                    )
+                    cost_a = problem.day_cost(new_a, a, weather=False)
+                    cost_b = problem.day_cost(new_b, b, weather=False)
+                    if not problem.fits(cost_b, b) or cost_a.late > costs[a].late:
+                        continue
+                    if cost_a.length > max(problem.budgets[a], costs[a].length):
                         continue
                     old = problem.cost(days[a]) + problem.cost(days[b])
                     if problem.cost(new_a) + problem.cost(new_b) < old - EPS:
                         days[a], days[b] = new_a, new_b
-                        duration[a], duration[b] = dur_a, dur_b
+                        costs[a], costs[b] = cost_a, cost_b
                         improved = True
                         break
                 if improved:
@@ -506,52 +642,69 @@ def _reorderings(order: Sequence[int]) -> Iterator[list[int]]:
             yield [*order[:i], *reversed(order[i:j]), *order[j:]]
 
 
-def _improve_day(problem: _Problem, order: Sequence[int], day: int, limit: int) -> list[int]:
-    """First-improvement local search for travel plus weather, within `limit` minutes."""
+def _improve_day(
+    problem: _Problem, order: Sequence[int], day: int, limit: int, *, weather: bool = True
+) -> list[int]:
+    """First-improvement local search for travel, lateness and weather, within `limit`
+    minutes."""
     best = list(order)
-    best_cost = problem.weather_cost(best, day).total
+    best_cost = problem.day_cost(best, day, weather=weather).total
     improved = True
     while improved:
         improved = False
         for candidate in _reorderings(best):
-            cost = problem.weather_cost(candidate, day)
+            cost = problem.day_cost(candidate, day, weather=weather)
             if cost.total < best_cost - EPS and cost.length <= limit:
                 best, best_cost, improved = candidate, cost.total, True
                 break
     return best
 
 
-def _weather_order(problem: _Problem, order: Sequence[int], day: int, budget: int) -> list[int]:
-    """Reorder a day so its outdoor stops meet less bad weather, if any of them meets some.
+def _reorder(
+    problem: _Problem,
+    order: Sequence[int],
+    day: int,
+    limit: int | None = None,
+    *,
+    weather: bool = True,
+) -> list[int]:
+    """Reorder a day whose outdoor stops meet bad weather or whose visits run late.
 
-    The day keeps to the budget (or to its current length, if that is longer already).
-    Also tried from the reversed order: a day often just needs turning around.
+    The day keeps to `limit`: the budget (or its current length, if that is longer already).
+    Also tried from the reversed order, as a day often just needs turning around, and for
+    late visits from the order of closing times.
     """
-    current = problem.weather_cost(order, day)
-    if current.bad <= EPS:
+    current = problem.day_cost(order, day, weather=weather)
+    if current.bad <= EPS and not current.late:
         return list(order)
-    limit = max(budget, current.length)
+    if limit is None:
+        limit = max(problem.budgets[day], current.length)
     seeds = [list(order)]
-    if problem.weather_cost(order[::-1], day).length <= limit:
+    if problem.day_cost(order[::-1], day, weather=weather).length <= limit:
         seeds.append(list(order[::-1]))
-    improved = [_improve_day(problem, seed, day, limit) for seed in seeds]
-    return min(improved, key=lambda o: problem.weather_cost(o, day).total)
+    if current.late:
+        # Stable: stops that close at the same time keep their order.
+        seeds.append(sorted(order, key=lambda i: problem.opening[day][i][::-1]))
+    improved = [_improve_day(problem, seed, day, limit, weather=weather) for seed in seeds]
+    return min(improved, key=lambda o: problem.day_cost(o, day, weather=weather).total)
 
 
 def _assign_dates(problem: _Problem, day_orders: list[list[int]]) -> list[list[int]]:
     """Put each day's stops on the trip date where they meet the least bad weather.
 
-    Every assignment is tried (7! for a week). Unless one is better, days keep their
-    order, so day 1 still holds the most important stop.
+    Every assignment is tried (7! for a week); a date whose budget a day's stops overflow
+    (more than on their own date) is not an option for them. Unless one is better, days keep
+    their order, so day 1 still holds the most important stop.
     """
     n = len(day_orders)
-    cost = [
-        [
-            min(problem.weather_cost(o, d).total, problem.weather_cost(o[::-1], d).total)
-            for d in range(n)
-        ]
-        for o in day_orders
-    ]
+
+    def on_date(i: int, d: int) -> float:
+        order = day_orders[i]
+        limit = max(problem.budgets[d], problem.day_cost(order, i).length)
+        costs = [problem.day_cost(o, d) for o in (order, order[::-1])]
+        return min((c.total for c in costs if c.length <= limit), default=inf)
+
+    cost = [[on_date(i, d) for d in range(n)] for i in range(n)]
 
     def total(dates: Sequence[int]) -> float:
         return sum(cost[i][d] for i, d in enumerate(dates))
@@ -573,7 +726,7 @@ def _best_insertion(
     options = []
     for pos in range(len(order) + 1):
         new = [*order[:pos], stop, *order[pos:]]
-        cost = problem.weather_cost(new, day)
+        cost = problem.day_cost(new, day)
         if cost.length <= limit:
             options.append((cost.total, pos, new))
     return min(options)[2] if options else None
@@ -590,7 +743,7 @@ def _trades(
             for b, other in enumerate(days):
                 if b == a:
                     continue
-                if without and problem.weather_cost(without, a).length <= limits[a]:
+                if without and problem.day_cost(without, a).length <= limits[a]:
                     moved = _best_insertion(problem, other, stop, b, limits[b])
                     if moved is not None:
                         yield a, b, without, moved
@@ -602,73 +755,93 @@ def _trades(
                         yield a, b, into_a, into_b
 
 
-def _trade_days(problem: _Problem, day_orders: list[list[int]], budget: int) -> list[list[int]]:
+def _trade_days(problem: _Problem, day_orders: list[list[int]]) -> list[list[int]]:
     """Make the best trade of outdoor stops between days while one lowers travel time plus
     weather penalty, then reorder the two days it changed."""
     days = [list(order) for order in day_orders]
     for _ in range(MAX_WEATHER_TRADES):
-        costs = [problem.weather_cost(order, d) for d, order in enumerate(days)]
-        limits = [max(budget, cost.length) for cost in costs]
+        costs = [problem.day_cost(order, d) for d, order in enumerate(days)]
+        limits = [max(problem.budgets[d], cost.length) for d, cost in enumerate(costs)]
         best_gain, best = EPS, None
         for a, b, new_a, new_b in _trades(problem, days, limits):
-            after = problem.weather_cost(new_a, a).total + problem.weather_cost(new_b, b).total
+            after = problem.day_cost(new_a, a).total + problem.day_cost(new_b, b).total
             gain = costs[a].total + costs[b].total - after
             if gain > best_gain:
                 best_gain, best = gain, (a, b, new_a, new_b)
         if best is None:
             break
         a, b, new_a, new_b = best
-        days[a] = _weather_order(problem, new_a, a, limits[a])
-        days[b] = _weather_order(problem, new_b, b, limits[b])
+        days[a] = _reorder(problem, new_a, a, limits[a])
+        days[b] = _reorder(problem, new_b, b, limits[b])
     return days
 
 
-def _weather_schedule(
-    problem: _Problem, day_orders: list[list[int]], budget: int
-) -> list[list[int]]:
+def _weather_schedule(problem: _Problem, day_orders: list[list[int]]) -> list[list[int]]:
     """Days on the dates that suit them, each day reordered, then trades between days."""
     dated = _assign_dates(problem, day_orders)
-    dated = [_weather_order(problem, order, d, budget) for d, order in enumerate(dated)]
-    return _trade_days(problem, dated, budget)
+    dated = [_reorder(problem, order, d) for d, order in enumerate(dated)]
+    return _trade_days(problem, dated)
 
 
 @dataclass(frozen=True)
 class _Solution:
     strategy: str
-    day_orders: list[list[int]]
+    day_orders: list[list[int]]  # by trip day; a day with no stops is empty
     dropped: list[int]
     warnings: list[str]
 
 
-def _solve(problem: _Problem, days: int, budget: int, enforce_budget: bool) -> _Solution:
+def _drop_warnings(
+    problem: _Problem, days: int, dropped: Sequence[int], closed: Collection[int]
+) -> list[str]:
+    warnings = []
+    shut = sum(i in closed for i in dropped)
+    if over := len(dropped) - shut:
+        budgets = set(problem.budgets[:days])
+        fit = f"{duration_label(budgets.pop())} days" if len(budgets) == 1 else "the days' hours"
+        warnings.append(f"dropped {over} stop(s) to fit {fit}")
+    if shut:
+        warnings.append(f"dropped {shut} stop(s) that are closed or dark in the day's hours")
+    if missed := sum(problem.stops[i].required for i in dropped):
+        warnings.append(f"{missed} must-visit stop(s) do not fit any day")
+    return warnings
+
+
+def _solve(problem: _Problem, days: int, enforce_budget: bool) -> _Solution:
     candidates = {
-        name: [problem.solve_day(group) for group in groups if group]
-        for name, groups in _split_strategies(problem, days, budget).items()
+        name: [problem.solve_day(group, d) for d, group in enumerate(groups)]
+        for name, groups in _split_strategies(problem, days).items()
     }
     strategy, day_orders = min(
         candidates.items(), key=lambda item: sum(problem.cost(o) for o in item[1])
     )
-    day_orders = _rebalance(problem, day_orders, budget)
+    day_orders = _rebalance(problem, day_orders)
 
     dropped: list[int] = []
-    warnings: list[str] = []
-    if enforce_budget:
-        fitted = []
-        for order in day_orders:
-            order, removed = _fit_budget(problem, order, budget)
-            fitted.append(order)
-            dropped.extend(removed)
-        day_orders = fitted
-        dropped = _place_required(problem, day_orders, dropped, budget)
-        if dropped:
-            warnings.append(f"dropped {len(dropped)} stop(s) to fit {budget // 60} h days")
-        if missed := sum(problem.stops[i].required for i in dropped):
-            warnings.append(f"{missed} must-visit stop(s) do not fit any day")
+    closed: set[int] = set()
 
-    # Day 1 holds the most important stop, and so on, unless the weather says otherwise.
-    day_orders.sort(key=lambda order: min(problem.rank[i] for i in order))
+    def fit(d: int, order: list[int]) -> list[int]:
+        order, over, shut = _fit_budget(problem, order, d)
+        dropped.extend(over + shut)
+        closed.update(shut)
+        return order
+
+    if enforce_budget:
+        day_orders = [fit(d, order) for d, order in enumerate(day_orders)]
+        dropped[:] = _place_required(problem, day_orders, dropped)
+
+    if problem.uniform:
+        # Day 1 holds the most important stop, and so on, unless the weather says otherwise.
+        day_orders = [order for order in day_orders if order]
+        day_orders.sort(key=lambda order: min(problem.rank[i] for i in order))
     if problem.conditions is not None:
-        day_orders = _weather_schedule(problem, day_orders, budget)
+        day_orders = _weather_schedule(problem, day_orders)
+    if problem.timed:
+        # On the dates they ended up on, days keep to their hours (daylight differs a bit).
+        day_orders = [_reorder(problem, order, d) for d, order in enumerate(day_orders)]
+        if enforce_budget:
+            day_orders = [fit(d, order) for d, order in enumerate(day_orders)]
+    warnings = _drop_warnings(problem, days, dropped, closed) if enforce_budget else []
     return _Solution(strategy, day_orders, dropped, warnings)
 
 
@@ -683,29 +856,35 @@ async def plan_route(
     modes: Collection[TravelMode] = ALL_MODES,
     transit: TransitProvider | None = None,
     conditions: Sequence[DayConditions] | None = None,
+    windows: Sequence[DayWindow] | None = None,
 ) -> RoutePlan:
-    """`conditions`, one per trip day in date order, make the plan weather-aware: plan day
-    N is then trip day N."""
+    """`windows`, one per trip day in date order, are the days' hours (by default 09:30 to
+    21:30); `conditions`, likewise, make the plan weather-aware. Plan day N is trip day N.
+
+    Raises NothingFitsError when no stop can be visited in the days' hours.
+    """
     if not stops:
         raise ValueError("no stops to plan")
     transit_threshold_m(modes)  # fail on no modes before any routing request
     if conditions is not None and len(conditions) < days:
         raise ValueError(f"weather conditions for {len(conditions)} of {days} days")
+    if windows is not None and len(windows) < days:
+        raise ValueError(f"hours for {len(windows)} of {days} days")
     warnings: list[str] = []
     if days > len(stops):
         warnings.append(f"only {len(stops)} stops for {days} days; using {len(stops)} days")
         days = len(stops)
+    hours = list(windows[:days]) if windows is not None else [DayWindow()] * days
 
     points = [LatLon(s.lat, s.lon) for s in stops] + (
         [LatLon(start.lat, start.lon)] if start else []
     )
     distances = await provider.matrix(points)
-    budget = DAY_BUDGET_MIN[pace]
 
     routes: dict[tuple[int, int], TransitRoute | None] = {}
     for attempt in range(TRANSIT_ROUNDS + 1):
-        problem = _Problem(distances.matrix, stops, start, modes, routes, conditions)
-        solution = _solve(problem, days, budget, enforce_budget)
+        problem = _Problem(distances.matrix, stops, start, modes, routes, hours, pace, conditions)
+        solution = _solve(problem, days, enforce_budget)
         if transit is None or attempt == TRANSIT_ROUNDS:
             break
         unknown = problem.unknown_rides(solution.day_orders)
@@ -717,24 +896,29 @@ async def plan_route(
     strategy, day_orders, dropped = solution.strategy, solution.day_orders, solution.dropped
     warnings += solution.warnings
     plans = []
-    for number, order in enumerate(day_orders, start=1):
-        visits, total_min = _schedule(problem, order)
+    for index, order in enumerate(day_orders):
+        if not order:
+            continue
+        visits, cost = problem.schedule(order, index)
         legs = problem.day_legs(order)
         path_points = [points[i] for i in problem.path(order)]
         if problem.round_trip:
             path_points = path_points[:-1]
         plans.append(
             DayPlan(
-                day=number,
+                day=index + 1,
                 visits=visits,
                 return_leg=legs[-1] if problem.round_trip else None,
                 distance_m=sum(leg.distance_m for leg in legs),
                 walking_m=sum(leg.walking_m for leg in legs),
                 transit_legs=sum(leg.mode == "transit" for leg in legs),
-                total_min=total_min,
+                total_min=cost.length,
                 self_intersections=count_self_intersections(path_points, closed=problem.round_trip),
+                window=hours[index],
             )
         )
+    if not plans:
+        raise NothingFitsError("none of the stops can be visited in the days' hours")
     return RoutePlan(
         days=plans,
         strategy=strategy,

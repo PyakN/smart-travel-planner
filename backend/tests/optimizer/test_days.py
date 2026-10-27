@@ -37,6 +37,15 @@ def test_kmeans_respects_capacity() -> None:
     assert sorted(i for g in groups for i in g) == list(range(9))
 
 
+def test_kmeans_with_capacities_per_day() -> None:
+    # A short first day (an afternoon) takes 2 stops; the full days share the rest.
+    groups = balanced_kmeans(ALFAMA + BELEM + AVENIDAS, days=3, capacities=[2, 5, 5])
+    assert [len(g) for g in groups] == [2, 5, 5]
+    assert sorted(i for g in groups for i in g) == list(range(12))
+    with pytest.raises(ValueError, match="hold every point"):
+        balanced_kmeans(ALFAMA + BELEM, days=2, capacities=[2, 5])
+
+
 def test_kmeans_edge_cases() -> None:
     assert balanced_kmeans(ALFAMA, days=1) == [[0, 1, 2, 3]]
     assert balanced_kmeans(ALFAMA[:2], days=3) == [[0], [1], []]
@@ -44,7 +53,7 @@ def test_kmeans_edge_cases() -> None:
         balanced_kmeans(ALFAMA, days=0)
 
 
-def spread(chunk: Sequence[float]) -> float:
+def spread(chunk: Sequence[float], day: int = 0) -> float:
     return max(chunk) - min(chunk) if chunk else 0.0
 
 
@@ -62,3 +71,14 @@ def test_split_sequence_keeps_days_balanced() -> None:
 
 def test_split_sequence_fewer_items_than_days() -> None:
     assert split_sequence([1.0, 2.0], 3, spread) == [[1.0], [2.0], []]
+
+
+def test_split_sequence_costs_each_chunk_as_its_day() -> None:
+    # The first day holds two items at most; the second takes the rest.
+    def short_first_day(chunk: Sequence[float], day: int) -> float:
+        return float("inf") if day == 0 and len(chunk) > 2 else spread(chunk)
+
+    positions = [0.0, 1, 10, 11, 12, 13]
+    chunks = split_sequence(positions, 2, short_first_day, min_size=1, max_size=6)
+    assert chunks == [[0, 1], [10, 11, 12, 13]]
+    assert split_sequence(positions, 2, spread) == [[0, 1, 10], [11, 12, 13]]

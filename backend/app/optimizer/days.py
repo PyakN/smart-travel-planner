@@ -1,4 +1,4 @@
-"""Split a trip's stops into days of (nearly) equal size."""
+"""Split a trip's stops into days of (nearly) equal size, or of sizes the days can hold."""
 
 from collections.abc import Callable, Sequence
 from math import ceil, inf
@@ -17,8 +17,11 @@ def _sq(a: tuple[float, float], b: tuple[float, float]) -> float:
     return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
 
 
-def balanced_kmeans(points: Sequence[LatLon], days: int) -> list[list[int]]:
-    """Geographic clusters with at most ceil(n / days) stops each.
+def balanced_kmeans(
+    points: Sequence[LatLon], days: int, capacities: Sequence[int] | None = None
+) -> list[list[int]]:
+    """Geographic clusters with at most ceil(n / days) stops each, or `capacities[c]` stops
+    in cluster c (they must add up to n or more).
 
     Deterministic: farthest-point initialisation and capacity-constrained greedy assignment
     (closest point-centre pairs first) instead of random restarts.
@@ -26,6 +29,8 @@ def balanced_kmeans(points: Sequence[LatLon], days: int) -> list[list[int]]:
     n = len(points)
     if days <= 0:
         raise ValueError("days must be positive")
+    if capacities is not None and (len(capacities) != days or sum(capacities) < n):
+        raise ValueError("capacities must hold every point, one per day")
     if n <= days:
         return [[i] for i in range(n)] + [[] for _ in range(days - n)]
 
@@ -35,13 +40,13 @@ def balanced_kmeans(points: Sequence[LatLon], days: int) -> list[list[int]]:
     while len(centers) < days:
         centers.append(max(xy, key=lambda p: min(_sq(p, c) for c in centers)))
 
-    capacity = day_sizes(n, days)[1]
+    capacity = list(capacities) if capacities is not None else [day_sizes(n, days)[1]] * days
     assignment: list[int] = []
     for _ in range(MAX_ITERATIONS):
         pairs = sorted((_sq(xy[i], centers[c]), i, c) for i in range(n) for c in range(days))
         new_assignment, sizes = [-1] * n, [0] * days
         for _, i, c in pairs:
-            if new_assignment[i] == -1 and sizes[c] < capacity:
+            if new_assignment[i] == -1 and sizes[c] < capacity[c]:
                 new_assignment[i] = c
                 sizes[c] += 1
         if new_assignment == assignment:
@@ -60,14 +65,15 @@ def balanced_kmeans(points: Sequence[LatLon], days: int) -> list[list[int]]:
 def split_sequence[T](
     sequence: Sequence[T],
     days: int,
-    day_cost: Callable[[Sequence[T]], float],
+    day_cost: Callable[[Sequence[T], int], float],
     min_size: int | None = None,
     max_size: int | None = None,
 ) -> list[list[T]] | None:
     """Cut an ordered sequence into `days` contiguous chunks with minimum total cost.
 
-    Chunk sizes default to balanced (n // days .. ceil(n / days)). `day_cost` may return
-    `inf` for an infeasible chunk; returns None if no feasible split exists.
+    Chunk sizes default to balanced (n // days .. ceil(n / days)). `day_cost(chunk, d)` is
+    the cost of the chunk as day d (0 is the first), `inf` if it is infeasible there;
+    returns None if no feasible split exists.
     """
     n = len(sequence)
     if n <= days:
@@ -76,12 +82,12 @@ def split_sequence[T](
     low = low if min_size is None else max(1, min_size)
     high = high if max_size is None else min(n, max_size)
 
-    chunk_costs: dict[tuple[int, int], float] = {}
+    chunk_costs: dict[tuple[int, int, int], float] = {}
 
-    def chunk_cost(j: int, i: int) -> float:
-        if (j, i) not in chunk_costs:
-            chunk_costs[(j, i)] = day_cost(sequence[j:i])
-        return chunk_costs[(j, i)]
+    def chunk_cost(j: int, i: int, d: int) -> float:
+        if (j, i, d) not in chunk_costs:
+            chunk_costs[(j, i, d)] = day_cost(sequence[j:i], d)
+        return chunk_costs[(j, i, d)]
 
     # best[d][i]: minimum cost of covering the first i items with d days.
     best = [[inf] * (n + 1) for _ in range(days + 1)]
@@ -93,7 +99,7 @@ def split_sequence[T](
                 j = i - size
                 if j < 0 or best[d - 1][j] == inf:
                     continue
-                cost = best[d - 1][j] + chunk_cost(j, i)
+                cost = best[d - 1][j] + chunk_cost(j, i, d - 1)
                 if cost < best[d][i]:
                     best[d][i], cut[d][i] = cost, j
     if best[days][n] == inf:
