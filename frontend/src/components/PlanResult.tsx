@@ -5,15 +5,19 @@ import { useState } from "react";
 import DayWeather from "@/components/DayWeather";
 import StopCard from "@/components/StopCard";
 import {
+  DEFAULT_DAY_END,
+  DEFAULT_DAY_START,
   dayColor,
   describeAdjustment,
   describeEdit,
+  describeHoursSwap,
   describeWeatherSwap,
   exposedStops,
   formatDate,
   formatDistance,
   formatDuration,
   formatTemp,
+  freeTimeLabel,
   hasWeather,
   rideBadge,
   rideDetails,
@@ -107,6 +111,22 @@ function WeatherNotes({ plan }: { plan: PlanResponse }) {
   );
 }
 
+function HoursNotes({ plan }: { plan: PlanResponse }) {
+  if (plan.hours_swaps.length === 0) return null;
+  return (
+    <div className="mt-3 space-y-1 rounded-md bg-violet-50 p-2 text-xs text-violet-900">
+      <p className="font-medium">Swapped for places that suit your hours:</p>
+      <ul className="list-disc pl-4">
+        {plan.hours_swaps.map((swap) => (
+          <li key={`${swap.removed?.place_id}-${swap.added?.place_id}`}>
+            {describeHoursSwap(swap)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Rides({ rides, color }: { rides: TransitRide[]; color: string }) {
   return (
     <ul className="space-y-0.5">
@@ -154,8 +174,15 @@ function DayStops({
     <ol className="space-y-1">
       {day.stops.map((stop, i) => {
         const travel = travelLabel(stop);
+        const freeTime = freeTimeLabel(stop);
         return (
           <li key={stop.place_id}>
+            {freeTime && (
+              <p className="py-1 pl-[13px] text-xs text-zinc-500">
+                <span aria-hidden>☕ </span>
+                {freeTime}
+              </p>
+            )}
             {travel && (
               <div className="flex items-stretch gap-2 py-1 pl-[13px] text-xs text-zinc-500">
                 <span
@@ -226,6 +253,8 @@ export default function PlanResult({
                 ` · ${transitLegs} transit ${transitLegs === 1 ? "ride" : "rides"}`}
               {" · "}
               {plan.trip.pace} pace
+              {(plan.day_start !== DEFAULT_DAY_START || plan.day_end !== DEFAULT_DAY_END) &&
+                ` · ${plan.day_start}–${plan.day_end}`}
               {plan.weather_aware && " · planned with the weather"}
             </p>
           </div>
@@ -233,6 +262,7 @@ export default function PlanResult({
         </div>
         {plan.rationale && <p className="mt-3 text-sm text-zinc-700">{plan.rationale}</p>}
         <WeatherNotes plan={plan} />
+        <HoursNotes plan={plan} />
         {plan.edit && <EditSummary edit={plan.edit} onUndo={onUndo} />}
         {(plan.warnings.length > 0 || plan.dropped.length > 0) && (
           <div className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-800">
@@ -281,7 +311,7 @@ export default function PlanResult({
       </div>
 
       <div className="space-y-2">
-        <DayWeather date={day.date} forecast={day.weather} />
+        <DayWeather day={day} weatherAware={plan.weather_aware} />
         <p className="text-xs text-zinc-500">
           {formatDistance(day.walking_m)} on foot
           {day.transit_legs > 0 &&

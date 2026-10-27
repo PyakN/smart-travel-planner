@@ -7,6 +7,8 @@ export type TransitVehicle =
 export type Pace = "relaxed" | "moderate" | "intense";
 export type WeatherCondition =
   "clear" | "clouds" | "fog" | "drizzle" | "rain" | "snow" | "thunderstorm";
+/** When a place can be visited: by day (until 20:00), in daylight, at night (from 20:00), any time. */
+export type VisitHours = "any" | "day" | "daylight" | "night";
 /** [lon, lat], GeoJSON order. */
 export type LonLat = [number, number];
 
@@ -24,8 +26,14 @@ export interface PlanRequest {
   modes?: TravelMode[];
   /** "YYYY-MM-DD"; the backend takes tomorrow when it is missing. */
   start_date?: string | null;
-  /** Keep outdoor stops out of rain, fog and darkness. */
+  /** Plan with the forecast of the days' hours; without it no forecast is fetched. */
   weather_aware?: boolean;
+  /** "HH:MM", the city's local time: when each day starts (09:30 by default). */
+  day_start?: string;
+  /** "HH:MM": when each day ends (21:30); not after day_start means the next morning. */
+  day_end?: string;
+  /** "HH:MM": when the first day starts, if not at day_start (today: from now). */
+  first_day_start?: string | null;
 }
 
 export interface ReplaceRequest {
@@ -139,6 +147,9 @@ export interface PlannedStop {
   outdoor: boolean;
   /** Null without a forecast for its time. */
   weather: StopForecast | null;
+  hours: VisitHours;
+  /** Free time before setting off for it, in minutes: it opens later. */
+  wait_min: number;
 }
 
 export interface RouteSegment {
@@ -161,6 +172,11 @@ export interface PlannedDay {
   date: string | null;
   /** Null past the forecast's reach. */
   weather: DayForecast | null;
+  /** The day's hours, "HH:MM" (`end` may be the next morning), and its daylight. */
+  start: string | null;
+  end: string | null;
+  sunrise: string | null;
+  sunset: string | null;
 }
 
 export interface TripRequest {
@@ -212,4 +228,9 @@ export interface PlanResponse {
   weather_aware: boolean;
   /** Outdoor picks the forecast left no room for, and their indoor replacements. */
   weather_swaps: Adjustment[];
+  /** Picks the days' hours had no room for (dark or closed then), and what replaced them. */
+  hours_swaps: Adjustment[];
+  day_start: string;
+  day_end: string;
+  first_day_start: string | null;
 }

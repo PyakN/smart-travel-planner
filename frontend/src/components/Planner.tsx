@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import PlanForm from "@/components/PlanForm";
 import PlanResult from "@/components/PlanResult";
 import { ApiError, createPlan, getPlan, replaceStops } from "@/lib/api";
-import { localDate } from "@/lib/format";
+import { DEFAULT_DAY_END, DEFAULT_DAY_START, cityNow, localDate, startingNow } from "@/lib/format";
 import type { PlaceRef, PlanResponse, StartPoint, TravelMode } from "@/lib/types";
 
 // Leaflet touches `window`, so the map only renders in the browser.
@@ -37,6 +37,10 @@ export default function Planner() {
   const [modes, setModes] = useState<TravelMode[]>(["walk", "transit"]);
   const [startDate, setStartDate] = useState(() => localDate(1));
   const [weatherAware, setWeatherAware] = useState(false);
+  // The start the traveller picked; null for the default: 09:30, or now for a trip today.
+  const [pickedStart, setPickedStart] = useState<string | null>(null);
+  const [endTime, setEndTime] = useState(DEFAULT_DAY_END);
+  const [laterStart, setLaterStart] = useState(DEFAULT_DAY_START);
   const [replacing, setReplacing] = useState(false);
   const [replaceError, setReplaceError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
@@ -59,6 +63,9 @@ export default function Planner() {
         setModes(saved.modes);
         setStartDate(upcoming(saved.start_date));
         setWeatherAware(saved.weather_aware);
+        setPickedStart(saved.day_start === DEFAULT_DAY_START ? null : saved.day_start);
+        setLaterStart(saved.day_start);
+        setEndTime(saved.day_end);
         setSelectedDay(saved.edit?.day ?? 1);
         setReplaceError(null);
         setStatus({ kind: "idle" });
@@ -71,6 +78,17 @@ export default function Planner() {
     };
   }, [sharedId, loadedId]);
 
+  // A trip that starts today starts now by default; the days after it keep their own start.
+  const now = cityNow();
+  const today = startDate === now.date;
+  const startTime = pickedStart ?? (today ? startingNow(now.minutes) : DEFAULT_DAY_START);
+
+  function changeStartDate(date: string) {
+    // Starting today or not changes what the start time means: back to its default.
+    if ((date === now.date) !== today) setPickedStart(null);
+    setStartDate(date);
+  }
+
   async function submit() {
     setStatus({ kind: "loading" });
     setPicking(false);
@@ -82,6 +100,9 @@ export default function Planner() {
         modes,
         start_date: startDate,
         weather_aware: weatherAware,
+        day_start: today ? laterStart : startTime,
+        day_end: endTime,
+        first_day_start: today ? startTime : null,
       });
       setPlan(created);
       setSelectedDay(1);
@@ -173,9 +194,16 @@ export default function Planner() {
             modes={modes}
             onModesChange={setModes}
             startDate={startDate}
-            onStartDateChange={setStartDate}
+            onStartDateChange={changeStartDate}
             weatherAware={weatherAware}
             onWeatherAwareChange={setWeatherAware}
+            startTime={startTime}
+            onStartTimeChange={setPickedStart}
+            endTime={endTime}
+            onEndTimeChange={setEndTime}
+            laterStartTime={today ? laterStart : null}
+            onLaterStartTimeChange={setLaterStart}
+            nowMinutes={today ? now.minutes : null}
             loading={status.kind === "loading"}
             onSubmit={submit}
           />

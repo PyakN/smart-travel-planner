@@ -34,6 +34,8 @@ const CATEGORY_LABELS: Record<string, string> = {
   culture: "Theatre & arts",
   market: "Market",
   attraction: "Attraction",
+  nightlife: "Bar & nightlife",
+  restaurant: "Restaurant",
 };
 
 export function categoryLabel(slug: string): string {
@@ -130,6 +132,8 @@ const CATEGORY_ICONS: Record<string, string> = {
   culture: "🎭",
   market: "🧺",
   attraction: "🎡",
+  nightlife: "🍸",
+  restaurant: "🍽️",
 };
 
 /** Stand-in picture for places without a photo. */
@@ -191,6 +195,90 @@ export function describeAdjustment({ removed, added, reason }: Adjustment): stri
 /** An outdoor place the forecast left no room for, and what took its slot. */
 export function describeWeatherSwap({ removed, added }: Adjustment): string {
   return `${added?.name ?? "An indoor place"} instead of ${removed?.name ?? "an outdoor one"}`;
+}
+
+/** A pick the day's hours had no room for, what took its slot, and why. */
+export function describeHoursSwap({ removed, added, reason }: Adjustment): string {
+  return `${added?.name ?? "Another place"} instead of ${removed?.name ?? "a pick"}: ${reason}`;
+}
+
+/** Plans are in the city's local time (Lisbon is the only city so far). */
+export const CITY_TIME_ZONE = "Europe/Lisbon";
+export const CITY_NAME = "Lisbon";
+export const DEFAULT_DAY_START = "09:30";
+export const DEFAULT_DAY_END = "21:30";
+const MINUTES_PER_DAY = 24 * 60;
+
+/** Today's date ("YYYY-MM-DD") and the time in minutes since midnight, in `timeZone`. */
+export function cityNow(
+  timeZone: string = CITY_TIME_ZONE,
+  now: Date = new Date(),
+): { date: string; minutes: number } {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(now)
+      .map((part) => [part.type, part.value]),
+  );
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    minutes: Number(parts.hour) * 60 + Number(parts.minute),
+  };
+}
+
+/** "HH:MM" of minutes since midnight; the next morning's read like that day's. */
+export function clockTime(minutes: number): string {
+  const m = ((minutes % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+}
+
+/** Minutes since midnight of "HH:MM". */
+export function clockMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+/** When a trip that starts now starts: the next quarter of an hour, "HH:MM". */
+export function startingNow(minutes: number): string {
+  return clockTime(Math.ceil(minutes / 15) * 15);
+}
+
+/** Minutes from `start` to `end` ("HH:MM"); an end not after the start is the next morning. */
+export function dayLength(start: string, end: string): number {
+  const length = clockMinutes(end) - clockMinutes(start);
+  return length > 0 ? length : length + MINUTES_PER_DAY;
+}
+
+/** A day's hours in a few words: "12 h a day", "11 h a day, until 03:00 the next morning". */
+export function hoursHint(start: string, end: string): string {
+  if (start === end) return "Pick an end time after the start.";
+  const length = dayLength(start, end);
+  const overnight = clockMinutes(end) < clockMinutes(start);
+  const hint = overnight
+    ? `${formatDuration(length)} a day, until ${end} the next morning.`
+    : `${formatDuration(length)} a day.`;
+  // Past 22:00 an evening is long enough to plan with places open at night.
+  if (!overnight && clockMinutes(end) <= 22 * 60) return hint;
+  return `${hint} From 20:00 the plan only has places open at night: bars, fado houses, restaurants and lit squares.`;
+}
+
+/** "16:00–03:00" for a day's hours; null on plans saved before days had hours. */
+export function dayHours(day: { start: string | null; end: string | null }): string | null {
+  return day.start && day.end ? `${day.start}–${day.end}` : null;
+}
+
+/** "Free time 1 h 25 min: it opens at 20:00", before a stop that opens later. */
+export function freeTimeLabel(stop: Pick<PlannedStop, "wait_min" | "arrive">): string | null {
+  if (stop.wait_min <= 0) return null;
+  return `Free time ${formatDuration(stop.wait_min)}: it opens at ${stop.arrive}`;
 }
 
 const WEATHER_ICONS: Record<WeatherCondition, string> = {

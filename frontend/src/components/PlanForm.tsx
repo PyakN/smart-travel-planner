@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import MustVisitPicker from "@/components/MustVisitPicker";
-import { localDate } from "@/lib/format";
+import { CITY_NAME, clockTime, hoursHint, localDate } from "@/lib/format";
 import type { PlaceRef, StartPoint, TravelMode } from "@/lib/types";
 
 const EXAMPLES = [
@@ -36,13 +36,15 @@ function modesHint(modes: TravelMode[]): string {
 const FORECAST_DAYS = 5;
 
 function weatherHint(weatherAware: boolean, startDate: string): string {
+  if (!weatherAware) return "Off: the plan ignores the weather, and no forecast is fetched.";
   if (startDate > localDate(FORECAST_DAYS - 1)) {
-    return "No forecast that far ahead yet: outdoor stops will only avoid the dark.";
+    return "No forecast that far ahead yet: the plan will go without it.";
   }
-  return weatherAware
-    ? "Viewpoints, parks and statues go into dry daylight; rain, fog and dark hours get museums, churches and market halls, swapping in indoor places if needed."
-    : "The forecast is shown either way; the route only follows it when this is on.";
+  return "Rain, snow, fog and poor visibility within your hours (and only those) send outdoor stops to drier hours, or swap them for museums, churches and market halls.";
 }
+
+const TIME_INPUT =
+  "rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm tabular-nums outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
 
 export interface PlanFormProps {
   text: string;
@@ -61,6 +63,17 @@ export interface PlanFormProps {
   onStartDateChange: (date: string) => void;
   weatherAware: boolean;
   onWeatherAwareChange: (weatherAware: boolean) => void;
+  /** "HH:MM", the city's time: when the first day starts (today: from now on). */
+  startTime: string;
+  onStartTimeChange: (time: string) => void;
+  /** "HH:MM": when every day ends; not after the start means the next morning. */
+  endTime: string;
+  onEndTimeChange: (time: string) => void;
+  /** When the days after today start, for a trip that starts today; null otherwise. */
+  laterStartTime: string | null;
+  onLaterStartTimeChange: (time: string) => void;
+  /** Minutes since midnight in the city, for a trip that starts today. */
+  nowMinutes: number | null;
   loading: boolean;
   onSubmit: () => void;
 }
@@ -93,6 +106,13 @@ export default function PlanForm({
   onStartDateChange,
   weatherAware,
   onWeatherAwareChange,
+  startTime,
+  onStartTimeChange,
+  endTime,
+  onEndTimeChange,
+  laterStartTime,
+  onLaterStartTimeChange,
+  nowMinutes,
   loading,
   onSubmit,
 }: PlanFormProps) {
@@ -218,6 +238,47 @@ export default function PlanForm({
             className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
           />
         </label>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-zinc-700">
+          <label className="flex items-center gap-2">
+            {laterStartTime === null ? "Start" : "Start today"}
+            <input
+              type="time"
+              value={startTime}
+              required
+              disabled={loading}
+              onChange={(event) => onStartTimeChange(event.target.value)}
+              className={TIME_INPUT}
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            End
+            <input
+              type="time"
+              value={endTime}
+              required
+              disabled={loading}
+              onChange={(event) => onEndTimeChange(event.target.value)}
+              className={TIME_INPUT}
+            />
+          </label>
+        </div>
+        {laterStartTime !== null && (
+          <label className="mt-2 flex items-center justify-between gap-3 text-xs text-zinc-600">
+            Later days start at
+            <input
+              type="time"
+              value={laterStartTime}
+              required
+              disabled={loading}
+              onChange={(event) => onLaterStartTimeChange(event.target.value)}
+              className={TIME_INPUT}
+            />
+          </label>
+        )}
+        <p className="mt-1 text-xs text-zinc-500">
+          {hoursHint(startTime, endTime)}
+          {nowMinutes !== null && ` It is ${clockTime(nowMinutes)} in ${CITY_NAME} now.`}
+        </p>
         <label className="mt-2 flex items-center gap-2 text-zinc-700">
           <input
             type="checkbox"

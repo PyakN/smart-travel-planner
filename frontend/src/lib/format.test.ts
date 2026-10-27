@@ -3,9 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   categoryIcon,
   categoryLabel,
+  cityNow,
+  clockMinutes,
+  clockTime,
   dayColor,
+  dayHours,
+  dayLength,
   describeAdjustment,
   describeEdit,
+  describeHoursSwap,
   describeWeatherSwap,
   exposedStops,
   formatDate,
@@ -13,11 +19,14 @@ import {
   formatDuration,
   formatOpeningHours,
   formatTemp,
+  freeTimeLabel,
   hasWeather,
+  hoursHint,
   localDate,
   rideBadge,
   rideDetails,
   rideName,
+  startingNow,
   textColorOn,
   transitCredits,
   travelLabel,
@@ -68,6 +77,8 @@ function stop(overrides: Partial<PlannedStop>): PlannedStop {
     website: null,
     outdoor: true,
     weather: null,
+    hours: "daylight",
+    wait_min: 0,
     ...overrides,
   };
 }
@@ -276,5 +287,67 @@ describe("weather", () => {
     expect(exposedStops(plan)).toEqual([wet]);
     expect(hasWeather(plan)).toBe(true);
     expect(hasWeather({ days: [{ weather: null }] } as unknown as PlanResponse)).toBe(false);
+  });
+});
+
+describe("day hours", () => {
+  it("tells the time in the city, whatever the browser's time zone", () => {
+    const moment = new Date(Date.UTC(2026, 9, 27, 16, 7)); // 16:07 UTC
+    expect(cityNow("Europe/Lisbon", moment)).toEqual({ date: "2026-10-27", minutes: 16 * 60 + 7 });
+    expect(cityNow("Europe/Kyiv", moment)).toEqual({ date: "2026-10-27", minutes: 18 * 60 + 7 });
+    const lateNight = new Date(Date.UTC(2026, 9, 27, 23, 30));
+    expect(cityNow("Europe/Kyiv", lateNight).date).toBe("2026-10-28");
+  });
+
+  it("starts a trip today at the next quarter of an hour", () => {
+    expect(startingNow(16 * 60)).toBe("16:00");
+    expect(startingNow(16 * 60 + 7)).toBe("16:15");
+    expect(startingNow(16 * 60 + 46)).toBe("17:00");
+  });
+
+  it("reads clock times, the next morning too", () => {
+    expect(clockMinutes("09:30")).toBe(570);
+    expect(clockTime(570)).toBe("09:30");
+    expect(clockTime(27 * 60)).toBe("03:00");
+  });
+
+  it("counts a day that ends after midnight", () => {
+    expect(dayLength("09:30", "21:30")).toBe(12 * 60);
+    expect(dayLength("16:00", "03:00")).toBe(11 * 60);
+    expect(dayLength("10:00", "10:00")).toBe(24 * 60);
+  });
+
+  it("explains the hours", () => {
+    expect(hoursHint("09:30", "21:30")).toBe("12 h a day.");
+    expect(hoursHint("16:00", "03:00")).toBe(
+      "11 h a day, until 03:00 the next morning. From 20:00 the plan only has places open at night: bars, fado houses, restaurants and lit squares.",
+    );
+    expect(hoursHint("10:00", "23:30")).toMatch(/^13 h 30 min a day\. From 20:00/);
+    expect(hoursHint("10:00", "10:00")).toBe("Pick an end time after the start.");
+  });
+
+  it("shows a day's hours and the free time before a place that opens later", () => {
+    expect(dayHours({ start: "16:00", end: "03:00" })).toBe("16:00–03:00");
+    expect(dayHours({ start: null, end: null })).toBeNull();
+    expect(freeTimeLabel({ wait_min: 85, arrive: "20:00" })).toBe(
+      "Free time 1 h 25 min: it opens at 20:00",
+    );
+    expect(freeTimeLabel({ wait_min: 0, arrive: "11:00" })).toBeNull();
+  });
+
+  it("explains picks the hours had no room for", () => {
+    const swap = {
+      removed: { place_id: 1, name: "Miradouro da Graça" },
+      added: { place_id: 2, name: "Museu do Fado" },
+      reason: "Your hours leave too little daylight for it.",
+    };
+    expect(describeHoursSwap(swap)).toBe(
+      "Museu do Fado instead of Miradouro da Graça: Your hours leave too little daylight for it.",
+    );
+  });
+
+  it("labels evening places", () => {
+    expect(categoryLabel("nightlife")).toBe("Bar & nightlife");
+    expect(categoryIcon("restaurant")).toBe("🍽️");
   });
 });

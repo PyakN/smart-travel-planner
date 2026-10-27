@@ -119,6 +119,11 @@ export default function StopCard({
                 Outdoors
               </span>
             )}
+            {stop.hours === "night" && (
+              <span className="rounded-full bg-violet-100 px-1.5 py-px font-medium text-violet-800">
+                🌙 Evening
+              </span>
+            )}
             {stop.must_visit && (
               <span className="rounded-full bg-amber-100 px-1.5 py-px font-medium text-amber-800">
                 Must-visit
