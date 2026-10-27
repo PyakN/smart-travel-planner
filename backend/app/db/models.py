@@ -51,6 +51,10 @@ class Place(Base):
     opening_hours: Mapped[str | None] = mapped_column(Text)
     website: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
+    # Photo from Wikimedia Commons: thumbnail, file page (licence, author) and credit line.
+    image_url: Mapped[str | None] = mapped_column(Text)
+    image_page_url: Mapped[str | None] = mapped_column(Text)
+    image_credit: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
