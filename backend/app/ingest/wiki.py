@@ -6,6 +6,7 @@ Commons gives a thumbnail with its author and licence; Wikipedia gives the artic
 OSM `wikimedia_commons` / `image` / `wikipedia` tags fill in when Wikidata has nothing.
 """
 
+import asyncio
 import html
 import re
 from collections.abc import Iterable, Mapping, Sequence
@@ -24,7 +25,11 @@ USER_AGENT = (
     "smart-travel-planner/0.1 (https://github.com/PyakN/smart-travel-planner; POI enrichment) "
     f"python-httpx/{httpx.__version__}"
 )
-SPARQL_BATCH, COMMONS_BATCH, WIKIPEDIA_BATCH = 200, 50, 20
+SPARQL_BATCH, COMMONS_BATCH, WIKIPEDIA_BATCH = 100, 50, 20
+# The query service and the APIs time out or throttle now and then: retry with pauses.
+ATTEMPTS = 3
+RETRY_DELAY_S = 2.0
+RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 THUMB_WIDTH = 500
 DESCRIPTION_MAX_CHARS = 300
 CREDIT_MAX_CHARS = 120
@@ -48,6 +53,25 @@ class Photo:
 def _batches[T](items: Sequence[T], size: int) -> Iterable[Sequence[T]]:
     for start in range(0, len(items), size):
         yield items[start : start + size]
+
+
+async def _get_json(
+    client: httpx.AsyncClient, method: str, url: str, **kwargs: Any
+) -> dict[str, Any]:
+    """JSON answer of a Wikimedia endpoint, retrying timeouts, throttling and 5xx."""
+    headers = {"User-Agent": USER_AGENT, **kwargs.pop("headers", {})}
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            response = await client.request(method, url, headers=headers, timeout=60, **kwargs)
+            if response.status_code not in RETRY_STATUS or attempt == ATTEMPTS:
+                response.raise_for_status()
+                payload: dict[str, Any] = response.json()
+                return payload
+        except httpx.TransportError:
+            if attempt == ATTEMPTS:
+                raise
+        await asyncio.sleep(RETRY_DELAY_S * 2 ** (attempt - 1))
+    raise AssertionError("unreachable")
 
 
 def _file_name(title: str) -> str:
@@ -91,14 +115,14 @@ def parse_sparql(payload: Mapping[str, Any]) -> dict[str, WikidataInfo]:
 async def fetch_wikidata(client: httpx.AsyncClient, qids: Sequence[str]) -> dict[str, WikidataInfo]:
     found: dict[str, WikidataInfo] = {}
     for batch in _batches(sorted(set(qids)), SPARQL_BATCH):
-        response = await client.post(
+        payload = await _get_json(
+            client,
+            "POST",
             WIKIDATA_SPARQL_URL,
             data={"query": sparql_query(batch)},
-            headers={"Accept": "application/sparql-results+json", "User-Agent": USER_AGENT},
-            timeout=60,
+            headers={"Accept": "application/sparql-results+json"},
         )
-        response.raise_for_status()
-        found |= parse_sparql(response.json())
+        found |= parse_sparql(payload)
     return found
 
 
@@ -106,7 +130,9 @@ async def fetch_wikidata(client: httpx.AsyncClient, qids: Sequence[str]) -> dict
 
 
 def _strip_html(value: str) -> str:
-    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", value)).split())
+    """Plain text of an HTML snippet, without bare URLs (authors often paste profile links)."""
+    text = re.sub(r"https?://\S+", " ", html.unescape(re.sub(r"<[^>]+>", " ", value)))
+    return " ".join(text.split()).strip(" ,;")
 
 
 def _credit(extmetadata: Mapping[str, Any]) -> str | None:
@@ -158,7 +184,9 @@ def parse_imageinfo(payload: Mapping[str, Any]) -> dict[str, Photo]:
 async def fetch_photos(client: httpx.AsyncClient, files: Sequence[str]) -> dict[str, Photo]:
     found: dict[str, Photo] = {}
     for batch in _batches(sorted({_file_name(f) for f in files}), COMMONS_BATCH):
-        response = await client.get(
+        payload = await _get_json(
+            client,
+            "GET",
             COMMONS_API_URL,
             params={
                 "action": "query",
@@ -170,11 +198,8 @@ async def fetch_photos(client: httpx.AsyncClient, files: Sequence[str]) -> dict[
                 "iiextmetadatafilter": "Artist|LicenseShortName",
                 "titles": "|".join(f"File:{f}" for f in batch),
             },
-            headers={"User-Agent": USER_AGENT},
-            timeout=60,
         )
-        response.raise_for_status()
-        found |= parse_imageinfo(response.json())
+        found |= parse_imageinfo(payload)
     return found
 
 
@@ -214,7 +239,9 @@ def parse_extracts(payload: Mapping[str, Any]) -> dict[str, str]:
 async def fetch_extracts(client: httpx.AsyncClient, titles: Sequence[str]) -> dict[str, str]:
     found: dict[str, str] = {}
     for batch in _batches(sorted({_title(t) for t in titles}), WIKIPEDIA_BATCH):
-        response = await client.get(
+        payload = await _get_json(
+            client,
+            "GET",
             WIKIPEDIA_API_URL,
             params={
                 "action": "query",
@@ -228,11 +255,8 @@ async def fetch_extracts(client: httpx.AsyncClient, titles: Sequence[str]) -> di
                 "redirects": "1",
                 "titles": "|".join(batch),
             },
-            headers={"User-Agent": USER_AGENT},
-            timeout=60,
         )
-        response.raise_for_status()
-        found |= parse_extracts(response.json())
+        found |= parse_extracts(payload)
     return found
 
 

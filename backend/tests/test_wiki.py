@@ -5,6 +5,7 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
+from app.ingest import wiki
 from app.ingest.wiki import (
     DESCRIPTION_MAX_CHARS,
     SPARQL_BATCH,
@@ -101,6 +102,12 @@ class TestImageinfo:
         photos = parse_imageinfo(payload)
         assert set(photos) == {"A b.jpg"}
         assert photos["A b.jpg"].credit == "José Silva, CC BY-SA 4.0"
+
+    def test_urls_are_left_out_of_credits(self) -> None:
+        artist = "Filipe Rocha,user:sacavem (pt) http://pt.wikipedia.org/wiki/Usu%C3%A1rio:Sacavem"
+        payload = {"query": {"pages": [imageinfo_page("File:X.jpg", artist=artist)]}}
+        credit = parse_imageinfo(payload)["X.jpg"].credit
+        assert credit == "Filipe Rocha,user:sacavem (pt), CC BY-SA 4.0"
 
 
 class TestExtracts:
@@ -202,9 +209,38 @@ def test_photo_requests_name_files_once() -> None:
     assert titles == ["File:A b.jpg"]
 
 
-def test_http_errors_propagate() -> None:
+@pytest.fixture
+def no_retry_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wiki, "RETRY_DELAY_S", 0)
+
+
+def test_throttling_and_timeouts_are_retried(no_retry_pause: None) -> None:
+    attempts = 0
+
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(429)
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ReadTimeout("slow", request=request)
+        if attempts == 2:
+            return httpx.Response(429)
+        return httpx.Response(200, json={"query": {"pages": [imageinfo_page("File:A.jpg")]}})
+
+    async def run() -> dict[str, Photo]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await fetch_photos(client, ["A.jpg"])
+
+    assert set(asyncio.run(run())) == {"A.jpg"}
+    assert attempts == 3
+
+
+def test_http_errors_propagate(no_retry_pause: None) -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503)
 
     async def run() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -212,3 +248,4 @@ def test_http_errors_propagate() -> None:
 
     with pytest.raises(httpx.HTTPStatusError):
         asyncio.run(run())
+    assert calls == wiki.ATTEMPTS
