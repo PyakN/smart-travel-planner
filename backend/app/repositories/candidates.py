@@ -4,10 +4,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import ColumnElement, Float, case, false, func, or_, select
+from sqlalchemy import ColumnElement, Float, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Category, Place
+from app.repositories.search import name_matches
 
 # Score weights. Notability (Wikidata/Wikipedia) keeps 700 street-art pieces from
 # drowning out the castle; explicit wishes outrank everything.
@@ -29,24 +30,6 @@ class Candidate:
     lon: float
 
 
-def _like_pattern(keyword: str) -> str:
-    escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"%{escaped}%"
-
-
-def _keyword_match(keywords: Sequence[str]) -> ColumnElement[bool]:
-    if not keywords:
-        return false()
-    haystacks = [Place.name, Place.tags["name:en"].astext]
-    return or_(
-        *(
-            func.unaccent(haystack).ilike(func.unaccent(_like_pattern(keyword)), escape="\\")
-            for keyword in keywords
-            for haystack in haystacks
-        )
-    )
-
-
 def _hint(name: str, tags: dict[str, str]) -> str | None:
     english = tags.get("name:en")
     hint = english if english and english != name else tags.get("description")
@@ -66,7 +49,7 @@ async def find_candidates(
     keywords: Sequence[str] = (),
     limit: int = 60,
 ) -> list[Candidate]:
-    keyword_match = _keyword_match(keywords)
+    keyword_match = name_matches(keywords)
     score = (
         _as_score(Place.wikidata.is_not(None), WEIGHT_WIKIDATA)
         + _as_score(Place.tags.has_key("wikipedia"), WEIGHT_WIKIPEDIA)
