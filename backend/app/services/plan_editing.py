@@ -244,26 +244,27 @@ async def replace_stops(
     aware = await _day_weather(weather, plan, day) if plan.weather_aware else None
     today = aware.days[0] if aware else None
 
-    async def ranked(avoid: Sequence[str], only: Sequence[str] = ()) -> list[Candidate]:
+    async def ranked(**filters: Sequence[str]) -> list[Candidate]:
         return await find_candidates(
             session,
             city=plan.city,
             interests=trip.interests,
-            avoid=avoid,
+            avoid=trip.avoid,
             keywords=trip.keywords,
             anchors=[_point(s) for s in (kept or removed)] + home,
             proximity_radius_m=proximity_radius_m(plan.modes),
             exclude_ids=sorted(planned | rejected),
             limit=REPLACE_POOL,
-            categories=only,
+            **filters,
         )
 
-    # Replacements take the removed stops' times: evening places only for evening stops.
+    # Replacements take the removed stops' times: evening places, in a pool of their own,
+    # only for evening stops.
     slots = [slot_minute(s.arrive, window) for s in removed]
     evening = sorted(EVENING_CATEGORIES)
-    pool = await ranked([*trip.avoid, *evening])
+    pool = await ranked(exclude_categories=evening)
     if any(t >= NIGHT_START_MIN for t in slots):
-        pool = merge_ranked(pool, await ranked(trip.avoid, evening))
+        pool = merge_ranked(pool, await ranked(categories=evening))
     planned_names = [s.name for d in plan.days for s in d.stops]
     fitting = [
         c

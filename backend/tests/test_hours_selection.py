@@ -29,11 +29,13 @@ CATEGORY: dict[VisitHours, str] = {
 }
 
 
-def place(i: int, hours: VisitHours, score: float | None = None) -> Candidate:
+def place(
+    i: int, hours: VisitHours, score: float | None = None, category: str | None = None
+) -> Candidate:
     return Candidate(
         i,
         f"Place {i}",
-        CATEGORY[hours],
+        category or CATEGORY[hours],
         10 - i if score is None else score,
         None,
         38.7,
@@ -104,6 +106,32 @@ class TestFitHours:
         assert {reason for *_, reason in swaps} == {
             "It closes at 20:00, and more of your day is in the evening."
         }
+
+    def test_afternoons_get_places_open_by_day(self) -> None:
+        # Seen live: five fado houses and a museum for an afternoon and an evening of three.
+        fado = [place(i, "night", category="restaurant") for i in (1, 2, 3, 4, 5)]
+        picks = [*fado, place(6, "day")]
+        pool = [*picks, place(7, "day"), place(8, "any"), place(9, "night"), place(10, "night")]
+        places, swaps = fit_hours(picks, pool, self.SLOTS)
+        assert sum(p.category == "restaurant" for p in places) == 1  # one dinner
+        assert sum(p.hours == "night" for p in places) == 3
+        assert sum(p.hours in ("day", "daylight") for p in places) <= 3
+        assert {p.id for p in places} >= {1, 6, 9, 10}  # the best fado house stays
+        assert {reason for *_, reason in swaps} == {
+            "One dinner an evening is enough: a bar or a square instead.",
+            "It opens at 20:00, and your hours have more time before then.",
+        }
+
+    def test_a_place_swapped_out_does_not_come_back(self) -> None:
+        dinners = [place(i, "night", category="restaurant") for i in (1, 2, 3)]
+        bar, other_bar, square = place(4, "night"), place(8, "night"), place(9, "any")
+        picks = [*dinners, bar, place(5, "day"), place(6, "day")]
+        pool = [*picks, place(7, "day"), other_bar, square]
+        places, swaps = fit_hours(picks, pool, self.SLOTS)
+        # The bar made way for the afternoon; the dinners after it take the other places.
+        assert bar not in places
+        assert ids(places) == [1, 9, 8, 7, 5, 6]
+        assert [old.id for old, _, _ in swaps] == [4, 3, 2]
 
     def test_must_visit_places_count_but_stay(self) -> None:
         must = [place(1, "daylight")]

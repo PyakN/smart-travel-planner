@@ -144,3 +144,18 @@ def test_get_candidates_keeps_order_and_city(
             return await get_candidates(session, wanted, city="lisbon")
 
     assert names(asyncio.run(run())) == ["Miradouro de Santa Luzia", "Castelo de São Jorge"]
+
+
+def test_categories_only_and_never(db_session: SessionFactory) -> None:
+    def testville(**kwargs: Any) -> list[str]:
+        async def run() -> list[Candidate]:
+            async with db_session() as session:
+                return await find_candidates(session, city="testville", **kwargs)
+
+        return names(asyncio.run(run()))
+
+    named = {"keywords": ["Harbour"]}
+    assert "Harbour Bar" in testville(**named, avoid=["nightlife"])  # avoided, but named
+    assert "Harbour Bar" not in testville(**named, exclude_categories=["nightlife"])
+    evening = testville(categories=["nightlife", "restaurant"])
+    assert sorted(evening) == ["Harbour Bar", "Old Town Fado"]
