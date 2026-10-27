@@ -12,7 +12,8 @@ from app.db.models import Route, RouteStop
 from app.llm.service import LLMService
 from app.optimizer.distance import DistanceProvider
 from app.optimizer.geometry import LatLon
-from app.optimizer.planner import DayPlan, Leg, StartPoint, Stop, plan_route
+from app.optimizer.planner import DayPlan, Leg, StartPoint, Stop, Visit, plan_route
+from app.repositories.places import PlaceDetails, place_details
 from app.schemas.plan import (
     ALL_MODES,
     PlaceRef,
@@ -21,6 +22,7 @@ from app.schemas.plan import (
     PlanResponse,
     RouteSegment,
     StartIn,
+    StopPhoto,
     TravelMode,
 )
 from app.services.place_selection import select_places
@@ -95,6 +97,38 @@ async def _straight(points: list[LatLon]) -> list[LatLon]:
     return points
 
 
+def _photo(details: PlaceDetails | None) -> StopPhoto | None:
+    if details is None or details.image_url is None:
+        return None
+    return StopPhoto(
+        url=details.image_url, page_url=details.image_page_url, credit=details.image_credit
+    )
+
+
+def _planned_stop(
+    visit: Visit, name: str, note: str | None, details: PlaceDetails | None
+) -> PlannedStop:
+    leg = visit.leg
+    return PlannedStop(
+        place_id=visit.stop.id,
+        name=name,
+        category=visit.stop.category,
+        lat=visit.stop.lat,
+        lon=visit.stop.lon,
+        arrive=_clock(visit.arrive_min),
+        leave=_clock(visit.leave_min),
+        travel_mode=leg.mode if leg else None,
+        travel_min=round(leg.minutes) if leg else 0,
+        distance_from_previous_m=round(leg.distance_m) if leg else 0,
+        must_visit=visit.stop.required,
+        note=note,
+        description=details.description if details else None,
+        photo=_photo(details),
+        opening_hours=details.opening_hours if details else None,
+        website=details.website if details else None,
+    )
+
+
 async def plan_trip(
     *,
     session: AsyncSession,
@@ -136,24 +170,17 @@ async def plan_trip(
 
     segments = await asyncio.gather(*(_segments(d, start, distances) for d in route.days))
     watch.lap("geometry")
+    details = await place_details(session, [v.stop.id for d in route.days for v in d.visits])
 
     days = [
         PlannedDay(
             day=day.day,
             stops=[
-                PlannedStop(
-                    place_id=v.stop.id,
-                    name=places[v.stop.id].name,
-                    category=v.stop.category,
-                    lat=v.stop.lat,
-                    lon=v.stop.lon,
-                    arrive=_clock(v.arrive_min),
-                    leave=_clock(v.leave_min),
-                    travel_mode=v.leg.mode if v.leg else None,
-                    travel_min=round(v.leg.minutes) if v.leg else 0,
-                    distance_from_previous_m=round(v.leg.distance_m) if v.leg else 0,
-                    must_visit=v.stop.required,
-                    note=selection.notes.get(v.stop.id),
+                _planned_stop(
+                    v,
+                    places[v.stop.id].name,
+                    selection.notes.get(v.stop.id),
+                    details.get(v.stop.id),
                 )
                 for v in day.visits
             ],

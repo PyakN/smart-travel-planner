@@ -39,6 +39,12 @@ class PlanRequest(BaseModel):
         return list(dict.fromkeys(values))
 
 
+class StopPhoto(BaseModel):
+    url: str = Field(description="Thumbnail, about 500 px wide")
+    page_url: str | None = Field(description="Wikimedia Commons file page: author and licence")
+    credit: str | None = Field(description="Author and licence, e.g. 'Jane Doe, CC BY-SA 4.0'")
+
+
 class PlannedStop(BaseModel):
     place_id: int
     name: str
@@ -53,6 +59,10 @@ class PlannedStop(BaseModel):
     distance_from_previous_m: int
     must_visit: bool = False
     note: str | None = Field(default=None, description="Why this place suits the traveller")
+    description: str | None = None
+    photo: StopPhoto | None = None
+    opening_hours: str | None = Field(default=None, description="OpenStreetMap syntax")
+    website: str | None = None
 
 
 class RouteSegment(BaseModel):

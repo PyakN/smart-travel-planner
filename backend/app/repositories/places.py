@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any
 
@@ -99,6 +100,38 @@ async def get_place(session: AsyncSession, place_id: int) -> PlaceOut | None:
     stmt = select(*_place_columns()).join(Category).where(Place.id == place_id)
     row = (await session.execute(stmt)).mappings().first()
     return PlaceOut.model_validate(dict(row)) if row else None
+
+
+@dataclass(frozen=True)
+class PlaceDetails:
+    """What a stop card shows besides the schedule."""
+
+    description: str | None
+    opening_hours: str | None
+    website: str | None
+    image_url: str | None
+    image_page_url: str | None
+    image_credit: str | None
+
+
+async def place_details(
+    session: AsyncSession, place_ids: Collection[int]
+) -> dict[int, PlaceDetails]:
+    if not place_ids:
+        return {}
+    stmt = select(
+        Place.id,
+        Place.description,
+        Place.opening_hours,
+        Place.website,
+        Place.image_url,
+        Place.image_page_url,
+        Place.image_credit,
+    ).where(Place.id.in_(place_ids))
+    return {
+        row["id"]: PlaceDetails(**{k: v for k, v in row.items() if k != "id"})
+        for row in (await session.execute(stmt)).mappings()
+    }
 
 
 async def list_categories(session: AsyncSession, city: str | None = None) -> list[CategoryOut]:

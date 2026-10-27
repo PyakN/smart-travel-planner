@@ -15,7 +15,7 @@ from app.llm.service import LLMService, TokenBudget
 from app.optimizer.distance import HaversineProvider
 from app.schemas.trip import PlaceNote, PlaceSelection
 from tests.fakes import FakeProvider
-from tests.integration.conftest import SessionFactory
+from tests.integration.conftest import SEED_DETAILS, SessionFactory
 from tests.test_trip_schema import trip
 
 ROSSIO = {"lat": 38.7139, "lon": -9.1394}
@@ -98,6 +98,20 @@ def test_plan_end_to_end(
     notes = {s["place_id"]: s["note"] for s in day["stops"]}
     assert notes.pop(chosen[0]) == "The castle has the best views."
     assert set(notes.values()) == {None}
+
+    # Stop cards: photo, description, hours and website where the place has them.
+    by_name = {s["name"]: s for s in day["stops"]}
+    castle = SEED_DETAILS["Castelo de São Jorge"]
+    assert by_name["Castelo de São Jorge"]["photo"] == {
+        "url": castle["image_url"],
+        "page_url": castle["image_page_url"],
+        "credit": castle["image_credit"],
+    }
+    assert {
+        k: by_name["Castelo de São Jorge"][k] for k in ("description", "opening_hours", "website")
+    } == {k: castle[k] for k in ("description", "opening_hours", "website")}
+    luzia = by_name["Miradouro de Santa Luzia"]
+    assert (luzia["photo"], luzia["description"], luzia["opening_hours"]) == (None, None, None)
 
     # The plan is persisted: same response from GET, stops stored in visiting order.
     assert client.get(f"/plans/{plan['id']}").json() == plan

@@ -55,6 +55,17 @@ SEED_PLACES: list[tuple[int, str, str, str, float, float, str | None, dict[str, 
     (112, "testville", "Harbour Theatre", "culture", 45.0000, 7.0080, None, {}),
     (113, "testville", "Far Fort", "landmark", 45.0800, 7.0900, "Q900013", {}),
 ]
+# Stop-card details (normally from OSM tags and app.ingest.enrich), by place name.
+SEED_DETAILS: dict[str, dict[str, str]] = {
+    "Castelo de São Jorge": {
+        "description": "São Jorge Castle is a historic castle in Lisbon.",
+        "opening_hours": "Mo-Su 09:00-21:00",
+        "website": "https://castelodesaojorge.pt",
+        "image_url": "https://thumb.wikimedia.org/x/500px-Castelo.jpg",
+        "image_page_url": "https://commons.wikimedia.org/wiki/File:Castelo.jpg",
+        "image_credit": "Jane, CC BY-SA 4.0",
+    }
+}
 
 
 async def _seed() -> None:
@@ -75,6 +86,7 @@ async def _seed() -> None:
                     geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
                     tags={"name": name, **extra_tags},
                     wikidata=wikidata,
+                    **SEED_DETAILS.get(name, {}),
                 )
                 for osm_id, city, name, category, lat, lon, wikidata, extra_tags in SEED_PLACES
             )
