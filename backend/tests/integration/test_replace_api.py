@@ -227,3 +227,24 @@ def test_replacements_fit_the_free_time(
     assert place_ids["River Park"] in offered
     assert not offered & {place_ids["City Museum"], place_ids["Museum of Toys"]}
     assert new["days"][0]["duration_min"] <= 200
+
+
+def test_replacements_that_do_not_fit_together_are_reported(
+    client: TestClient,
+    llm: FakeProvider,
+    place_ids: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # About 2 hours free after removing two stops: each museum fits, both do not.
+    monkeypatch.setitem(DAY_BUDGET_MIN, "relaxed", 200)
+    plan = create_plan(client, llm, place_ids, FIRST_DAY)
+    picks(llm, place_ids["City Museum"], place_ids["Museum of Toys"])
+    removed = [place_ids["Hilltop Viewpoint"], place_ids["Clock Tower"]]
+    new = replace(client, plan, 1, removed).json()
+
+    prompt = str(llm.calls[-1]["prompt"])
+    assert "Free time for them: about " in prompt
+    assert "museum 90" in prompt
+    assert [a["name"] for a in new["edit"]["added"]] == ["City Museum"]
+    assert "1 replacement(s) did not fit day 1's 3 h budget" in new["warnings"]
+    assert new["days"][0]["duration_min"] <= 200
