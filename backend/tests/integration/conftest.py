@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from testcontainers.community.postgres import PostgresContainer
 
-from app.api.deps import get_distances, get_llm, get_transit
+from app.api.deps import get_distances, get_llm, get_transit, get_weather
 from app.config import get_settings
 from app.db.models import Category, Place
 from app.db.session import create_engine, create_sessionmaker
@@ -108,6 +108,7 @@ def database_url() -> Iterator[str]:
         url = postgres.get_connection_url()
         monkeypatch.setenv("DATABASE_URL", url)
         monkeypatch.setenv("TRANSIT_PROVIDER", "estimate")  # tests that ride use a fake
+        monkeypatch.setenv("OPENWEATHER_API_KEY", "")  # tests with weather use a fake
         get_settings.cache_clear()
         command.upgrade(Config(str(BACKEND_DIR / "alembic.ini")), "head")
         asyncio.run(_seed())
@@ -174,5 +175,6 @@ def llm(client: TestClient) -> Iterator[FakeProvider]:
     overrides = client.app.dependency_overrides  # type: ignore[attr-defined]
     overrides[get_distances] = HaversineProvider
     overrides[get_transit] = lambda: None
+    overrides[get_weather] = lambda: None
     yield provider
     client.app.dependency_overrides.clear()  # type: ignore[attr-defined]

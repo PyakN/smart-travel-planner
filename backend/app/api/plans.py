@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.deps import DistancesDep, LLMDep, SessionDep, SettingsDep, TransitDep
+from app.api.deps import DistancesDep, LLMDep, SessionDep, SettingsDep, TransitDep, WeatherDep
 from app.llm.base import LLMBudgetExceededError, LLMError, LLMUnavailableError
 from app.schemas.plan import PlanRequest, PlanResponse, ReplaceRequest
 from app.services.place_selection import PlanningError
@@ -49,6 +49,7 @@ async def create_plan(
     llm: LLMDep,
     distances: DistancesDep,
     transit: TransitDep,
+    weather: WeatherDep,
     settings: SettingsDep,
 ) -> PlanResponse:
     async with planning_errors(settings.plan_timeout_s):
@@ -62,6 +63,9 @@ async def create_plan(
             must_visit=body.must_visit,
             modes=body.modes,
             transit=transit,
+            weather=weather,
+            start_date=body.start_date,
+            weather_aware=body.weather_aware,
         )
 
 
@@ -73,6 +77,7 @@ async def replace_plan_stops(
     llm: LLMDep,
     distances: DistancesDep,
     transit: TransitDep,
+    weather: WeatherDep,
     settings: SettingsDep,
 ) -> PlanResponse:
     """Replace stops of one day; answers with a new plan version (`parent_id` = this plan)."""
@@ -85,6 +90,7 @@ async def replace_plan_stops(
             day=body.day,
             place_ids=body.place_ids,
             transit=transit,
+            weather=weather,
         )
         if plan is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "plan not found")

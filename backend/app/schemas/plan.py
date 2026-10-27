@@ -1,3 +1,4 @@
+import datetime as dt  # PlannedDay has a field named `date`
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -9,6 +10,7 @@ ALL_MODES: list[TravelMode] = ["walk", "transit"]
 TransitVehicle = Literal[
     "metro", "tram", "bus", "train", "ferry", "funicular", "cable_car", "other"
 ]
+WeatherCondition = Literal["clear", "clouds", "fog", "drizzle", "rain", "snow", "thunderstorm"]
 MAX_MUST_VISIT = 10
 
 
@@ -34,6 +36,14 @@ class PlanRequest(BaseModel):
         default_factory=lambda: list(ALL_MODES),
         min_length=1,
         description="walk only: no tram/metro; transit only: ride every leg over 1 km",
+    )
+    start_date: dt.date | None = Field(
+        default=None, description="First day of the trip (the city's local date); tomorrow if unset"
+    )
+    weather_aware: bool = Field(
+        default=False,
+        description="Keep outdoor stops out of rain, snow, fog and darkness, and swap some for "
+        "indoor places when the forecast leaves too few dry daylight hours",
     )
 
     @field_validator("must_visit", "modes")
@@ -65,6 +75,37 @@ class TransitRide(BaseModel):
     attributions: list[Attribution] = Field(default_factory=list)
 
 
+class ForecastSlot(BaseModel):
+    time: str = Field(description="HH:MM: the forecast holds for the 3 hours around it")
+    temp_c: int
+    condition: WeatherCondition
+    description: str = Field(description="e.g. 'light rain'")
+    icon: str = Field(description="OpenWeatherMap icon code, e.g. '10d' ('n' at night)")
+    pop: int = Field(description="Chance of rain or snow, %")
+
+
+class StopForecast(ForecastSlot):
+    """The forecast at the stop's arrival."""
+
+    warning: str | None = Field(
+        default=None, description="Outdoor stops only: rain, fog or darkness spoils the visit"
+    )
+
+
+class DayForecast(BaseModel):
+    """The weather of a day's sightseeing hours, headed by its worst bad spell (if any)."""
+
+    condition: WeatherCondition
+    description: str
+    icon: str
+    temp_min_c: int
+    temp_max_c: int
+    pop: int = Field(description="Highest chance of rain or snow, %")
+    sunrise: str = Field(description="HH:MM")
+    sunset: str = Field(description="HH:MM")
+    slots: list[ForecastSlot]
+
+
 class PlannedStop(BaseModel):
     place_id: int
     name: str
@@ -87,6 +128,8 @@ class PlannedStop(BaseModel):
     photo: StopPhoto | None = None
     opening_hours: str | None = Field(default=None, description="OpenStreetMap syntax")
     website: str | None = None
+    outdoor: bool = Field(default=False, description="Visited in the open air")
+    weather: StopForecast | None = None
 
 
 class RouteSegment(BaseModel):
@@ -107,6 +150,8 @@ class PlannedDay(BaseModel):
     duration_min: int
     self_intersections: int
     segments: list[RouteSegment]
+    date: dt.date | None = None
+    weather: DayForecast | None = Field(default=None, description="None past the forecast")
 
 
 class PlaceRef(BaseModel):
@@ -158,3 +203,7 @@ class PlanResponse(BaseModel):
     # Set on versions made by replacing stops: the plan this one was made from, and how.
     parent_id: int | None = None
     edit: PlanEdit | None = None
+    start_date: dt.date | None = None
+    weather_aware: bool = False
+    # Outdoor picks the forecast left no room for, and the indoor places that replaced them.
+    weather_swaps: list[Adjustment] = Field(default_factory=list)

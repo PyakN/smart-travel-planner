@@ -12,15 +12,20 @@
    nearby candidates, and one other stop of the dominant kind is swapped for a different
    kind of place. Must-visit stops and the new replacements are never adjusted, and every
    adjustment is reported in the response.
+
+The edited day gets the latest forecast for its date. On weather-aware plans the LLM also
+sees that day's weather and which candidates are outdoor, and the day is ordered around it.
 """
 
 import json
 from collections import Counter
 from collections.abc import Collection, Sequence
+from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Route
+from app.ingest.cities import CITIES
 from app.llm.service import LLMService
 from app.optimizer.distance import DistanceProvider, PrefetchedProvider
 from app.optimizer.geometry import LatLon
@@ -29,6 +34,7 @@ from app.optimizer.planner import (
     RoutePlan,
     StartPoint,
     Stop,
+    day_hours,
     plan_route,
     visit_minutes,
 )
@@ -55,11 +61,19 @@ from app.services.place_selection import (
 from app.services.trip_planner import (
     Stopwatch,
     day_segments,
+    forecast_of,
     get_plan,
     planned_day,
     planned_stop,
     save_plan,
     transit_source,
+)
+from app.services.weather_service import (
+    TripWeather,
+    WeatherProvider,
+    city_trip_weather,
+    describe_day,
+    outdoor_conditions,
 )
 
 # Candidates ranked for a swap; the ones the LLM does not pick stay at hand (and are
@@ -111,7 +125,9 @@ def _replace_prompt(
     removed: Sequence[PlannedStop],
     candidates: Sequence[Candidate],
     free_min: int,
+    weather: str | None = None,
 ) -> str:
+    """`weather` (that day's, weather-aware plans only) also marks the outdoor candidates."""
     lengths = ", ".join(
         f"{category} {visit_minutes(category)}"
         for category in dict.fromkeys(c.category for c in candidates)
@@ -121,13 +137,18 @@ def _replace_prompt(
     lines.extend([f"- {s.name} ({s.category})" for s in kept] or ["- (nothing)"])
     lines.append("Removed by the traveller:")
     lines.extend(f"- {s.name} ({s.category})" for s in removed)
+    if weather:
+        lines.append(
+            f"Weather that day: {weather}. Outdoor places only suit dry daylight; in bad "
+            "weather prefer indoor places that suit the request."
+        )
     lines += [
         f"Number of places to choose: {len(removed)}",
         f"Free time for them: about {free_min} minutes. Visit lengths (minutes): {lengths}",
         "",
         "Candidates (id | name | category | distance | hint):",
     ]
-    lines.extend(map(candidate_line, candidates))
+    lines.extend(candidate_line(c, exposure=weather is not None) for c in candidates)
     return "\n".join(lines)
 
 
@@ -136,7 +157,17 @@ def _point(stop: PlannedStop | Candidate) -> LatLon:
 
 
 def _stop(c: Candidate, priority: int) -> Stop:
-    return Stop(c.id, c.lat, c.lon, c.category, priority=priority)
+    return Stop(c.id, c.lat, c.lon, c.category, priority=priority, outdoor=c.outdoor)
+
+
+async def _day_weather(
+    provider: WeatherProvider | None, plan: PlanResponse, day: int
+) -> TripWeather | None:
+    """The latest forecast for one day of a saved plan."""
+    city = CITIES.get(plan.city)
+    if provider is None or city is None or plan.start_date is None:
+        return None
+    return await city_trip_weather(provider, city, plan.start_date + timedelta(days=day - 1), 1)
 
 
 def _ref(place_id: int, names: dict[int, str]) -> PlaceRef:
@@ -152,6 +183,7 @@ async def replace_stops(
     day: int,
     place_ids: Sequence[int],
     transit: TransitProvider | None = None,
+    weather: WeatherProvider | None = None,
 ) -> PlanResponse | None:
     """New version of the plan with the given stops of `day` replaced; None if no such plan."""
     watch = Stopwatch()
@@ -176,6 +208,9 @@ async def replace_stops(
     planned = {s.place_id for d in plan.days for s in d.stops}
     budget = DAY_BUDGET_MIN[trip.pace]
     free_min = budget - target.duration_min + sum(visit_minutes(s.category) for s in removed)
+    forecast = await _day_weather(weather, plan, day)
+    today = forecast.days[0] if forecast else None
+    aware = forecast if plan.weather_aware else None
 
     pool = await find_candidates(
         session,
@@ -198,7 +233,14 @@ async def replace_stops(
     if fitting:
         selection = await llm.generate(
             system=REPLACE_SYSTEM,
-            prompt=_replace_prompt(trip, kept, removed, fitting, free_min),
+            prompt=_replace_prompt(
+                trip,
+                kept,
+                removed,
+                fitting,
+                free_min,
+                describe_day(aware.days[0], *day_hours(trip.pace)) if aware else None,
+            ),
             schema=PlaceSelection,
         )
         chosen, warnings = validate_selection(selection.place_ids, fitting, len(removed))
@@ -216,6 +258,7 @@ async def replace_stops(
             s.category,
             priority=ranking.get(s.place_id, len(ranking) + i),
             required=s.must_visit,
+            outdoor=s.outdoor,
         )
         for i, s in enumerate(kept)
     ]
@@ -239,6 +282,7 @@ async def replace_stops(
             start=StartPoint(start.lat, start.lon, start.round_trip) if start else None,
             modes=plan.modes,
             transit=transit,
+            conditions=outdoor_conditions(aware) if aware else None,
         )
 
     route = await optimize(stops)
@@ -310,10 +354,13 @@ async def replace_stops(
                 names[v.stop.id],
                 notes.get(v.stop.id) or old_notes.get(v.stop.id),
                 details.get(v.stop.id),
+                today,
             )
             for v in current.visits
         ],
         await day_segments(current, start, distances),
+        on=target.date,
+        weather=forecast_of(today, trip.pace) if today else target.weather,
     )
     watch.lap("geometry")
 

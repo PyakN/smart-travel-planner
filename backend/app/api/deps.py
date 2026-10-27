@@ -8,6 +8,7 @@ from app.config import Settings, get_settings
 from app.llm.service import LLMService
 from app.optimizer.distance import DistanceProvider
 from app.optimizer.transit import TransitProvider
+from app.services.weather_service import WeatherProvider
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
@@ -36,8 +37,15 @@ def get_transit(request: Request) -> TransitProvider | None:
     return transit
 
 
+def get_weather(request: Request) -> WeatherProvider | None:
+    """Weather forecasts; None means plans without weather."""
+    weather: WeatherProvider | None = request.app.state.weather
+    return weather
+
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 LLMDep = Annotated[LLMService, Depends(get_llm)]
 DistancesDep = Annotated[DistanceProvider, Depends(get_distances)]
 TransitDep = Annotated[TransitProvider | None, Depends(get_transit)]
+WeatherDep = Annotated[WeatherProvider | None, Depends(get_weather)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]

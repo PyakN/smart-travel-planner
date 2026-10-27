@@ -26,6 +26,8 @@ from app.config import Settings
 from app.http_logging import hide_api_keys
 from app.ingest.cities import City
 from app.optimizer.geometry import LatLon
+from app.optimizer.planner import DayConditions
+from app.schemas.plan import DayForecast, ForecastSlot, StopForecast
 
 logger = logging.getLogger(__name__)
 hide_api_keys()
@@ -126,12 +128,25 @@ class DayWeather:
     # Forecast steps around the day, by local minute (negative for the evening before).
     steps: tuple[tuple[int, WeatherStep], ...]
 
-    def at(self, minute: float) -> WeatherStep | None:
-        """The step whose three hours `minute` falls in; None past the forecast's reach."""
+    def slot(self, minute: float) -> tuple[int, WeatherStep] | None:
+        """The step whose three hours `minute` falls in, with its own minute; None past the
+        forecast's reach."""
         for start, step in self.steps:
             if start - STEP_MIN / 2 <= minute < start + STEP_MIN / 2:
-                return step
+                return start, step
         return None
+
+    def at(self, minute: float) -> WeatherStep | None:
+        found = self.slot(minute)
+        return found[1] if found else None
+
+    def during(self, start_min: int, end_min: int) -> list[tuple[int, WeatherStep]]:
+        """The steps whose three hours overlap `start_min` to `end_min`."""
+        return [
+            (minute, step)
+            for minute, step in self.steps
+            if minute - STEP_MIN // 2 < end_min and minute + STEP_MIN // 2 > start_min
+        ]
 
     @property
     def has_forecast(self) -> bool:
@@ -191,11 +206,7 @@ def describe_day(day: DayWeather, start_min: int, end_min: int) -> str:
     rain 10:30-19:30 (up to 91%); 16-17 °C; daylight 07:03-17:37"."""
     daylight = f"daylight {hhmm(day.sunrise_min)}-{hhmm(day.sunset_min)}"
     label = f"{day.date:%a} {day.date.day} {day.date:%b}"
-    steps = [
-        (minute, step)
-        for minute, step in day.steps
-        if minute - STEP_MIN // 2 < end_min and minute + STEP_MIN // 2 > start_min
-    ]
+    steps = day.during(start_min, end_min)
     if not steps:
         return f"{label}: no forecast yet; {daylight}"
     # Bad spells: runs of steps bad for outdoor sights, told by the worst step of each.
@@ -218,6 +229,81 @@ def describe_day(day: DayWeather, start_min: int, end_min: int) -> str:
     )
     temps = [round(step.temp_c) for _, step in steps]
     return f"{label}: {weather or 'dry'}; {min(temps)}-{max(temps)} °C; {daylight}"
+
+
+def forecast_slot(minute: int, step: WeatherStep) -> ForecastSlot:
+    return ForecastSlot(
+        time=hhmm(minute),
+        temp_c=round(step.temp_c),
+        condition=step.condition,
+        description=step.description,
+        icon=step.icon,
+        pop=round(step.pop * 100),
+    )
+
+
+def day_forecast(day: DayWeather, start_min: int, end_min: int) -> DayForecast | None:
+    """The weather of a day's sightseeing hours, headed by its worst bad spell, or by the
+    step in the middle of the day when there is none; None past the forecast's reach."""
+    steps = day.during(start_min, end_min)
+    if not steps:
+        return None
+    worst = max(steps, key=lambda s: s[1].outdoor_badness)[1]
+    middle = (start_min + end_min) / 2
+    head = (
+        worst
+        if worst.outdoor_badness >= BAD_WEATHER
+        else min(steps, key=lambda s: abs(s[0] - middle))[1]
+    )
+    temps = [step.temp_c for _, step in steps]
+    return DayForecast(
+        condition=head.condition,
+        description=head.description,
+        icon=head.icon,
+        temp_min_c=round(min(temps)),
+        temp_max_c=round(max(temps)),
+        pop=round(max(step.pop for _, step in steps) * 100),
+        sunrise=hhmm(day.sunrise_min),
+        sunset=hhmm(day.sunset_min),
+        slots=[forecast_slot(minute, step) for minute, step in steps],
+    )
+
+
+def outdoor_warning(day: DayWeather, arrive_min: int, leave_min: int) -> str | None:
+    """What spoils an outdoor visit, if bad weather or darkness covers most of it."""
+    minutes = range(arrive_min, max(leave_min, arrive_min + 1))
+    if sum(map(day.outdoor_badness, minutes)) < BAD_WEATHER * len(minutes):
+        return None
+    if 2 * sum(map(day.is_dark, minutes)) >= len(minutes):
+        if arrive_min > (day.sunrise_min + day.sunset_min) / 2:
+            return f"After sunset ({hhmm(day.sunset_min)})"
+        return f"Before sunrise ({hhmm(day.sunrise_min)})"
+    steps = [step for m in minutes if (step := day.at(m)) is not None]
+    if not steps:
+        return None
+    worst = max(steps, key=lambda s: s.outdoor_badness)
+    chance = f"likely ({round(worst.pop * 100)}%)"
+    if worst.condition in WET:
+        return f"{worst.description.capitalize()} {chance}"
+    if worst.precipitation_mm > 0:
+        return f"Showers {chance}"
+    return f"{worst.description.capitalize()}: poor visibility"
+
+
+def stop_forecast(
+    day: DayWeather, arrive_min: int, leave_min: int, outdoor: bool
+) -> StopForecast | None:
+    """The forecast at a stop's arrival; outdoor stops also say what spoils their visit."""
+    found = day.slot(arrive_min)
+    if found is None:
+        return None
+    warning = outdoor_warning(day, arrive_min, leave_min) if outdoor else None
+    return StopForecast(**forecast_slot(*found).model_dump(), warning=warning)
+
+
+def outdoor_conditions(weather: TripWeather) -> list[DayConditions]:
+    """The trip's weather as the optimizer takes it."""
+    return [DayConditions.from_minutes(day.minute_badness()) for day in weather.days]
 
 
 def trip_weather(forecast: Forecast, start: date, days: int, tz: ZoneInfo) -> TripWeather:

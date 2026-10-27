@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -20,9 +20,12 @@ from app.services.weather_service import (
     city_trip_weather,
     condition,
     create_weather_provider,
+    day_forecast,
     day_weather,
     describe_day,
+    outdoor_warning,
     parse_forecast,
+    stop_forecast,
     trip_weather,
 )
 
@@ -194,6 +197,59 @@ def test_describe_day() -> None:
     assert describe_day(later, nine_thirty, half_past_seven) == (
         "Tue 3 Nov: no forecast yet; daylight 07:03-17:37"
     )
+
+
+@pytest.mark.parametrize(
+    ("day", "hours", "warning"),
+    [
+        (WEDNESDAY, (9.5, 10.25), None),  # dry morning
+        (WEDNESDAY, (12, 12.75), "Light rain likely (62%)"),
+        (WEDNESDAY, (13, 13.75), "Moderate rain likely (91%)"),  # the worst step it meets
+        (WEDNESDAY, (16.75, 17.5), None),  # a 47% chance is not bad yet
+        (WEDNESDAY, (17.5, 18.25), "After sunset (17:37)"),
+        (THURSDAY, (6.75, 7.5), "Fog: poor visibility"),
+        (THURSDAY, (6, 6.5), "Before sunrise (07:03)"),
+    ],
+)
+def test_outdoor_warning(day: date, hours: tuple[float, float], warning: str | None) -> None:
+    weather = day_weather(forecast(), day, LISBON_TZ)
+    arrive, leave = (round(h * 60) for h in hours)
+    assert outdoor_warning(weather, arrive, leave) == warning
+
+
+def test_showers_from_a_cloudy_step() -> None:
+    showers = step(condition="clouds", description="overcast clouds", pop=0.7, precipitation_mm=1)
+    noon = datetime(2026, 10, 28, 12, tzinfo=UTC)
+    weather = day_weather(
+        Forecast((showers,), noon - timedelta(hours=5), noon + timedelta(hours=5)),
+        WEDNESDAY,
+        LISBON_TZ,
+    )
+    assert outdoor_warning(weather, 12 * 60, 12 * 60 + 30) == "Showers likely (70%)"
+
+
+def test_stop_forecast() -> None:
+    wednesday = day_weather(forecast(), WEDNESDAY, LISBON_TZ)
+    museum = stop_forecast(wednesday, 13 * 60, 14 * 60 + 30, outdoor=False)
+    assert museum is not None
+    assert (museum.time, museum.description, museum.pop, museum.warning) == (
+        "12:00",
+        "light rain",
+        62,
+        None,
+    )
+    park = stop_forecast(wednesday, 12 * 60, 12 * 60 + 40, outdoor=True)
+    assert park is not None and park.warning == "Light rain likely (62%)"
+    later = day_weather(forecast(), date(2026, 11, 3), LISBON_TZ)
+    assert stop_forecast(later, 13 * 60, 14 * 60, outdoor=True) is None
+
+
+def test_day_forecast_without_bad_weather_is_headed_by_midday() -> None:
+    thursday = day_weather(forecast(), THURSDAY, LISBON_TZ)
+    head = day_forecast(thursday, 9 * 60 + 30, 17 * 60 + 30)
+    assert head is not None
+    assert (head.condition, head.description, head.pop) == ("clear", "clear sky", 0)
+    assert [s.time for s in head.slots] == ["09:00", "12:00", "15:00", "18:00"]
 
 
 def openweather(handler: Any, **kwargs: Any) -> OpenWeatherProvider:

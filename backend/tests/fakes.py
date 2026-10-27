@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from app.llm.base import LLMResponse
 from app.optimizer.geometry import LatLon
 from app.optimizer.transit import TransitRoute
+from app.services.weather_service import Forecast
 
 
 @dataclass
@@ -45,3 +46,15 @@ class FakeTransit:
     @property
     def asked(self) -> list[tuple[LatLon, LatLon]]:
         return [pair for call in self.calls for pair in call]
+
+
+@dataclass
+class FakeWeather:
+    """Answers every place with the same forecast (None: unavailable); records the places."""
+
+    answer: Forecast | None
+    asked: list[LatLon] = field(default_factory=list)
+
+    async def forecast(self, point: LatLon) -> Forecast | None:
+        self.asked.append(point)
+        return self.answer
