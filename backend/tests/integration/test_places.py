@@ -63,8 +63,26 @@ def test_pagination(client: TestClient) -> None:
 
 
 @pytest.mark.parametrize(
+    ("q", "expected"),
+    [
+        ("sao jorge", ["Castelo de São Jorge"]),  # accents ignored
+        ("BELEM TOWER", ["Torre de Belém"]),  # English name
+        ("100%", []),  # wildcards are literal
+    ],
+)
+def test_name_search(client: TestClient, q: str, expected: list[str]) -> None:
+    assert names(search(client, city="lisbon", q=q)) == expected
+
+
+def test_name_search_puts_prefix_matches_first(client: TestClient) -> None:
+    # Without the prefix rule the City Museum (with Wikidata) would come first.
+    assert names(search(client, q="museum", city="testville")) == ["Museum of Toys", "City Museum"]
+
+
+@pytest.mark.parametrize(
     "params",
     [
+        {"q": "a"},  # too short
         {"lat": 38.7, "lon": -9.1},  # radius missing
         {"radius_m": 500},  # point missing
         {**PRACA_DO_COMERCIO, "radius_m": 50_000},  # radius too large

@@ -29,6 +29,10 @@ def parse_bbox(raw: str) -> BBox:
 
 def place_filters(
     city: str | None = None,
+    q: Annotated[
+        str | None,
+        Query(min_length=2, max_length=100, description="Name contains (accents ignored)"),
+    ] = None,
     category: Annotated[list[str] | None, Query(description="Repeat for several")] = None,
     bbox: Annotated[str | None, Query(description="west,south,east,north")] = None,
     lat: Annotated[float | None, Query(ge=-90, le=90)] = None,
@@ -43,6 +47,7 @@ def place_filters(
     near = Near(lat, lon, radius_m) if lat is not None and lon is not None and radius_m else None
     return PlaceFilters(
         city=city,
+        q=q.strip() or None if q else None,
         categories=tuple(category or ()),
         bbox=parse_bbox(bbox) if bbox else None,
         near=near,

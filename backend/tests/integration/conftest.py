@@ -39,6 +39,21 @@ SEED_PLACES: list[tuple[int, str, str, str, float, float, str | None, dict[str, 
     ),
     (5, "lisbon", "Museu Calouste Gulbenkian", "museum", 38.7372, -9.1545, None, {}),
     (6, "porto", "Museu de Serralves", "museum", 41.1597, -8.6598, None, {}),
+    # A compact fictional town with plenty of places, for tests that need spare candidates
+    # (replacing stops). Its city is registered in CITIES only by the tests that use it.
+    (101, "testville", "Testville Cathedral", "religious", 45.0000, 7.0000, "Q900001", {}),
+    (102, "testville", "Old Town Square", "landmark", 45.0010, 7.0020, "Q900002", {}),
+    (103, "testville", "Clock Tower", "landmark", 45.0020, 7.0010, None, {}),
+    (104, "testville", "City Museum", "museum", 45.0030, 7.0030, "Q900004", {}),
+    (105, "testville", "Museum of Toys", "museum", 45.0040, 7.0000, None, {}),
+    (106, "testville", "Hilltop Viewpoint", "viewpoint", 45.0050, 7.0040, None, {}),
+    (107, "testville", "River Park", "park", 45.0020, 7.0060, None, {}),
+    (108, "testville", "Saint Anne Church", "religious", 45.0060, 7.0020, None, {}),
+    (109, "testville", "Saint Paul Church", "religious", 45.0070, 7.0010, None, {}),
+    (110, "testville", "Fish Market", "market", 45.0010, 7.0050, None, {}),
+    (111, "testville", "Modern Art Gallery", "gallery", 45.0030, 7.0070, None, {}),
+    (112, "testville", "Harbour Theatre", "culture", 45.0000, 7.0080, None, {}),
+    (113, "testville", "Far Fort", "landmark", 45.0800, 7.0900, "Q900013", {}),
 ]
 
 

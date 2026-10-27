@@ -8,6 +8,7 @@ from sqlalchemy.sql.elements import SQLCoreOperations
 
 from app.db.models import Category, Place
 from app.geo import BBox
+from app.repositories.search import like_pattern, name_matches
 from app.schemas.place import CategoryOut, PlaceOut
 
 
@@ -21,6 +22,8 @@ class Near:
 @dataclass(frozen=True)
 class PlaceFilters:
     city: str | None = None
+    # Accent-insensitive name search (local or English name).
+    q: str | None = None
     categories: tuple[str, ...] = ()
     bbox: BBox | None = None
     near: Near | None = None
@@ -50,6 +53,8 @@ async def search_places(session: AsyncSession, filters: PlaceFilters) -> tuple[l
     conditions: list[ColumnElement[bool]] = []
     if filters.city:
         conditions.append(Place.city == filters.city)
+    if filters.q:
+        conditions.append(name_matches([filters.q]))
     if filters.categories:
         conditions.append(Category.slug.in_(filters.categories))
     if filters.bbox:
@@ -67,12 +72,16 @@ async def search_places(session: AsyncSession, filters: PlaceFilters) -> tuple[l
         select(func.count()).select_from(Place).join(Category).where(*conditions)
     )
 
-    # Closest first around a point; otherwise well-known places (with Wikidata) first.
-    order_by = (
-        [distance, Place.id]
-        if distance is not None
-        else [Place.wikidata.is_(None), Place.name, Place.id]
-    )
+    # Closest first around a point; otherwise well-known places (with Wikidata) first,
+    # after names that start with the search text.
+    order_by: list[SQLCoreOperations[Any]] = [Place.wikidata.is_(None), Place.name, Place.id]
+    if distance is not None:
+        order_by = [distance, Place.id]
+    elif filters.q:
+        starts = func.unaccent(Place.name).ilike(
+            func.unaccent(like_pattern(filters.q, prefix=True)), escape="\\"
+        )
+        order_by.insert(0, starts.desc())
     distance_column = (distance if distance is not None else null()).label("distance_m")
     stmt = (
         select(*_place_columns(), distance_column)
