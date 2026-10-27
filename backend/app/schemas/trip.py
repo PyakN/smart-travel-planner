@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.catalog import CategorySlug
 
 Pace = Literal["relaxed", "moderate", "intense"]
+# Places in a day of the default hours (app.services.place_selection.day_places).
 STOPS_PER_DAY: dict[Pace, int] = {"relaxed": 4, "moderate": 6, "intense": 8}
 MAX_DAYS = 7
 MAX_KEYWORDS = 8
@@ -43,10 +44,6 @@ class TripRequest(BaseModel):
     def _clean_keywords(cls, keywords: list[str]) -> list[str]:
         cleaned = [k.strip()[:50] for k in keywords if k.strip()]
         return list(dict.fromkeys(cleaned))[:MAX_KEYWORDS]
-
-    @property
-    def stops_target(self) -> int:
-        return self.days * STOPS_PER_DAY[self.pace]
 
 
 class PlaceNote(BaseModel):

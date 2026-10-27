@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from app.api.deps import DistancesDep, LLMDep, SessionDep, SettingsDep, TransitDep, WeatherDep
 from app.llm.base import LLMBudgetExceededError, LLMError, LLMUnavailableError
 from app.schemas.plan import PlanRequest, PlanResponse, ReplaceRequest
+from app.services.day_hours import DailyHours
 from app.services.place_selection import PlanningError
 from app.services.plan_editing import replace_stops
 from app.services.trip_planner import get_plan, plan_trip
@@ -66,6 +67,7 @@ async def create_plan(
             weather=weather,
             start_date=body.start_date,
             weather_aware=body.weather_aware,
+            hours=DailyHours(body.day_start, body.day_end, body.first_day_start),
         )
 
 

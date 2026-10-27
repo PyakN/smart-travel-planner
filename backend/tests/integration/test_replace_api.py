@@ -103,6 +103,22 @@ def test_replace_one_stop(client: TestClient, llm: FakeProvider, place_ids: dict
     assert client.get(f"/plans/{new['id']}").json() == new
 
 
+def test_replacing_keeps_the_days_hours(
+    client: TestClient, llm: FakeProvider, place_ids: dict[str, int]
+) -> None:
+    hours = {"day_start": "13:00", "day_end": "21:30", "start_date": "2026-10-28"}
+    plan = create_plan(client, llm, place_ids, ["Testville Cathedral", "City Museum"], **hours)
+    church = place_ids["Saint Paul Church"]
+    picks(llm, church)
+    new = replace(client, plan, 1, [place_ids["Testville Cathedral"]]).json()
+    [day] = new["days"]
+    assert (day["start"], day["end"]) == ("13:00", "21:30")
+    assert day["stops"][0]["arrive"] == "13:00"
+    assert church in {s["place_id"] for s in day["stops"]}
+    assert day["duration_min"] <= 255  # a relaxed share of 8 h 30 min
+    assert (new["day_start"], new["day_end"]) == ("13:00", "21:30")
+
+
 def test_no_repeats_across_days_or_earlier_swaps(
     client: TestClient, llm: FakeProvider, place_ids: dict[str, int]
 ) -> None:
@@ -249,7 +265,7 @@ def test_replacements_that_do_not_fit_together_are_reported(
     assert "Free time for them: about " in prompt
     assert "museum 90" in prompt
     assert [a["name"] for a in new["edit"]["added"]] == ["City Museum"]
-    assert "1 replacement(s) did not fit day 1's 3 h budget" in new["warnings"]
+    assert "1 replacement(s) did not fit day 1's 3 h 20 min budget" in new["warnings"]
     assert new["days"][0]["duration_min"] <= 200
 
 

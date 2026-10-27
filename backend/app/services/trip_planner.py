@@ -9,7 +9,7 @@ import logging
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from pydantic import ValidationError
@@ -20,7 +20,18 @@ from app.ingest.cities import CITIES, City
 from app.llm.service import LLMService
 from app.optimizer.distance import DistanceProvider
 from app.optimizer.geometry import LatLon
-from app.optimizer.planner import DayPlan, Leg, StartPoint, Stop, Visit, day_hours, plan_route
+from app.optimizer.planner import (
+    DayConditions,
+    DayPlan,
+    DayWindow,
+    Leg,
+    NothingFitsError,
+    RoutePlan,
+    StartPoint,
+    Stop,
+    Visit,
+    plan_route,
+)
 from app.optimizer.transit import Ride, TransitProvider
 from app.repositories.places import PlaceDetails, place_details
 from app.schemas.plan import (
@@ -39,7 +50,13 @@ from app.schemas.plan import (
     TravelMode,
 )
 from app.schemas.trip import Pace
-from app.services.place_selection import WeatherLookup, select_places
+from app.services.day_hours import DEFAULT_HOURS, DailyHours, clock, minute_of, trip_windows
+from app.services.place_selection import (
+    HoursLookup,
+    PlanningError,
+    WeatherLookup,
+    select_places,
+)
 from app.services.weather_service import (
     DayWeather,
     TripWeather,
@@ -51,11 +68,6 @@ from app.services.weather_service import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _clock(minutes: int) -> str:
-    minutes %= 24 * 60
-    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 class Stopwatch:
@@ -191,8 +203,8 @@ def planned_stop(
         category=visit.stop.category,
         lat=visit.stop.lat,
         lon=visit.stop.lon,
-        arrive=_clock(visit.arrive_min),
-        leave=_clock(visit.leave_min),
+        arrive=clock(visit.arrive_min),
+        leave=clock(visit.leave_min),
         travel_mode=leg.mode if leg else None,
         travel_min=round(leg.minutes) if leg else 0,
         distance_from_previous_m=round(leg.distance_m) if leg else 0,
@@ -205,6 +217,8 @@ def planned_stop(
         website=details.website if details else None,
         outdoor=stop.outdoor,
         weather=forecast,
+        hours=stop.hours,
+        wait_min=visit.wait_min,
     )
 
 
@@ -217,6 +231,7 @@ def planned_day(
     on: date | None = None,
     weather: DayForecast | None = None,
 ) -> PlannedDay:
+    window = day.window
     return PlannedDay(
         day=number,
         stops=stops,
@@ -228,7 +243,55 @@ def planned_day(
         segments=segments,
         date=on,
         weather=weather,
+        start=clock(window.start_min),
+        end=clock(window.end_min),
+        sunrise=clock(window.sunrise_min) if window.sunrise_min is not None else None,
+        sunset=clock(window.sunset_min) if window.sunset_min is not None else None,
     )
+
+
+def window_params(window: DayWindow) -> list[int | None]:
+    """A day's hours as saved with the plan: [start, end, sunrise, sunset]."""
+    return [window.start_min, window.end_min, window.sunrise_min, window.sunset_min]
+
+
+def window_of(params: dict[str, Any], day: int) -> DayWindow:
+    """The hours of day `day` (1 is the first) of a saved plan; plans saved before days had
+    their own hours get the default ones."""
+    saved = params.get("windows") or []
+    return DayWindow(*saved[day - 1]) if day <= len(saved) else DayWindow()
+
+
+async def optimize(
+    stops: Sequence[Stop],
+    *,
+    days: int,
+    pace: Pace,
+    provider: DistanceProvider,
+    start: StartPoint | None,
+    modes: Sequence[TravelMode],
+    transit: TransitProvider | None,
+    conditions: Sequence[DayConditions] | None,
+    windows: Sequence[DayWindow],
+) -> RoutePlan:
+    """plan_route; hours that no stop fits are a PlanningError."""
+    try:
+        return await plan_route(
+            stops,
+            days=days,
+            pace=pace,
+            provider=provider,
+            start=start,
+            modes=modes,
+            transit=transit,
+            conditions=conditions,
+            windows=windows,
+        )
+    except NothingFitsError as exc:
+        raise PlanningError(
+            "None of these places can be visited in the hours you chose: sights close and "
+            "bars open at 20:00, and viewpoints need daylight."
+        ) from exc
 
 
 def first_day(city: City, requested: date | None) -> date:
@@ -243,13 +306,29 @@ def weather_lookup(provider: WeatherProvider, start_date: date | None) -> Weathe
     return lookup
 
 
+def hours_lookup(hours: DailyHours, start_date: date | None, now: datetime | None) -> HoursLookup:
+    def lookup(city: City, days: int) -> list[DayWindow]:
+        moment = now or datetime.now(city.tz)
+        return trip_windows(hours, city, first_day(city, start_date), days, moment)
+
+    return lookup
+
+
+def late_start_warnings(hours: DailyHours, windows: Sequence[DayWindow]) -> list[str]:
+    """A trip that starts today, later than asked: now is too late for that."""
+    asked = minute_of(hours.first_start or hours.start)
+    if not windows or windows[0].start_min <= asked:
+        return []
+    return [f"Day 1 starts at {clock(windows[0].start_min)}: it is past {clock(asked)} already."]
+
+
 def day_weather_of(weather: TripWeather | None, day: int) -> DayWeather | None:
     """Trip day `day` (1 is the first) of the trip's weather, if any."""
     return weather.days[day - 1] if weather and day <= len(weather.days) else None
 
 
-def forecast_of(weather: DayWeather | None, pace: Pace) -> DayForecast | None:
-    return day_forecast(weather, *day_hours(pace)) if weather else None
+def forecast_of(weather: DayWeather | None, window: DayWindow, pace: Pace) -> DayForecast | None:
+    return day_forecast(weather, *window.sightseeing(pace)) if weather else None
 
 
 def weather_warnings(weather: TripWeather | None, weather_aware: bool) -> list[str]:
@@ -304,8 +383,12 @@ async def plan_trip(
     weather: WeatherProvider | None = None,
     start_date: date | None = None,
     weather_aware: bool = False,
+    hours: DailyHours = DEFAULT_HOURS,
+    now: datetime | None = None,
 ) -> PlanResponse:
-    """`weather` gives every day and stop its forecast; `weather_aware` plans with it."""
+    """`weather` gives every day and stop its forecast; `weather_aware` plans with it.
+    `hours` are the days' hours; a first day that is today starts at `now` (the current
+    time) or later."""
     watch = Stopwatch()
     selection = await select_places(
         llm,
@@ -317,8 +400,10 @@ async def plan_trip(
         modes=modes,
         weather=weather_lookup(weather, start_date) if weather else None,
         weather_aware=weather_aware,
+        hours=hours_lookup(hours, start_date, now),
     )
     watch.lap("selection")
+    windows = selection.windows
     forecast = selection.weather
     first = forecast.days[0].date if forecast else first_day(CITIES[selection.city], start_date)
 
@@ -333,11 +418,13 @@ async def plan_trip(
             priority=rank,
             required=p.id in required,
             outdoor=p.outdoor,
+            hours=p.hours,
         )
         for rank, p in enumerate(selection.places)
     ]
-    route = await plan_route(
+    route = await optimize(
         stops,
+        windows=windows,
         days=selection.trip.days,
         pace=selection.trip.pace,
         provider=distances,
@@ -372,7 +459,7 @@ async def plan_trip(
                 stops_of_day,
                 segments_of_day,
                 on=first + timedelta(days=day.day - 1),
-                weather=forecast_of(today, selection.trip.pace),
+                weather=forecast_of(today, day.window, selection.trip.pace),
             )
         )
     swaps = [
@@ -392,6 +479,8 @@ async def plan_trip(
         "ranking": [p.id for p in selection.places],
         "start_date": first.isoformat(),
         "weather_aware": weather_aware,
+        **hours.as_params(),
+        "windows": [window_params(w) for w in windows],
     }
     return await save_plan(
         session,
@@ -410,7 +499,8 @@ async def plan_trip(
             transit_source=transit_source(days),
             strategy=route.strategy,
             dropped=[PlaceRef(place_id=s.id, name=places[s.id].name) for s in route.dropped],
-            warnings=selection.warnings
+            warnings=late_start_warnings(hours, windows)
+            + selection.warnings
             + route.warnings
             + weather_warnings(forecast, weather_aware),
             timings_ms=watch.total(),
@@ -420,6 +510,7 @@ async def plan_trip(
             start_date=first,
             weather_aware=weather_aware,
             weather_swaps=swaps,
+            **hours.as_params(),
         ),
     )
 

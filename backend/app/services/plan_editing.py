@@ -30,12 +30,10 @@ from app.llm.service import LLMService
 from app.optimizer.distance import DistanceProvider, PrefetchedProvider
 from app.optimizer.geometry import LatLon
 from app.optimizer.planner import (
-    DAY_BUDGET_MIN,
     RoutePlan,
     StartPoint,
     Stop,
-    day_hours,
-    plan_route,
+    duration_label,
     visit_minutes,
 )
 from app.optimizer.transit import TransitProvider
@@ -63,10 +61,12 @@ from app.services.trip_planner import (
     day_segments,
     forecast_of,
     get_plan,
+    optimize,
     planned_day,
     planned_stop,
     save_plan,
     transit_source,
+    window_of,
 )
 from app.services.weather_service import (
     TripWeather,
@@ -157,7 +157,7 @@ def _point(stop: PlannedStop | Candidate) -> LatLon:
 
 
 def _stop(c: Candidate, priority: int) -> Stop:
-    return Stop(c.id, c.lat, c.lon, c.category, priority=priority, outdoor=c.outdoor)
+    return Stop(c.id, c.lat, c.lon, c.category, priority=priority, outdoor=c.outdoor, hours=c.hours)
 
 
 async def _day_weather(
@@ -206,7 +206,8 @@ async def replace_stops(
     home = [LatLon(start.lat, start.lon)] if start else []
     rejected = set(params.get("rejected", [])) | selected
     planned = {s.place_id for d in plan.days for s in d.stops}
-    budget = DAY_BUDGET_MIN[trip.pace]
+    window = window_of(params, day)
+    budget = window.budget(trip.pace)
     free_min = budget - target.duration_min + sum(visit_minutes(s.category) for s in removed)
     forecast = await _day_weather(weather, plan, day)
     today = forecast.days[0] if forecast else None
@@ -239,7 +240,7 @@ async def replace_stops(
                 removed,
                 fitting,
                 free_min,
-                describe_day(aware.days[0], *day_hours(trip.pace)) if aware else None,
+                describe_day(aware.days[0], *window.sightseeing(trip.pace)) if aware else None,
             ),
             schema=PlaceSelection,
         )
@@ -259,6 +260,7 @@ async def replace_stops(
             priority=ranking.get(s.place_id, len(ranking) + i),
             required=s.must_visit,
             outdoor=s.outdoor,
+            hours=s.hours,
         )
         for i, s in enumerate(kept)
     ]
@@ -273,9 +275,10 @@ async def replace_stops(
     provider = PrefetchedProvider(distances)
     await provider.prefetch([LatLon(s.lat, s.lon) for s in stops] + list(map(_point, spare)) + home)
 
-    async def optimize(day_stops: Sequence[Stop]) -> RoutePlan:
-        return await plan_route(
+    async def optimize_day(day_stops: Sequence[Stop]) -> RoutePlan:
+        return await optimize(
             day_stops,
+            windows=[window],
             days=1,
             pace=trip.pace,
             provider=provider,
@@ -285,7 +288,7 @@ async def replace_stops(
             conditions=outdoor_conditions(aware) if aware else None,
         )
 
-    route = await optimize(stops)
+    route = await optimize_day(stops)
     names = {s.place_id: s.name for s in target.stops} | {c.id: c.name for c in fitting}
     protected = {s.place_id for s in kept if s.must_visit} | chosen_ids
     adjustments: list[Adjustment] = []
@@ -302,7 +305,9 @@ async def replace_stops(
             if visit_minutes(candidate.category) >= budget - current.total_min:
                 continue
             tried += 1
-            trial = await optimize([v.stop for v in current.visits] + [_stop(candidate, next_rank)])
+            trial = await optimize_day(
+                [v.stop for v in current.visits] + [_stop(candidate, next_rank)]
+            )
             if candidate.id in {v.stop.id for v in trial.days[0].visits}:
                 route, current = trial, trial.days[0]
                 next_rank += 1
@@ -325,7 +330,7 @@ async def replace_stops(
     if dominant and victims and alternatives:
         victim = max(victims, key=lambda s: s.priority)  # the least important one
         alternative = alternatives[0]
-        trial = await optimize(
+        trial = await optimize_day(
             [v.stop for v in current.visits if v.stop.id != victim.id]
             + [_stop(alternative, victim.priority)]
         )
@@ -360,7 +365,7 @@ async def replace_stops(
         ],
         await day_segments(current, start, distances),
         on=target.date,
-        weather=forecast_of(today, trip.pace) if today else target.weather,
+        weather=forecast_of(today, window, trip.pace) if today else target.weather,
     )
     watch.lap("geometry")
 
@@ -368,9 +373,11 @@ async def replace_stops(
     if not chosen:
         warnings.append(f"no other places fit day {day}")
     if late := sum(c.id not in final_ids for c in chosen):
-        warnings.append(f"{late} replacement(s) did not fit day {day}'s {budget // 60} h budget")
+        warnings.append(
+            f"{late} replacement(s) did not fit day {day}'s {duration_label(budget)} budget"
+        )
     if lost:
-        warnings.append(f"dropped {len(lost)} stop(s) to fit {budget // 60} h days")
+        warnings.append(f"dropped {len(lost)} stop(s) to fit {duration_label(budget)} days")
     days = [edited if d.day == day else d for d in plan.days]
     must_visit = [m for m in plan.must_visit if m.place_id not in selected]
     edit = PlanEdit(

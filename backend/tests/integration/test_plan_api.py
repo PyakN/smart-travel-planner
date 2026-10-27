@@ -159,6 +159,58 @@ def test_must_visit_and_walking_only(
     assert (stored["must_visit"], stored["modes"]) == ([torre], ["walk"])
 
 
+def test_a_day_that_starts_late_holds_fewer_places(
+    client: TestClient, llm: FakeProvider, place_ids: dict[str, int], db_session: SessionFactory
+) -> None:
+    chosen = queue_relaxed_day(llm, place_ids)
+    response = post_plan(client, start_date="2026-10-28", day_start="16:00", day_end="21:30")
+    assert response.status_code == 201, response.text
+    plan = response.json()
+
+    # Two thirds of a relaxed day's 4 places: the day has 5 h 30 min instead of 12 h.
+    assert "Number of places to choose: 2" in str(llm.calls[1]["prompt"])
+    [day] = plan["days"]
+    assert sorted(s["place_id"] for s in day["stops"]) == sorted(chosen[:2])
+    assert day["stops"][0]["arrive"] == "16:00"
+    assert (day["start"], day["end"]) == ("16:00", "21:30")
+    assert day["sunset"] is not None and "17:35" <= day["sunset"] <= "17:45"
+    assert day["duration_min"] <= 165  # a relaxed share of the hours
+    assert (plan["day_start"], plan["day_end"], plan["first_day_start"]) == ("16:00", "21:30", None)
+    assert client.get(f"/plans/{plan['id']}").json() == plan
+
+    async def params() -> dict[str, Any]:
+        async with db_session() as session:
+            route = await session.get(Route, plan["id"])
+            assert route is not None
+            return route.params
+
+    stored = asyncio.run(params())
+    assert stored["day_start"] == "16:00" and stored["windows"][0][:2] == [16 * 60, 21 * 60 + 30]
+
+
+def test_a_day_until_three_in_the_morning(
+    client: TestClient, llm: FakeProvider, place_ids: dict[str, int]
+) -> None:
+    queue_relaxed_day(llm, place_ids)
+    response = post_plan(
+        client, start_date="2026-10-28", day_start="16:00", day_end="03:00", first_day_start="18:00"
+    )
+    assert response.status_code == 201, response.text
+    plan = response.json()
+    [day] = plan["days"]
+    assert (day["start"], day["end"]) == ("18:00", "03:00")
+    assert plan["first_day_start"] == "18:00"
+    # Three places for 9 hours. From 18:00 the castle and the viewpoint are in the dark; the
+    # museum is open until 20:00.
+    assert [s["name"] for s in day["stops"]] == ["Museu Calouste Gulbenkian"]
+    assert (day["stops"][0]["arrive"], day["stops"][0]["hours"]) == ("18:00", "day")
+    assert {d["name"] for d in plan["dropped"]} == {
+        "Castelo de São Jorge",
+        "Miradouro de Santa Luzia",
+    }
+    assert "dropped 2 stop(s) that are closed or dark in the day's hours" in plan["warnings"]
+
+
 def test_rides_follow_real_transit_routes(
     client: TestClient, llm: FakeProvider, place_ids: dict[str, int]
 ) -> None:
@@ -238,8 +290,19 @@ def test_llm_not_configured_is_503(client: TestClient) -> None:
         {"text": "ok", "modes": []},
         {"text": "ok", "modes": ["car"]},
         {"text": "ok", "must_visit": list(range(11))},
+        {"text": "ok", "day_start": "10:00", "day_end": "10:00"},
+        {"text": "ok", "day_start": "25:00"},
     ],
-    ids=["empty", "too-long", "bad-start", "no-mode", "bad-mode", "too-many-must-visit"],
+    ids=[
+        "empty",
+        "too-long",
+        "bad-start",
+        "no-mode",
+        "bad-mode",
+        "too-many-must-visit",
+        "no-hours",
+        "bad-hour",
+    ],
 )
 def test_request_validation(client: TestClient, llm: FakeProvider, body: dict[str, Any]) -> None:
     assert client.post("/plan", json=body).status_code == 422

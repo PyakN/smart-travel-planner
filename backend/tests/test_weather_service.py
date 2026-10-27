@@ -170,17 +170,15 @@ def test_past_the_forecast_only_darkness_counts() -> None:
 def test_outdoor_share_of_the_sightseeing_hours() -> None:
     trip = trip_weather(forecast(), WEDNESDAY, 2, LISBON_TZ)
     assert [d.date for d in trip.days] == [WEDNESDAY, THURSDAY]
-    nine_thirty, half_past_five = 9 * 60 + 30, 17 * 60 + 30
+    day = (9 * 60 + 30, 17 * 60 + 30)
     # Wednesday: dry until 10:30 and from 16:30 (a 47% chance is not bad yet).
-    assert (
-        trip_weather(forecast(), WEDNESDAY, 1, LISBON_TZ).outdoor_share(nine_thirty, half_past_five)
-        == 120 / 480
-    )
-    assert trip.outdoor_share(nine_thirty, half_past_five) == (120 + 480) / 960
+    assert trip_weather(forecast(), WEDNESDAY, 1, LISBON_TZ).outdoor_share([day]) == 120 / 480
+    assert trip.outdoor_share([day, day]) == (120 + 480) / 960
+    # Each day has its own hours: Thursday only from 16:30.
+    assert trip.outdoor_share([day, (16 * 60 + 30, 17 * 60 + 30)]) == (120 + 60) / 540
     # An evening past sunset is dark however dry it is.
-    assert (
-        trip_weather(forecast(), THURSDAY, 1, LISBON_TZ).outdoor_share(17 * 60, 19 * 60) == 37 / 120
-    )
+    thursday = trip_weather(forecast(), THURSDAY, 1, LISBON_TZ)
+    assert thursday.outdoor_share([(17 * 60, 19 * 60)]) == 37 / 120
 
 
 def test_describe_day() -> None:

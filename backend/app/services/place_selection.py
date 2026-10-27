@@ -7,6 +7,7 @@ The LLM never invents places: it may only return ids from the candidate list, an
 import json
 from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, field
+from math import floor
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,9 +15,16 @@ from app.ingest.cities import CITIES, City, resolve_city
 from app.ingest.osm import normalize_name
 from app.llm.service import LLMService
 from app.optimizer.geometry import LatLon
-from app.optimizer.planner import ALL_MODES, TravelMode, day_hours
+from app.optimizer.planner import ALL_MODES, FULL_DAY_MIN, DayWindow, TravelMode
 from app.repositories.candidates import Candidate, find_candidates, get_candidates
-from app.schemas.trip import MAX_REQUEST_CHARS, PlaceNote, PlaceSelection, TripRequest
+from app.schemas.trip import (
+    MAX_REQUEST_CHARS,
+    STOPS_PER_DAY,
+    Pace,
+    PlaceNote,
+    PlaceSelection,
+    TripRequest,
+)
 from app.services.weather_service import TripWeather, describe_day
 
 MIN_POOL, MAX_POOL, POOL_PER_STOP = 30, 100, 3
@@ -82,6 +90,8 @@ only suit dry daylight):"""
 
 # The weather of a trip's days in a city, by number of days; None without a forecast.
 WeatherLookup = Callable[[City, int], Awaitable[TripWeather | None]]
+# The hours of a trip's days in a city, by number of days.
+HoursLookup = Callable[[City, int], list[DayWindow]]
 
 
 class PlanningError(Exception):
@@ -101,6 +111,14 @@ class SelectionResult:
     weather: TripWeather | None = None
     # Outdoor picks the weather had no room for, and the indoor places that replaced them.
     weather_swaps: list[tuple[Candidate, Candidate]] = field(default_factory=list)
+    # The hours of the trip's days, in date order.
+    windows: list[DayWindow] = field(default_factory=list)
+
+
+def day_places(window: DayWindow, pace: Pace) -> int:
+    """Places a day with these hours holds: as many as a full day at this pace (09:30 to
+    21:30) for the same share of its hours, at least one."""
+    return max(1, floor(STOPS_PER_DAY[pace] * window.length_min / FULL_DAY_MIN + 0.5))
 
 
 def validate_selection(
@@ -221,6 +239,7 @@ def candidate_line(c: Candidate, exposure: bool = False) -> str:
 class _WeatherNote:
     weather: TripWeather
     max_outdoor: int  # outdoor places the LLM may still choose
+    windows: Sequence[DayWindow]
 
 
 def _selection_prompt(
@@ -239,11 +258,11 @@ def _selection_prompt(
         lines.append("Must-visit places (already in the plan):")
         lines.extend(f"- {m.id} | {m.name} | {_category(m, exposure)}" for m in must_visit)
     if weather is not None:
-        start, end = day_hours(trip.pace)
         lines.append(WEATHER_PROMPT)
+        days = zip(weather.weather.days, weather.windows, strict=True)
         lines.extend(
-            f"- Day {number}, {describe_day(day, start, end)}"
-            for number, day in enumerate(weather.weather.days, start=1)
+            f"- Day {number}, {describe_day(day, *window.sightseeing(trip.pace))}"
+            for number, (day, window) in enumerate(days, start=1)
         )
         if (most := weather.max_outdoor) < target:
             lines.append(
@@ -271,10 +290,13 @@ async def select_places(
     modes: Collection[TravelMode] = ALL_MODES,
     weather: WeatherLookup | None = None,
     weather_aware: bool = False,
+    hours: HoursLookup | None = None,
 ) -> SelectionResult:
-    """`weather` gives the trip's weather, returned with the result. When the selection is
-    `weather_aware`, the LLM also sees it with each candidate's exposure, and outdoor picks
-    are capped at the share of the sightseeing hours that are dry and light."""
+    """`hours` gives the hours of the trip's days (by default 09:30 to 21:30), and with them
+    how many places to choose. `weather` gives the trip's weather, returned with the result.
+    When the selection is `weather_aware`, the LLM also sees it with each candidate's
+    exposure, and outdoor picks are capped at the share of the sightseeing hours that are
+    dry and light."""
     text = text.strip()
     if not text:
         raise PlanningError("Describe the trip you want.")
@@ -291,8 +313,9 @@ async def select_places(
     must = await get_candidates(session, must_visit, city=city)
     if len(must) < len(set(must_visit)):
         raise PlanningError(f"Some must-visit places are not in {resolved.name}.")
+    windows = hours(resolved, trip.days) if hours else [DayWindow()] * trip.days
     forecast = await weather(resolved, trip.days) if weather else None
-    target = max(0, trip.stops_target - len(must))
+    target = max(0, sum(day_places(w, trip.pace) for w in windows) - len(must))
     if target == 0:
         return SelectionResult(
             trip=trip,
@@ -302,12 +325,14 @@ async def select_places(
             candidates_considered=0,
             must_visit=must,
             weather=forecast,
+            windows=windows,
         )
     note = None
     if weather_aware and forecast is not None:
-        share = forecast.outdoor_share(*day_hours(trip.pace))
+        share = forecast.outdoor_share([w.sightseeing(trip.pace) for w in windows])
         outdoor_must = sum(m.outdoor for m in must)
-        note = _WeatherNote(forecast, max(0, round(share * (len(must) + target)) - outdoor_must))
+        most = max(0, round(share * (len(must) + target)) - outdoor_must)
+        note = _WeatherNote(forecast, most, windows)
 
     anchors = ([start] if start else []) + [LatLon(m.lat, m.lon) for m in must]
     pool = max(MIN_POOL, min(MAX_POOL, target * POOL_PER_STOP))
@@ -326,7 +351,9 @@ async def select_places(
     if not candidates:
         if not must:
             raise PlanningError("No places match this request.")
-        return SelectionResult(trip, city, must, "", 0, must_visit=must, weather=forecast)
+        return SelectionResult(
+            trip, city, must, "", 0, must_visit=must, weather=forecast, windows=windows
+        )
 
     selection = await llm.generate(
         system=SELECT_SYSTEM,
@@ -349,4 +376,5 @@ async def select_places(
         notes=validate_notes(selection.notes, {p.id for p in places}),
         weather=forecast,
         weather_swaps=swaps,
+        windows=windows,
     )

@@ -39,8 +39,3 @@ def test_keywords_are_trimmed_deduplicated_and_capped() -> None:
 def test_unknown_category_is_rejected() -> None:
     with pytest.raises(ValidationError):
         trip(interests=["nightclub"])
-
-
-def test_stops_target_depends_on_pace() -> None:
-    assert trip(days=2, pace="relaxed").stops_target == 8
-    assert trip(days=1, pace="intense").stops_target == 8

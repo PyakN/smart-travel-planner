@@ -13,7 +13,7 @@ minutes since midnight like the optimizer's schedule.
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from math import inf
@@ -185,12 +185,12 @@ def day_weather(forecast: Forecast, day: date, tz: ZoneInfo) -> DayWeather:
 class TripWeather:
     days: tuple[DayWeather, ...]  # the trip's days in order
 
-    def outdoor_share(self, start_min: int, end_min: int) -> float:
-        """Share of the sightseeing hours, `start_min` to `end_min` every day, that suit
+    def outdoor_share(self, hours: Sequence[tuple[int, int]]) -> float:
+        """Share of the sightseeing hours, (start, end) for each day in order, that suit
         outdoor sights: dry, clear enough and light."""
         fine = [
             day.outdoor_badness(minute) < BAD_WEATHER
-            for day in self.days
+            for day, (start_min, end_min) in zip(self.days, hours, strict=True)
             for minute in range(start_min, end_min)
         ]
         return sum(fine) / len(fine) if fine else 1.0

@@ -1,8 +1,9 @@
 import datetime as dt  # PlannedDay has a field named `date`
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.catalog import VisitHours
 from app.schemas.trip import MAX_REQUEST_CHARS, TripRequest
 
 TravelMode = Literal["walk", "transit"]
@@ -45,11 +46,30 @@ class PlanRequest(BaseModel):
         description="Keep outdoor stops out of rain, snow, fog and darkness, and swap some for "
         "indoor places when the forecast leaves too few dry daylight hours",
     )
+    day_start: dt.time = Field(
+        default=dt.time(9, 30), description="When each day starts, in the city's local time"
+    )
+    day_end: dt.time = Field(
+        default=dt.time(21, 30),
+        description="When each day ends; earlier than day_start: the next morning (16:00 to "
+        "03:00). After 20:00 the plan only has places open at night",
+    )
+    first_day_start: dt.time | None = Field(
+        default=None,
+        description="When the first day starts, if not at day_start (e.g. now, for a trip that "
+        "starts today). A trip that starts today never starts before the current time",
+    )
 
     @field_validator("must_visit", "modes")
     @classmethod
     def _unique[T](cls, values: list[T]) -> list[T]:
         return list(dict.fromkeys(values))
+
+    @model_validator(mode="after")
+    def _day_has_hours(self) -> Self:
+        if self.day_start == self.day_end:
+            raise ValueError("day_end must differ from day_start")
+        return self
 
 
 class StopPhoto(BaseModel):
@@ -130,6 +150,11 @@ class PlannedStop(BaseModel):
     website: str | None = None
     outdoor: bool = Field(default=False, description="Visited in the open air")
     weather: StopForecast | None = None
+    hours: VisitHours = Field(
+        default="any",
+        description="When it can be visited: day (until 20:00), daylight, night (from 20:00), any",
+    )
+    wait_min: int = Field(default=0, description="Free time before setting off: it opens later")
 
 
 class RouteSegment(BaseModel):
@@ -152,6 +177,12 @@ class PlannedDay(BaseModel):
     segments: list[RouteSegment]
     date: dt.date | None = None
     weather: DayForecast | None = Field(default=None, description="None past the forecast")
+    # The day's hours, HH:MM (`end` may be the next morning), and its daylight; None on
+    # plans saved before days had their own hours.
+    start: str | None = None
+    end: str | None = None
+    sunrise: str | None = None
+    sunset: str | None = None
 
 
 class PlaceRef(BaseModel):
@@ -207,3 +238,7 @@ class PlanResponse(BaseModel):
     weather_aware: bool = False
     # Outdoor picks the forecast left no room for, and the indoor places that replaced them.
     weather_swaps: list[Adjustment] = Field(default_factory=list)
+    # The hours asked for, HH:MM (see PlanRequest).
+    day_start: str = "09:30"
+    day_end: str = "21:30"
+    first_day_start: str | None = None
