@@ -89,6 +89,28 @@ class PlaceRef(BaseModel):
     name: str
 
 
+class ReplaceRequest(BaseModel):
+    day: int = Field(ge=1)
+    place_ids: list[int] = Field(
+        min_length=1, max_length=20, description="Stops of that day to replace"
+    )
+
+
+class Adjustment(BaseModel):
+    """A change to a stop the traveller did not tick, made to keep the day full and varied."""
+
+    removed: PlaceRef | None
+    added: PlaceRef | None
+    reason: str
+
+
+class PlanEdit(BaseModel):
+    day: int
+    replaced: list[PlaceRef] = Field(description="Stops the traveller asked to replace")
+    added: list[PlaceRef] = Field(description="Their replacements")
+    adjustments: list[Adjustment] = Field(description="Last-resort changes to other stops")
+
+
 class PlanResponse(BaseModel):
     id: int
     request_text: str
@@ -105,3 +127,6 @@ class PlanResponse(BaseModel):
     # Defaults keep plans saved before these fields existed readable.
     modes: list[TravelMode] = Field(default_factory=lambda: list(ALL_MODES))
     must_visit: list[PlaceRef] = Field(default_factory=list)
+    # Set on versions made by replacing stops: the plan this one was made from, and how.
+    parent_id: int | None = None
+    edit: PlanEdit | None = None

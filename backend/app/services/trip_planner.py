@@ -238,6 +238,8 @@ async def plan_trip(
         "start": start.model_dump() if start else None,
         "must_visit": [p.id for p in selection.must_visit],
         "modes": list(modes),
+        # Selection order, most important first: decides what is trimmed first in edits.
+        "ranking": [p.id for p in selection.places],
     }
     return await save_plan(
         session,

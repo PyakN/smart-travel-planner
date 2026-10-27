@@ -7,8 +7,9 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.api.deps import DistancesDep, LLMDep, SessionDep, SettingsDep
 from app.llm.base import LLMBudgetExceededError, LLMError, LLMUnavailableError
-from app.schemas.plan import PlanRequest, PlanResponse
+from app.schemas.plan import PlanRequest, PlanResponse, ReplaceRequest
 from app.services.place_selection import PlanningError
+from app.services.plan_editing import replace_stops
 from app.services.trip_planner import get_plan, plan_trip
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,30 @@ async def create_plan(
             must_visit=body.must_visit,
             modes=body.modes,
         )
+
+
+@router.post("/plans/{plan_id}/replace", status_code=status.HTTP_201_CREATED)
+async def replace_plan_stops(
+    plan_id: int,
+    body: ReplaceRequest,
+    session: SessionDep,
+    llm: LLMDep,
+    distances: DistancesDep,
+    settings: SettingsDep,
+) -> PlanResponse:
+    """Replace stops of one day; answers with a new plan version (`parent_id` = this plan)."""
+    async with planning_errors(settings.plan_timeout_s):
+        plan = await replace_stops(
+            session=session,
+            llm=llm,
+            distances=distances,
+            plan_id=plan_id,
+            day=body.day,
+            place_ids=body.place_ids,
+        )
+        if plan is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "plan not found")
+        return plan
 
 
 @router.get("/plans/{plan_id}")

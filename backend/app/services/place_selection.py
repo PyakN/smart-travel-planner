@@ -145,7 +145,7 @@ async def parse_trip_request(llm: LLMService, text: str) -> TripRequest:
     )
 
 
-def _candidate_line(c: Candidate) -> str:
+def candidate_line(c: Candidate) -> str:
     distance = f" | {c.distance_m / 1000:.1f} km" if c.distance_m is not None else ""
     return f"{c.id} | {c.name} | {c.category}{distance}" + (f" | {c.hint}" if c.hint else "")
 
@@ -164,7 +164,7 @@ def _selection_prompt(
         lines.append("Must-visit places (already in the plan):")
         lines.extend(f"- {m.id} | {m.name} | {m.category}" for m in must_visit)
     lines += [f"Number of places to choose: {target}", "", f"Candidates ({columns} | hint):"]
-    lines.extend(map(_candidate_line, candidates))
+    lines.extend(map(candidate_line, candidates))
     return "\n".join(lines)
 
 

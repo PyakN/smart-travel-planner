@@ -1,38 +1,21 @@
 """POST /plan end to end: real DB and optimizer, scripted LLM, straight-line distances."""
 
 import asyncio
-from collections.abc import Iterator
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.api.deps import get_distances, get_llm
 from app.db.models import Route, RouteStop
 from app.llm.base import LLMError, TransientLLMError
-from app.llm.service import LLMService, TokenBudget
-from app.optimizer.distance import HaversineProvider
+from app.llm.service import TokenBudget
 from app.schemas.trip import PlaceNote, PlaceSelection
 from tests.fakes import FakeProvider
-from tests.integration.conftest import SEED_DETAILS, SessionFactory
+from tests.integration.conftest import SEED_DETAILS, SessionFactory, use_llm
 from tests.test_trip_schema import trip
 
 ROSSIO = {"lat": 38.7139, "lon": -9.1394}
-
-
-def use_llm(client: TestClient, provider: FakeProvider, **service_kwargs: Any) -> None:
-    service = LLMService(provider, model="fake", max_retries=0, **service_kwargs)
-    client.app.dependency_overrides[get_llm] = lambda: service  # type: ignore[attr-defined]
-
-
-@pytest.fixture
-def llm(client: TestClient) -> Iterator[FakeProvider]:
-    provider = FakeProvider()
-    use_llm(client, provider)
-    client.app.dependency_overrides[get_distances] = HaversineProvider  # type: ignore[attr-defined]
-    yield provider
-    client.app.dependency_overrides.clear()  # type: ignore[attr-defined]
 
 
 def queue_relaxed_day(llm: FakeProvider, place_ids: dict[str, int]) -> list[int]:

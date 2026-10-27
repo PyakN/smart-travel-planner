@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic import command
@@ -14,10 +15,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from testcontainers.community.postgres import PostgresContainer
 
+from app.api.deps import get_distances, get_llm
 from app.config import get_settings
 from app.db.models import Category, Place
 from app.db.session import create_engine, create_sessionmaker
+from app.llm.service import LLMService
 from app.main import create_app
+from app.optimizer.distance import HaversineProvider
+from tests.fakes import FakeProvider
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 POSTGIS_IMAGE = "postgis/postgis:17-3.5"
@@ -153,3 +158,18 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         if "tests/integration/" in item.nodeid:
             item.add_marker(pytest.mark.integration)
+
+
+def use_llm(client: TestClient, provider: FakeProvider, **service_kwargs: Any) -> None:
+    service = LLMService(provider, model="fake", max_retries=0, **service_kwargs)
+    client.app.dependency_overrides[get_llm] = lambda: service  # type: ignore[attr-defined]
+
+
+@pytest.fixture
+def llm(client: TestClient) -> Iterator[FakeProvider]:
+    """Scripted LLM and straight-line distances for API tests."""
+    provider = FakeProvider()
+    use_llm(client, provider)
+    client.app.dependency_overrides[get_distances] = HaversineProvider  # type: ignore[attr-defined]
+    yield provider
+    client.app.dependency_overrides.clear()  # type: ignore[attr-defined]
