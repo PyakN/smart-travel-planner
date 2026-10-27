@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import MustVisitPicker from "@/components/MustVisitPicker";
+import { localDate } from "@/lib/format";
 import type { PlaceRef, StartPoint, TravelMode } from "@/lib/types";
 
 const EXAMPLES = [
@@ -31,6 +32,18 @@ function modesHint(modes: TravelMode[]): string {
   return "Walk, and ride the metro, tram or bus when a leg over 2.5 km is faster that way.";
 }
 
+// The free OpenWeatherMap forecast reaches five days ahead.
+const FORECAST_DAYS = 5;
+
+function weatherHint(weatherAware: boolean, startDate: string): string {
+  if (startDate > localDate(FORECAST_DAYS - 1)) {
+    return "No forecast that far ahead yet: outdoor stops will only avoid the dark.";
+  }
+  return weatherAware
+    ? "Viewpoints, parks and statues go into dry daylight; rain, fog and dark hours get museums, churches and market halls, swapping in indoor places if needed."
+    : "The forecast is shown either way; the route only follows it when this is on.";
+}
+
 export interface PlanFormProps {
   text: string;
   onTextChange: (text: string) => void;
@@ -43,6 +56,11 @@ export interface PlanFormProps {
   onMustVisitChange: (places: PlaceRef[]) => void;
   modes: TravelMode[];
   onModesChange: (modes: TravelMode[]) => void;
+  /** First day of the trip, "YYYY-MM-DD". */
+  startDate: string;
+  onStartDateChange: (date: string) => void;
+  weatherAware: boolean;
+  onWeatherAwareChange: (weatherAware: boolean) => void;
   loading: boolean;
   onSubmit: () => void;
 }
@@ -71,6 +89,10 @@ export default function PlanForm({
   onMustVisitChange,
   modes,
   onModesChange,
+  startDate,
+  onStartDateChange,
+  weatherAware,
+  onWeatherAwareChange,
   loading,
   onSubmit,
 }: PlanFormProps) {
@@ -180,6 +202,32 @@ export default function PlanForm({
           })}
         </div>
         <p className="mt-1 text-xs text-zinc-500">{modesHint(modes)}</p>
+      </fieldset>
+
+      <fieldset className="rounded-lg border border-zinc-200 bg-white p-3 text-sm">
+        <legend className="px-1 text-zinc-700">When and weather</legend>
+        <label className="flex items-center justify-between gap-3 text-zinc-700">
+          First day
+          <input
+            type="date"
+            value={startDate}
+            min={localDate(0)}
+            required
+            disabled={loading}
+            onChange={(event) => onStartDateChange(event.target.value)}
+            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          />
+        </label>
+        <label className="mt-2 flex items-center gap-2 text-zinc-700">
+          <input
+            type="checkbox"
+            checked={weatherAware}
+            disabled={loading}
+            onChange={(event) => onWeatherAwareChange(event.target.checked)}
+          />
+          Optimize route based on weather conditions
+        </label>
+        <p className="mt-1 text-xs text-zinc-500">{weatherHint(weatherAware, startDate)}</p>
       </fieldset>
 
       <button

@@ -3,7 +3,13 @@
 import Image from "next/image";
 import { useState } from "react";
 
-import { categoryIcon, categoryLabel, formatOpeningHours } from "@/lib/format";
+import {
+  categoryIcon,
+  categoryLabel,
+  formatOpeningHours,
+  formatTemp,
+  weatherIcon,
+} from "@/lib/format";
 import type { PlannedStop } from "@/lib/types";
 
 export interface StopCardProps {
@@ -98,9 +104,21 @@ export default function StopCard({
             />
           </div>
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
-            <span>
-              {categoryLabel(stop.category)} · {stop.arrive}–{stop.leave}
+            <span className="rounded bg-zinc-100 px-1.5 py-px font-medium text-zinc-700 tabular-nums">
+              {stop.arrive}–{stop.leave}
             </span>
+            <span>{categoryLabel(stop.category)}</span>
+            {stop.weather && (
+              <span title={`Forecast for ${stop.weather.time}: ${stop.weather.description}`}>
+                {weatherIcon(stop.weather)} {formatTemp(stop.weather.temp_c)}
+                {stop.weather.pop > 0 && ` · ${stop.weather.pop}%`}
+              </span>
+            )}
+            {stop.outdoor && stop.weather && (
+              <span className="rounded-full bg-sky-50 px-1.5 py-px font-medium text-sky-800">
+                Outdoors
+              </span>
+            )}
             {stop.must_visit && (
               <span className="rounded-full bg-amber-100 px-1.5 py-px font-medium text-amber-800">
                 Must-visit
@@ -112,6 +130,9 @@ export default function StopCard({
               </span>
             )}
           </div>
+          {stop.weather?.warning && (
+            <p className="text-xs font-medium text-amber-700">⚠️ {stop.weather.warning}</p>
+          )}
           {stop.note && <p className="text-xs text-blue-900">✨ {stop.note}</p>}
           {stop.description && (
             <p className="text-xs text-zinc-600">

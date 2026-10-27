@@ -1,11 +1,13 @@
 import type {
   Adjustment,
   Attribution,
+  ForecastSlot,
   PlanEdit,
   PlannedStop,
   PlanResponse,
   TransitRide,
   TransitVehicle,
+  WeatherCondition,
 } from "./types";
 
 export function formatDistance(meters: number): string {
@@ -184,4 +186,62 @@ export function describeAdjustment({ removed, added, reason }: Adjustment): stri
   if (removed && added) return `Also swapped ${removed.name} for ${added.name}. ${reason}`;
   if (added) return `Also added ${added.name}. ${reason}`;
   return `Also removed ${removed?.name ?? "a stop"}. ${reason}`;
+}
+
+/** An outdoor place the forecast left no room for, and what took its slot. */
+export function describeWeatherSwap({ removed, added }: Adjustment): string {
+  return `${added?.name ?? "An indoor place"} instead of ${removed?.name ?? "an outdoor one"}`;
+}
+
+const WEATHER_ICONS: Record<WeatherCondition, string> = {
+  clear: "☀️",
+  clouds: "☁️",
+  fog: "🌫️",
+  drizzle: "🌦️",
+  rain: "🌧️",
+  snow: "🌨️",
+  thunderstorm: "⛈️",
+};
+
+/** Emoji for a forecast; OpenWeatherMap's icon code tells night ("01n") and how cloudy. */
+export function weatherIcon({ condition, icon }: Pick<ForecastSlot, "condition" | "icon">): string {
+  const night = icon.endsWith("n");
+  if (condition === "clear") return night ? "🌙" : "☀️";
+  if (condition === "clouds" && !night) {
+    if (icon.startsWith("02")) return "🌤️"; // few clouds
+    if (icon.startsWith("03")) return "⛅"; // scattered clouds
+  }
+  return WEATHER_ICONS[condition];
+}
+
+export function formatTemp(celsius: number): string {
+  return `${Math.round(celsius)}°`;
+}
+
+/** "Wed 28 Oct" for "2026-10-28". The date is the city's own, so no time zone moves it. */
+export function formatDate(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+}
+
+/** "YYYY-MM-DD" of the day `days` after today, in the browser's time zone. */
+export function localDate(days = 0, now: Date = new Date()): string {
+  const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** Outdoor stops that rain, fog or darkness still spoil. */
+export function exposedStops(plan: PlanResponse): PlannedStop[] {
+  return plan.days.flatMap((day) => day.stops.filter((stop) => stop.weather?.warning));
+}
+
+/** OpenWeatherMap's data needs a credit wherever it is shown. */
+export function hasWeather(plan: PlanResponse): boolean {
+  return plan.days.some((day) => day.weather);
 }

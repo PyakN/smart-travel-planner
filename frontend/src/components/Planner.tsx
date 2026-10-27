@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import PlanForm from "@/components/PlanForm";
 import PlanResult from "@/components/PlanResult";
 import { ApiError, createPlan, getPlan, replaceStops } from "@/lib/api";
+import { localDate } from "@/lib/format";
 import type { PlaceRef, PlanResponse, StartPoint, TravelMode } from "@/lib/types";
 
 // Leaflet touches `window`, so the map only renders in the browser.
@@ -21,6 +22,11 @@ function describe(error: unknown): string {
   return error instanceof ApiError ? error.message : "Something went wrong. Try again.";
 }
 
+/** A saved plan's first day, unless it is past: then tomorrow, for planning it again. */
+function upcoming(startDate: string | null): string {
+  return startDate && startDate >= localDate(0) ? startDate : localDate(1);
+}
+
 export default function Planner() {
   const planParam = useSearchParams().get("plan");
   const [plan, setPlan] = useState<PlanResponse | null>(null);
@@ -29,6 +35,8 @@ export default function Planner() {
   const [start, setStart] = useState<StartPoint | null>(null);
   const [mustVisit, setMustVisit] = useState<PlaceRef[]>([]);
   const [modes, setModes] = useState<TravelMode[]>(["walk", "transit"]);
+  const [startDate, setStartDate] = useState(() => localDate(1));
+  const [weatherAware, setWeatherAware] = useState(false);
   const [replacing, setReplacing] = useState(false);
   const [replaceError, setReplaceError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
@@ -49,6 +57,8 @@ export default function Planner() {
         setStart(saved.start);
         setMustVisit(saved.must_visit);
         setModes(saved.modes);
+        setStartDate(upcoming(saved.start_date));
+        setWeatherAware(saved.weather_aware);
         setSelectedDay(saved.edit?.day ?? 1);
         setReplaceError(null);
         setStatus({ kind: "idle" });
@@ -70,6 +80,8 @@ export default function Planner() {
         start,
         must_visit: mustVisit.map((p) => p.place_id),
         modes,
+        start_date: startDate,
+        weather_aware: weatherAware,
       });
       setPlan(created);
       setSelectedDay(1);
@@ -160,6 +172,10 @@ export default function Planner() {
             onMustVisitChange={setMustVisit}
             modes={modes}
             onModesChange={setModes}
+            startDate={startDate}
+            onStartDateChange={setStartDate}
+            weatherAware={weatherAware}
+            onWeatherAwareChange={setWeatherAware}
             loading={status.kind === "loading"}
             onSubmit={submit}
           />

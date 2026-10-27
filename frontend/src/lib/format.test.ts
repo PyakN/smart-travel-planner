@@ -6,17 +6,24 @@ import {
   dayColor,
   describeAdjustment,
   describeEdit,
+  describeWeatherSwap,
+  exposedStops,
+  formatDate,
   formatDistance,
   formatDuration,
   formatOpeningHours,
+  formatTemp,
+  hasWeather,
+  localDate,
   rideBadge,
   rideDetails,
   rideName,
   textColorOn,
   transitCredits,
   travelLabel,
+  weatherIcon,
 } from "./format";
-import type { PlannedStop, PlanResponse, TransitRide } from "./types";
+import type { DayForecast, PlannedStop, PlanResponse, StopForecast, TransitRide } from "./types";
 
 const GREEN_LINE: TransitRide = {
   vehicle: "metro",
@@ -59,6 +66,8 @@ function stop(overrides: Partial<PlannedStop>): PlannedStop {
     photo: null,
     opening_hours: null,
     website: null,
+    outdoor: true,
+    weather: null,
     ...overrides,
   };
 }
@@ -197,5 +206,75 @@ describe("edit descriptions", () => {
     expect(
       describeAdjustment({ removed: null, added: ref(2, "B"), reason: "Fills free time." }),
     ).toBe("Also added B. Fills free time.");
+  });
+
+  it("names weather swaps", () => {
+    const swap = { removed: ref(1, "River Park"), added: ref(2, "City Museum"), reason: "Wet." };
+    expect(describeWeatherSwap(swap)).toBe("City Museum instead of River Park");
+  });
+});
+
+describe("weather", () => {
+  const rain: StopForecast = {
+    time: "12:00",
+    temp_c: 17,
+    condition: "rain",
+    description: "light rain",
+    icon: "10d",
+    pop: 62,
+    warning: "Light rain likely (62%)",
+  };
+
+  it.each([
+    ["clear", "01d", "☀️"],
+    ["clear", "01n", "🌙"],
+    ["clouds", "02d", "🌤️"],
+    ["clouds", "03d", "⛅"],
+    ["clouds", "04d", "☁️"],
+    ["clouds", "02n", "☁️"],
+    ["fog", "50d", "🌫️"],
+    ["drizzle", "09d", "🌦️"],
+    ["rain", "10n", "🌧️"],
+    ["snow", "13d", "🌨️"],
+    ["thunderstorm", "11d", "⛈️"],
+  ] as const)("%s %s is %s", (condition, icon, emoji) => {
+    expect(weatherIcon({ condition, icon })).toBe(emoji);
+  });
+
+  it("formats temperatures and dates", () => {
+    expect(formatTemp(16.6)).toBe("17°");
+    expect(formatDate("2026-10-28")).toBe("Wed 28 Oct");
+    expect(formatDate("2027-01-01")).toBe("Fri 1 Jan");
+  });
+
+  it("counts days from the browser's today", () => {
+    const evening = new Date(2026, 11, 31, 23, 30); // local time
+    expect(localDate(0, evening)).toBe("2026-12-31");
+    expect(localDate(1, evening)).toBe("2027-01-01");
+  });
+
+  it("finds outdoor stops the weather spoils", () => {
+    const day: DayForecast = {
+      condition: "rain",
+      description: "light rain",
+      icon: "10d",
+      temp_min_c: 16,
+      temp_max_c: 17,
+      pop: 62,
+      sunrise: "07:03",
+      sunset: "17:37",
+      slots: [],
+    };
+    const wet = stop({ place_id: 2, weather: rain });
+    const dry = stop({ place_id: 3, weather: { ...rain, warning: null } });
+    const plan = {
+      days: [
+        { stops: [wet, dry], weather: day },
+        { stops: [stop({})], weather: null },
+      ],
+    } as unknown as PlanResponse;
+    expect(exposedStops(plan)).toEqual([wet]);
+    expect(hasWeather(plan)).toBe(true);
+    expect(hasWeather({ days: [{ weather: null }] } as unknown as PlanResponse)).toBe(false);
   });
 });

@@ -2,18 +2,25 @@
 
 import { useState } from "react";
 
+import DayWeather from "@/components/DayWeather";
 import StopCard from "@/components/StopCard";
 import {
   dayColor,
   describeAdjustment,
   describeEdit,
+  describeWeatherSwap,
+  exposedStops,
+  formatDate,
   formatDistance,
   formatDuration,
+  formatTemp,
+  hasWeather,
   rideBadge,
   rideDetails,
   textColorOn,
   transitCredits,
   travelLabel,
+  weatherIcon,
 } from "@/lib/format";
 import type { PlanEdit, PlannedDay, PlanResponse, TransitRide } from "@/lib/types";
 
@@ -66,6 +73,36 @@ function EditSummary({ edit, onUndo }: { edit: PlanEdit; onUndo: PlanResultProps
       {edit.adjustments.map((a) => (
         <p key={`${a.removed?.place_id}-${a.added?.place_id}`}>{describeAdjustment(a)}</p>
       ))}
+    </div>
+  );
+}
+
+function WeatherNotes({ plan }: { plan: PlanResponse }) {
+  const exposed = exposedStops(plan).length;
+  if (plan.weather_swaps.length === 0 && exposed === 0) return null;
+  return (
+    <div className="mt-3 space-y-1 rounded-md bg-sky-50 p-2 text-xs text-sky-900">
+      {plan.weather_swaps.length > 0 && (
+        <>
+          <p className="font-medium">Swapped for indoor places, as the forecast is wet or dark:</p>
+          <ul className="list-disc pl-4">
+            {plan.weather_swaps.map((swap) => (
+              <li key={`${swap.removed?.place_id}-${swap.added?.place_id}`}>
+                {describeWeatherSwap(swap)}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {exposed > 0 && (
+        <p>
+          {exposed} outdoor {exposed === 1 ? "stop meets" : "stops meet"} rain, fog or darkness
+          (marked ⚠️)
+          {plan.weather_aware
+            ? ": the forecast left no better slot."
+            : ". Plan again with “Optimize route based on weather conditions” to rearrange."}
+        </p>
+      )}
     </div>
   );
 }
@@ -189,11 +226,13 @@ export default function PlanResult({
                 ` · ${transitLegs} transit ${transitLegs === 1 ? "ride" : "rides"}`}
               {" · "}
               {plan.trip.pace} pace
+              {plan.weather_aware && " · planned with the weather"}
             </p>
           </div>
           <ShareButton planId={plan.id} />
         </div>
         {plan.rationale && <p className="mt-3 text-sm text-zinc-700">{plan.rationale}</p>}
+        <WeatherNotes plan={plan} />
         {plan.edit && <EditSummary edit={plan.edit} onUndo={onUndo} />}
         {(plan.warnings.length > 0 || plan.dropped.length > 0) && (
           <div className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-800">
@@ -224,8 +263,16 @@ export default function PlanResult({
               }`}
               style={active ? { background: dayColor(d.day) } : undefined}
             >
-              <div className="font-semibold">Day {d.day}</div>
+              <div className="flex items-baseline justify-between gap-2 font-semibold">
+                Day {d.day}
+                {d.weather && (
+                  <span className="text-xs font-normal" title={d.weather.description}>
+                    {weatherIcon(d.weather)} {formatTemp(d.weather.temp_max_c)}
+                  </span>
+                )}
+              </div>
               <div className={`text-xs ${active ? "text-white/80" : "text-zinc-500"}`}>
+                {d.date && `${formatDate(d.date)} · `}
                 {d.stops.length} stops · {formatDuration(d.duration_min)}
               </div>
             </button>
@@ -233,8 +280,9 @@ export default function PlanResult({
         })}
       </div>
 
-      <div>
-        <p className="mb-2 text-xs text-zinc-500">
+      <div className="space-y-2">
+        <DayWeather date={day.date} forecast={day.weather} />
+        <p className="text-xs text-zinc-500">
           {formatDistance(day.walking_m)} on foot
           {day.transit_legs > 0 &&
             ` + ${day.transit_legs} ${day.transit_legs === 1 ? "ride" : "rides"}`}{" "}
@@ -303,6 +351,19 @@ export default function PlanResult({
                 )}
               </span>
             ))}
+          </p>
+        )}
+        {hasWeather(plan) && (
+          <p>
+            Weather data ©{" "}
+            <a
+              href="https://openweathermap.org/"
+              target="_blank"
+              rel="noreferrer"
+              className="hover:underline"
+            >
+              OpenWeather
+            </a>
           </p>
         )}
       </div>

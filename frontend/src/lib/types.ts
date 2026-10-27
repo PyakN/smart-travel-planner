@@ -5,6 +5,8 @@ export type TravelMode = "walk" | "transit";
 export type TransitVehicle =
   "metro" | "tram" | "bus" | "train" | "ferry" | "funicular" | "cable_car" | "other";
 export type Pace = "relaxed" | "moderate" | "intense";
+export type WeatherCondition =
+  "clear" | "clouds" | "fog" | "drizzle" | "rain" | "snow" | "thunderstorm";
 /** [lon, lat], GeoJSON order. */
 export type LonLat = [number, number];
 
@@ -20,6 +22,10 @@ export interface PlanRequest {
   /** Place ids from GET /places. */
   must_visit?: number[];
   modes?: TravelMode[];
+  /** "YYYY-MM-DD"; the backend takes tomorrow when it is missing. */
+  start_date?: string | null;
+  /** Keep outdoor stops out of rain, fog and darkness. */
+  weather_aware?: boolean;
 }
 
 export interface ReplaceRequest {
@@ -75,6 +81,39 @@ export interface TransitRide {
   attributions: Attribution[];
 }
 
+export interface ForecastSlot {
+  /** "HH:MM": the forecast holds for the 3 hours around it. */
+  time: string;
+  temp_c: number;
+  condition: WeatherCondition;
+  /** e.g. "light rain". */
+  description: string;
+  /** OpenWeatherMap icon code, e.g. "10d" ("n" at night). */
+  icon: string;
+  /** Chance of rain or snow, %. */
+  pop: number;
+}
+
+/** The forecast at the stop's arrival. */
+export interface StopForecast extends ForecastSlot {
+  /** Outdoor stops only: what spoils the visit (rain, fog, darkness). */
+  warning: string | null;
+}
+
+/** The weather of a day's sightseeing hours, headed by its worst bad spell. */
+export interface DayForecast {
+  condition: WeatherCondition;
+  description: string;
+  icon: string;
+  temp_min_c: number;
+  temp_max_c: number;
+  /** Highest chance of rain or snow, %. */
+  pop: number;
+  sunrise: string;
+  sunset: string;
+  slots: ForecastSlot[];
+}
+
 export interface PlannedStop {
   place_id: number;
   name: string;
@@ -96,6 +135,10 @@ export interface PlannedStop {
   /** OpenStreetMap opening_hours syntax, e.g. "Tu-Su 10:00-18:00". */
   opening_hours: string | null;
   website: string | null;
+  /** Visited in the open air. */
+  outdoor: boolean;
+  /** Null without a forecast for its time. */
+  weather: StopForecast | null;
 }
 
 export interface RouteSegment {
@@ -114,6 +157,10 @@ export interface PlannedDay {
   duration_min: number;
   self_intersections: number;
   segments: RouteSegment[];
+  /** "YYYY-MM-DD"; null on plans saved before trips had dates. */
+  date: string | null;
+  /** Null past the forecast's reach. */
+  weather: DayForecast | null;
 }
 
 export interface TripRequest {
@@ -161,4 +208,8 @@ export interface PlanResponse {
   /** Set on versions made by replacing stops. */
   parent_id: number | null;
   edit: PlanEdit | null;
+  start_date: string | null;
+  weather_aware: boolean;
+  /** Outdoor picks the forecast left no room for, and their indoor replacements. */
+  weather_swaps: Adjustment[];
 }
