@@ -30,6 +30,8 @@ async def create_plan(
                 text=body.text,
                 start=body.start,
                 default_city=settings.default_city,
+                must_visit=body.must_visit,
+                modes=body.modes,
             )
     except PlanningError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

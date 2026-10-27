@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from collections.abc import Sequence
 
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +14,8 @@ from app.optimizer.distance import DistanceProvider
 from app.optimizer.geometry import LatLon
 from app.optimizer.planner import DayPlan, Leg, StartPoint, Stop, plan_route
 from app.schemas.plan import (
-    DroppedPlace,
+    ALL_MODES,
+    PlaceRef,
     PlannedDay,
     PlannedStop,
     PlanResponse,
@@ -101,14 +103,25 @@ async def plan_trip(
     text: str,
     start: StartIn | None,
     default_city: str,
+    must_visit: Sequence[int] = (),
+    modes: Sequence[TravelMode] = ALL_MODES,
 ) -> PlanResponse:
     watch = _Stopwatch()
-    selection = await select_places(llm, session, text, default_city=default_city)
+    selection = await select_places(
+        llm,
+        session,
+        text,
+        default_city=default_city,
+        must_visit=must_visit,
+        start=LatLon(start.lat, start.lon) if start else None,
+        modes=modes,
+    )
     watch.lap("selection")
 
     places = {p.id: p for p in selection.places}
+    required = {p.id for p in selection.must_visit}
     stops = [
-        Stop(p.id, p.lat, p.lon, p.category, priority=rank)
+        Stop(p.id, p.lat, p.lon, p.category, priority=rank, required=p.id in required)
         for rank, p in enumerate(selection.places)
     ]
     route = await plan_route(
@@ -117,6 +130,7 @@ async def plan_trip(
         pace=selection.trip.pace,
         provider=distances,
         start=StartPoint(start.lat, start.lon, start.round_trip) if start else None,
+        modes=modes,
     )
     watch.lap("optimization")
 
@@ -138,6 +152,7 @@ async def plan_trip(
                     travel_mode=v.leg.mode if v.leg else None,
                     travel_min=round(v.leg.minutes) if v.leg else 0,
                     distance_from_previous_m=round(v.leg.distance_m) if v.leg else 0,
+                    must_visit=v.stop.required,
                 )
                 for v in day.visits
             ],
@@ -157,6 +172,8 @@ async def plan_trip(
         params={
             "trip": selection.trip.model_dump(mode="json"),
             "start": start.model_dump() if start else None,
+            "must_visit": [p.id for p in selection.must_visit],
+            "modes": list(modes),
         },
         total_distance_m=route.total_distance_m,
     )
@@ -178,9 +195,11 @@ async def plan_trip(
         total_distance_m=round(route.total_distance_m),
         distance_source=route.distance_source,
         strategy=route.strategy,
-        dropped=[DroppedPlace(place_id=s.id, name=places[s.id].name) for s in route.dropped],
+        dropped=[PlaceRef(place_id=s.id, name=places[s.id].name) for s in route.dropped],
         warnings=selection.warnings + route.warnings,
         timings_ms=watch.total(),
+        modes=list(modes),
+        must_visit=[PlaceRef(place_id=p.id, name=p.name) for p in selection.must_visit],
     )
     saved.result = response.model_dump(mode="json")
     await session.commit()

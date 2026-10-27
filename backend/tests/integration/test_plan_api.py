@@ -118,6 +118,46 @@ def test_hotel_round_trip(client: TestClient, llm: FakeProvider, place_ids: dict
     assert day["stops"][0]["distance_from_previous_m"] > 0
 
 
+def test_must_visit_and_walking_only(
+    client: TestClient, llm: FakeProvider, place_ids: dict[str, int], db_session: SessionFactory
+) -> None:
+    torre = place_ids["Torre de Belém"]  # 7 km west of the others
+    llm.queue(
+        trip(city=None, days=1, pace="relaxed", interests=["viewpoint"]),
+        PlaceSelection(
+            place_ids=[place_ids[n] for n in ("Castelo de São Jorge", "Miradouro de Santa Luzia")],
+            rationale="Views.",
+        ),
+    )
+    response = post_plan(client, must_visit=[torre, torre], modes=["walk"])
+    assert response.status_code == 201, response.text
+    plan = response.json()
+
+    [day] = plan["days"]
+    flagged = {s["place_id"]: s["must_visit"] for s in day["stops"]}
+    assert flagged.pop(torre) is True
+    assert not any(flagged.values())
+    assert day["transit_legs"] == 0  # walking only, even to Belém
+    assert plan["modes"] == ["walk"]
+    assert plan["must_visit"] == [{"place_id": torre, "name": "Torre de Belém"}]
+
+    async def params() -> dict[str, Any]:
+        async with db_session() as session:
+            route = await session.get(Route, plan["id"])
+            assert route is not None
+            return route.params
+
+    stored = asyncio.run(params())
+    assert (stored["must_visit"], stored["modes"]) == ([torre], ["walk"])
+
+
+def test_unknown_must_visit_is_422(client: TestClient, llm: FakeProvider) -> None:
+    llm.queue(trip(city=None))
+    response = post_plan(client, must_visit=[999999])
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Some must-visit places are not in Lisbon."
+
+
 def test_unsupported_city_is_a_clear_422(client: TestClient, llm: FakeProvider) -> None:
     llm.queue(trip(city="tokyo"))
     response = post_plan(client)
@@ -155,8 +195,15 @@ def test_llm_not_configured_is_503(client: TestClient) -> None:
 
 @pytest.mark.parametrize(
     "body",
-    [{"text": ""}, {"text": "x" * 1001}, {"text": "ok", "start": {"lat": 100, "lon": 0}}],
-    ids=["empty", "too-long", "bad-start"],
+    [
+        {"text": ""},
+        {"text": "x" * 1001},
+        {"text": "ok", "start": {"lat": 100, "lon": 0}},
+        {"text": "ok", "modes": []},
+        {"text": "ok", "modes": ["car"]},
+        {"text": "ok", "must_visit": list(range(11))},
+    ],
+    ids=["empty", "too-long", "bad-start", "no-mode", "bad-mode", "too-many-must-visit"],
 )
 def test_request_validation(client: TestClient, llm: FakeProvider, body: dict[str, Any]) -> None:
     assert client.post("/plan", json=body).status_code == 422
