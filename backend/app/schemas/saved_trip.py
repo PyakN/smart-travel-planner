@@ -50,9 +50,16 @@ class TripSummary(BaseModel):
     updated_at: dt.datetime
 
 
+class TripVisitOut(BaseModel):
+    place_id: int
+    name: str
+    visited_at: dt.datetime
+
+
 class TripOut(BaseModel):
     id: int
     title: str
     plan: PlanResponse = Field(description="The current version of the plan")
+    visits: list[TripVisitOut] = Field(description="Stops visited so far, in visiting order")
     created_at: dt.datetime
     updated_at: dt.datetime

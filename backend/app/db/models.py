@@ -139,3 +139,18 @@ class Trip(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class TripVisit(Base):
+    """A stop of a trip the traveller has visited. Visits live on the trip, not on a plan
+    version: no version the trip switches to may leave a visited place out."""
+
+    __tablename__ = "trip_visits"
+
+    trip_id: Mapped[int] = mapped_column(
+        ForeignKey("trips.id", ondelete="CASCADE"), primary_key=True
+    )
+    place_id: Mapped[int] = mapped_column(
+        ForeignKey("places.id", ondelete="RESTRICT"), primary_key=True
+    )
+    visited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
