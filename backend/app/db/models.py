@@ -98,3 +98,28 @@ class RouteStop(Base):
 
     route: Mapped[Route] = relationship(back_populates="stops")
     place: Mapped[Place] = relationship()
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # Stored lowercase: log-ins ignore case.
+    email: Mapped[str] = mapped_column(String(254), unique=True)
+    # argon2id, in the PHC string format (algorithm, parameters and salt included).
+    password_hash: Mapped[str] = mapped_column(Text)
+    display_name: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserSession(Base):
+    """A log-in. The cookie holds a random token; only its SHA-256 is stored, so a leaked
+    table cannot be replayed."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

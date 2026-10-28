@@ -61,3 +61,4 @@ repos:
           - fastapi>=0.115
           - google-genai>=2.0
           - openai>=1.60
+          - argon2-cffi>=23.1

@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from alembic import command
@@ -181,3 +182,35 @@ def llm(client: TestClient) -> Iterator[FakeProvider]:
     overrides[get_weather] = lambda: None
     yield provider
     client.app.dependency_overrides.clear()  # type: ignore[attr-defined]
+
+
+@pytest.fixture
+def visitor(client: TestClient) -> Iterator[TestClient]:
+    """The API client, logged out before and after the test."""
+    client.cookies.clear()
+    yield client
+    client.cookies.clear()
+
+
+PASSWORD = "correct horse"
+
+
+def sign_up(client: TestClient, name: str = "Ana") -> dict[str, Any]:
+    """A new account with a unique email, logged in on `client`; returns the user."""
+    email = f"{name.lower()}-{uuid4().hex[:8]}@example.com"
+    response = client.post(
+        "/auth/signup", json={"email": email, "password": PASSWORD, "display_name": name}
+    )
+    assert response.status_code == 201, response.text
+    user: dict[str, Any] = response.json()
+    return user
+
+
+def session_token(client: TestClient) -> str:
+    return client.cookies["session"]
+
+
+def use_session(client: TestClient, token: str) -> None:
+    """Act as the user `token` belongs to."""
+    client.cookies.clear()
+    client.cookies.set("session", token)

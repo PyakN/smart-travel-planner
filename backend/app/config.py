@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     openweather_url: str = "https://api.openweathermap.org/data/2.5/forecast"
     openweather_timeout_s: float = 5.0
 
+    # Accounts (app.services.accounts): a log-in lasts this many days. The session cookie
+    # is Secure only when asked: browsers drop Secure cookies over plain http, except on
+    # localhost. Set SESSION_COOKIE_SECURE=true wherever the site is served over HTTPS.
+    session_days: int = 30
+    session_cookie_secure: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:
