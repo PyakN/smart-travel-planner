@@ -141,6 +141,47 @@
 - [ ] (later) Per-venue opening hours from OSM `opening_hours` (days, opening and closing times): today indoor sights all close at 20:00, so a museum that closes at 18:00 can be planned until 18:30
 - [ ] (later) Breaks in the middle of a day (lunch, a rest): days only wait for places to open
 
+## Phase 6.5. Profiles, live route editing and places to eat
+A traveller saves a trip, ticks off places during the day and changes the rest of it on the go: removes a stop, adds a place, or finds somewhere to eat nearby and makes it the next stop. Generated plans suggest sights only; food and drink come from the search.
+
+**Design notes**
+- One edit for everything: removing stops, adding a place, "next stop" and "re-plan from my location now" are options of a single day edit; "Add to route" from the food search is just one call to it. The edit runs only the optimizer (no LLM), so it is fast and predictable
+- Drafts are the approval step: an edit returns a draft version that the trip does not use yet. If it drops planned stops, the app lists them and says why; saving the draft approves it, Cancel leaves the trip unchanged. The same save makes the cycle repeatable
+- Stops drop only when the day really runs long: a live re-plan must end by the day's end time (plus a short grace), not within the pace share, which would drop stops even when the day still ends on time
+- The "original destination" is the hotel on round trips; plans without a hotel have no destination, so they stay open-ended
+- The current location comes from the browser ("Use my location"), with a pin on the map as the fallback, defaulting to the last visited stop
+- The stay at a venue is adjustable, with a default by type: a coffee and a dinner differ a lot
+- Live editing needs a saved trip: visited places live on it, so there is one source of truth. Plans that are not saved keep the AI replace only
+- Food data is OSM only for now: no ratings or prices exist there, so those filters wait for an optional provider (see the last items)
+
+**Accounts and saved trips** (moved from Phase 9)
+- [ ] Accounts: `users` (email, argon2 password hash, display name) and `sessions` (hashed random token, expiry); `POST /auth/signup`, `/auth/login`, `/auth/logout`, `GET` / `DELETE /auth/me`; an HttpOnly, SameSite=Lax, `Path=/` cookie through the same-origin `/api` proxy; a limit on failed log-ins. Password reset waits for an email sender
+- [ ] Saved trips: `trips` (owner, title, current plan version) and `trip_visits` (place, visited at); `POST /trips` saves a plan, `GET /trips` lists mine, `GET /trips/{id}` returns the trip with its current plan and visited places, `PATCH /trips/{id}` renames it or switches it to another version of the same trip (save a draft, undo), `DELETE /trips/{id}`. Other users' trips answer 404; `?plan=<id>` share links stay public and read-only
+- [ ] Visited places: `PUT` / `DELETE /trips/{id}/visits/{place_id}`; later edits never move or drop a visited stop
+- [ ] Frontend: a header with My trips and log in / out, sign-up and log-in pages, a My trips page, "Save to my trips" on a plan (log in first, then it saves), `?trip=<id>` opens a saved trip, a "Visited" tick on its stop cards
+
+**Editing a saved day**
+- [ ] Optimizer: a day can start from any point at any time and end at a different point (the hotel), using the TSP's existing `end` support; a live re-plan is bounded by the day's end time (+30 min grace) instead of the pace share, so planned stops drop only when the day would really run long. Least important stops go first; visited, must-visit and newly added places are protected
+- [ ] `POST /trips/{id}/edit` (no LLM): `{day, remove, add, next, start, stay_min}`. Visited stops stay first, as they were; with `start` (the traveller's pinned location) on today's day, the rest of the day is planned from now; `next` is visited first (pin → venue is a fixed first leg), then the remaining stops are reordered from it; the day keeps its end (the hotel on round trips, else open). The answer is a draft: a new plan version (`parent_id`, `edit` lists removed, added and dropped places) that the trip does not use yet. AI replace on a saved trip also returns a draft
+- [ ] Approval: when a draft drops planned stops, the app lists them and says why ("the day would end at 23:10 instead of 21:30"); only saving it (`PATCH /trips/{id}`) applies it, Cancel keeps the trip as it was. A draft made from an outdated version is refused (409)
+- [ ] Frontend: Edit mode on a saved day (remove a stop, add a place with the place search taken out of the must-visit picker), a draft banner (Save / Discard), a confirmation dialog for dropped stops, undo to the previous version
+
+**Sightseeing only by default** (replaces Phase 6d's evening venues)
+- [ ] Generated plans and AI replacements never suggest restaurants, cafés, bars, pubs, clubs or fado houses, even when the request names them; only must-visit places of these kinds are planned (dinner from 20:00, bars at night, as before). A request that asks for food or nightlife gets a note pointing to must-visit places and the search
+- [ ] Evenings: after 20:00 only lit squares and late-open sights are offered (a few per evening); the rest is free time with a "Find places to eat & drink" link that opens the search near the evening's last stop
+- [ ] Update the evening tests, the hours hint and the README (a 16:00–03:00 day now has afternoon sights and a free evening)
+
+**Places to eat and drink**
+- [ ] Import every named food and drink venue from OSM: all restaurants (not only well-known ones), cafés, fast food, ice cream, pastry shops, bars, pubs, clubs; a new `cafe` category; cuisine, `diet:*`, `opening_hours` and `outdoor_seating` stay in `tags`
+- [ ] Opening hours: parse OSM `opening_hours` (a maintained parser such as `opening-hours-py`) to tell "open now" and "open when you arrive"; hours it cannot read count as unknown
+- [ ] `GET /venues`: near a point (`ST_DWithin`, radius 250 m – 2 km) with filters for kind (food / drinks & nightlife), cuisine, vegetarian, vegan, open now and outdoor seating; sorted by distance, then by how complete a venue's data is; each result has its cuisine, diet tags, opening hours, open-now state, distance and walking minutes, plus the cuisines found in range for the filter
+- [ ] Frontend: "Find places to eat" on a saved trip turns the sidebar into the search, with the route still on the map; "Use my location" (browser geolocation) or a pin on the map, defaulting to the last visited stop; results as cards and markers; "← Back to route" always visible (browser Back and Esc too; `?trip=<id>&eat=1`)
+- [ ] Add to route: pick a venue, choose how long to stay (by default: café 30 min, bar 60 min, restaurant 75 min), and the day is re-planned through the day edit with the pin as the start and the venue as the next stop; the draft opens with the approval step; once saved, the search and the edit can be repeated
+- [ ] (later) Ratings and price from an optional provider (e.g. Foursquare: one call per search, cached, matched to OSM venues by name and distance; filters hidden without a key). Google Places is ruled out: its terms forbid showing Places content on a non-Google map
+- [ ] (later) "Keep all and finish later" as an alternative to dropping stops; per-venue opening hours in the optimizer (see Phase 6d)
+
+**DoD:** a user signs up, plans a day from a hotel (round trip) and saves it; nothing in it is a restaurant or a bar. Mid-day they tick two stops visited, search vegetarian food within 500 m of their pinned location and add a café: the draft keeps the visited stops, goes from the pin to the café first, reorders the rest and ends at the hotel by the day's end time; if it cannot, it lists the stops it would drop and nothing changes until they approve. Saving it and repeating with a bar works. Another user cannot see or edit the trip. A 16:00–03:00 day has afternoon sights and a free evening with the eat link.
+
 ## Phase 7. Quality and reliability
 - [ ] E2E tests (Playwright)
 - [ ] Structured logs, request id
@@ -158,10 +199,9 @@
 - [ ] Demo link and screenshots in the README
 
 ## Phase 9. Post-MVP
-- [ ] Authentication and saved trips
 - [ ] Export (GPX, Google Maps link)
 - [ ] Multiple cities
-- [ ] Drag-and-drop stops with route recalculation
+- [ ] Drag-and-drop stops with route recalculation (reuse the Phase 6.5 day edit)
 - [ ] Mapbox GL instead of Leaflet (if needed)
 
 ---
