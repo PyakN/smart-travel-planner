@@ -43,12 +43,13 @@ async function request<T>(path: string, init: RequestInit, fetchImpl: typeof fet
   return body as T;
 }
 
+/** Request options that send `body` as JSON. */
+function sendJson(method: string, body: unknown): RequestInit {
+  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+}
+
 export function createPlan(body: PlanRequest, fetchImpl: typeof fetch = fetch) {
-  return request<PlanResponse>(
-    "/plan",
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
-    fetchImpl,
-  );
+  return request<PlanResponse>("/plan", sendJson("POST", body), fetchImpl);
 }
 
 export function getPlan(id: number, fetchImpl: typeof fetch = fetch) {
@@ -61,11 +62,7 @@ export function replaceStops(
   body: ReplaceRequest,
   fetchImpl: typeof fetch = fetch,
 ) {
-  return request<PlanResponse>(
-    `/plans/${planId}/replace`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
-    fetchImpl,
-  );
+  return request<PlanResponse>(`/plans/${planId}/replace`, sendJson("POST", body), fetchImpl);
 }
 
 /** Places whose name contains `query` (accents ignored), for the must-visit picker. */
