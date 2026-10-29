@@ -3,7 +3,9 @@
 A trip points at one version of a plan. Editing a plan saves a new version that names the
 one it was made from (`parent_id` in its params). Versions that go back to the same first
 plan, edit after edit, are versions of the same trip, and a trip can switch between them:
-to a draft made from it (save) or to an earlier version (undo).
+to a draft made from its current version (save) or to one its current version was made from
+(undo). A draft made from another version is outdated: the trip changed since, so saving it
+would undo that change.
 
 Visited places live on the trip, so there is one record of them whatever the version; a
 version that leaves a visited place out is refused.
@@ -11,7 +13,7 @@ version that leaves a visited place out is refused.
 
 from datetime import date
 
-from sqlalchemy import BigInteger, delete, func, select, update
+from sqlalchemy import BigInteger, delete, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -24,6 +26,10 @@ from app.schemas.saved_trip import TripSummary, TripVisitOut
 
 class NotAVersionError(Exception):
     """The plan is not a version of the trip's plan."""
+
+
+class OutdatedVersionError(Exception):
+    """The version was made from another version than the trip's current one."""
 
 
 class NotAStopError(Exception):
@@ -48,22 +54,25 @@ def default_title(plan: PlanResponse) -> str:
     return f"{days} {'day' if days == 1 else 'days'} in {city.name if city else plan.city.title()}"
 
 
-async def first_version(session: AsyncSession, plan_id: int) -> int | None:
-    """The plan `plan_id` was made from, edit after edit (itself if it is not an edit);
-    None if there is no such plan."""
-    newer = aliased(Route)
+async def version_chain(session: AsyncSession, plan_id: int) -> list[int]:
+    """`plan_id` and the versions it was made from, edit after edit, back to the first plan;
+    empty if there is no such plan."""
+    older = aliased(Route)
     chain = (
-        select(Route.id, Route.params["parent_id"].astext.cast(BigInteger).label("parent"))
+        select(
+            Route.id,
+            Route.params["parent_id"].astext.cast(BigInteger).label("parent"),
+            literal(0).label("depth"),
+        )
         .where(Route.id == plan_id)
         .cte("chain", recursive=True)
     )
     chain = chain.union_all(
-        select(newer.id, newer.params["parent_id"].astext.cast(BigInteger)).join(
-            chain, newer.id == chain.c.parent
+        select(older.id, older.params["parent_id"].astext.cast(BigInteger), chain.c.depth + 1).join(
+            chain, older.id == chain.c.parent
         )
     )
-    first: int | None = await session.scalar(select(chain.c.id).where(chain.c.parent.is_(None)))
-    return first
+    return list(await session.scalars(select(chain.c.id).order_by(chain.c.depth)))
 
 
 async def find_trip(session: AsyncSession, user: User, trip_id: int) -> Trip | None:
@@ -165,11 +174,15 @@ async def unmark_visited(session: AsyncSession, trip: Trip, place_id: int) -> No
 async def update_trip(
     session: AsyncSession, trip: Trip, *, title: str | None, plan: PlanResponse | None
 ) -> None:
-    """Rename the trip and/or switch it to another version of its plan, which must keep
-    every visited place."""
+    """Rename the trip and/or switch it to another version of its plan: a draft made from
+    its current version, or one that version was made from. It must keep every visited
+    place."""
     if plan is not None and plan.id != trip.plan_id:
-        if await first_version(session, plan.id) != await first_version(session, trip.plan_id):
-            raise NotAVersionError(plan.id)
+        current = await version_chain(session, trip.plan_id)
+        if plan.id not in current and plan.parent_id != trip.plan_id:
+            if (await version_chain(session, plan.id))[-1:] != current[-1:]:
+                raise NotAVersionError(plan.id)
+            raise OutdatedVersionError(plan.id)
         stops = stop_ids(plan)
         if left_out := [v for v in await trip_visits(session, trip) if v.place_id not in stops]:
             raise VisitedLeftOutError(left_out)

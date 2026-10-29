@@ -106,6 +106,22 @@ def test_remove_and_add_make_a_draft(
     assert drafted(visitor, trip, remove=[park])["parent_id"] == draft["id"]
 
 
+def test_a_draft_made_from_an_outdated_version_is_refused(
+    visitor: TestClient, place_ids: dict[str, int], trip: dict[str, Any]
+) -> None:
+    # Two drafts made from the same version (two tabs): saving one outdates the other.
+    first = drafted(visitor, trip, remove=[place_ids["Clock Tower"]])
+    second = drafted(visitor, trip, add=[place_ids["River Park"]])
+    path = f"/trips/{trip['id']}"
+    assert visitor.patch(path, json={"plan_id": first["id"]}).status_code == 200
+    refused = visitor.patch(path, json={"plan_id": second["id"]})
+    assert refused.status_code == 409
+    assert visitor.get(path).json()["plan"]["id"] == first["id"]
+    # Undo is still fine: back to the version the current one was made from.
+    undone = visitor.patch(path, json={"plan_id": trip["plan"]["id"]})
+    assert undone.json()["plan"]["id"] == trip["plan"]["id"]
+
+
 def test_visited_stops_stay_first_as_they_were(
     visitor: TestClient, place_ids: dict[str, int], trip: dict[str, Any]
 ) -> None:

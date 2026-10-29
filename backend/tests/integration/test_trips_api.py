@@ -142,9 +142,18 @@ def test_switch_to_another_version(
 
     picks(llm, place_ids["Fish Market"])
     newer = replace(visitor, edited, 1, [place_ids["River Park"]]).json()
+    # Undo goes back to any version the current one was made from.
     assert visitor.patch(path, json={"plan_id": plan["id"]}).json()["plan"]["id"] == plan["id"]
-    # Any version made from the same first plan belongs to the trip.
-    assert visitor.patch(path, json={"plan_id": newer["id"]}).json()["plan"]["id"] == newer["id"]
+    # A version made from another one than the current version is outdated...
+    outdated = visitor.patch(path, json={"plan_id": newer["id"]})
+    assert outdated.status_code == 409
+    assert outdated.json()["detail"] == (
+        "The trip changed after this draft was made from it. Make the change again."
+    )
+    # ...until the one it was made from is the trip's again.
+    for version in (edited, newer):
+        saved = visitor.patch(path, json={"plan_id": version["id"]})
+        assert saved.json()["plan"]["id"] == version["id"]
 
     other = create_plan(visitor, llm, place_ids, FIRST_DAY)
     for plan_id in (other["id"], 10**9):

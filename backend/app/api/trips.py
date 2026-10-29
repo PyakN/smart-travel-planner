@@ -26,7 +26,12 @@ from app.schemas.saved_trip import (
 )
 from app.services import saved_trips
 from app.services.day_editing import edit_day
-from app.services.saved_trips import NotAStopError, NotAVersionError, VisitedLeftOutError
+from app.services.saved_trips import (
+    NotAStopError,
+    NotAVersionError,
+    OutdatedVersionError,
+    VisitedLeftOutError,
+)
 from app.services.trip_planner import get_plan
 
 router = APIRouter(prefix="/trips", tags=["trips"])
@@ -97,9 +102,9 @@ async def read_trip(trip_id: int, user: CurrentUserDep, session: SessionDep) -> 
 async def update_trip(
     trip_id: int, body: TripUpdate, user: CurrentUserDep, session: SessionDep
 ) -> TripOut:
-    """Rename a trip, or switch it to another version of its plan: a draft made from it
-    (save) or an earlier one (undo). A version that leaves out a visited place is refused
-    (409)."""
+    """Rename a trip, or switch it to another version of its plan: a draft made from its
+    current version (save), or one that version was made from (undo). A draft made from an
+    outdated version, or a version that leaves out a visited place, is refused (409)."""
     trip = await _trip(session, user, trip_id)
     plan: PlanResponse | None = None
     if body.plan_id is not None:
@@ -110,6 +115,11 @@ async def update_trip(
         await saved_trips.update_trip(session, trip, title=body.title, plan=plan)
     except NotAVersionError as exc:
         raise _not_a_version(exc.args[0]) from exc
+    except OutdatedVersionError as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "The trip changed after this draft was made from it. Make the change again.",
+        ) from exc
     except VisitedLeftOutError as exc:
         raise HTTPException(
             status.HTTP_409_CONFLICT, f"That version leaves out places you visited: {exc}."
