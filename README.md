@@ -36,6 +36,10 @@ pip install -e ".[dev]" pre-commit
 alembic upgrade head
 python -m app.ingest lisbon        # ~7.2k places from OpenStreetMap (5k to eat and drink), ~1 min
 python -m app.ingest.enrich lisbon # photos + descriptions from Wikimedia, ~1 min
+python -m app.ingest berlin        # ~19.7k places (13k to eat and drink)
+python -m app.ingest.enrich berlin
+python -m app.ingest barcelona     # ~11.3k places (8.5k to eat and drink)
+python -m app.ingest.enrich barcelona
 
 # 5. Frontend
 cd ../frontend
@@ -48,9 +52,11 @@ pre-commit install
 
 Run it: start the API (`cd backend && uvicorn app.main:app --reload`) and the UI (`cd frontend && npm run dev`), then open http://localhost:3000. The UI proxies `/api/*` to the backend; see [frontend/README.md](frontend/README.md).
 
-The importer caches the raw Overpass response in `backend/data/raw/`. Re-runs use the cache and upsert by OSM id; pass `--refresh` to fetch fresh data.
+The importer caches the raw Overpass response in `backend/data/raw/`. Re-runs use the cache and upsert by OSM id; pass `--refresh` to fetch fresh data. An answer Overpass cut short (it ran out of time or memory) counts as a failure, so it is never cached.
 
-`app.ingest.enrich` adds what the stop cards show: a photo from Wikimedia Commons (thumbnail, author and licence), and a short description from English Wikipedia or Wikidata. Opening hours and websites come from the OSM tags. Its answers are cached in `backend/data/raw/<city>-wiki.json` (`--refresh` asks again). Lisbon: 604 places with a photo, 414 with a description.
+**Cities:** Lisbon, Berlin and Barcelona, each with its bounding box, time zone and country (for public holidays in opening hours) in `app/ingest/cities.py`; `GET /cities` lists them. A plan is for the city its text names, or the one in `city` (`POST /plan`). Holidays are national only: Berlin's and Catalonia's own are not known. Places that OSM marks as closed in their name or hours ("(geschlossen)", "Cerrado permanentemente") are skipped in English, Portuguese, German, Spanish and Catalan. The frontend still assumes Lisbon (map, clock, place search), but a request that names Berlin or Barcelona is planned there.
+
+`app.ingest.enrich` adds what the stop cards show: a photo from Wikimedia Commons (thumbnail, author and licence), and a short description from English Wikipedia or Wikidata. Opening hours and websites come from the OSM tags. Its answers are cached in `backend/data/raw/<city>-wiki.json` (`--refresh` asks again). Places with a photo and with a description: Lisbon 634 and 440, Berlin 3,070 and 2,943, Barcelona 859 and 561.
 
 ## API
 
@@ -62,10 +68,11 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 | Endpoint | Description |
 |---|---|
 | `GET /health` | Service and database status |
+| `GET /cities` | Supported cities: `slug`, `name`, `timezone` (IANA) and `bbox` (west, south, east, north) |
 | `GET /places` | Search: `q` (name contains, accents ignored), `city`, `category` (repeatable), `bbox=west,south,east,north`, or `lat`+`lon`+`radius_m` (sorted by distance); `limit` / `offset` |
 | `GET /places/{id}` | One place |
 | `GET /categories` | Categories with place counts (optional `city`) |
-| `POST /plan` | **Plan a trip from text**: `{"text", "start"?: {"lat", "lon", "round_trip"}, "must_visit"?: [place ids], "modes"?: ["walk", "transit"], "start_date"?: "YYYY-MM-DD", "weather_aware"?: bool, "day_start"?: "HH:MM", "day_end"?: "HH:MM", "first_day_start"?: "HH:MM"}` → dated days with their hours, ordered, timed stops (photo, description, personal note, opening hours, free time before them, forecast), when a free evening begins (`free_from`) and map geometry. Saved; returns `id` |
+| `POST /plan` | **Plan a trip from text**: `{"text", "city"?: slug, "start"?: {"lat", "lon", "round_trip"}, "must_visit"?: [place ids], "modes"?: ["walk", "transit"], "start_date"?: "YYYY-MM-DD", "weather_aware"?: bool, "day_start"?: "HH:MM", "day_end"?: "HH:MM", "first_day_start"?: "HH:MM"}` → dated days with their hours, ordered, timed stops (photo, description, personal note, opening hours, free time before them, forecast), when a free evening begins (`free_from`) and map geometry. Saved; returns `id` |
 | `GET /plans/{id}` | A saved plan |
 | `POST /plans/{id}/replace` | **Replace stops of a day**: `{"day", "place_ids"}` → a new saved version (`parent_id` = this plan), with an `edit` listing what was replaced, added, adjusted and dropped |
 | `POST /auth/signup` | Create an account and log in: `{"email", "password", "display_name"}` (password 8+ characters); 409 if the email has an account |
@@ -108,7 +115,7 @@ Error statuses:
 - **401:** not logged in (`/auth/me` and `/trips`).
 - **404:** no such plan, or a trip that does not exist or belongs to someone else.
 - **409:** an email that has an account; a trip version that leaves out a visited place, or a draft made from an outdated version.
-- **422:** the request can't be planned, for example an unsupported city.
+- **422:** the request can't be planned, for example an unsupported city, or a text that names another city than `city`.
 - **429:** the daily LLM token budget is used up.
 - **502:** the LLM rejected the request.
 - **503:** the LLM is unavailable or not configured.

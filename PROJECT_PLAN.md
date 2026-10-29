@@ -202,7 +202,10 @@ A traveller saves a trip, ticks off places during the day and changes the rest o
 
 ## Phase 9. Post-MVP
 - [ ] Export (GPX, Google Maps link)
-- [ ] Multiple cities
+- [x] Multiple cities: Berlin and Barcelona join Lisbon (bounding box, time zone, country for public holidays); 19,655 and 11,302 places imported and enriched. Closed places are recognised in German, Spanish and Catalan too, and an Overpass answer cut short is never cached. `GET /cities` lists them; `POST /plan` takes `city` (a text that names another city gets a 422)
+- [ ] Frontend: choose the city (`GET /cities`); the map, clock and place search follow it
+- [ ] (later) Rank candidates by fame (e.g. Wikidata sitelinks): hundreds of sights tie at the top score (991 in Berlin), so the LLM sees an arbitrary 60 of them and misses the Sagrada Família on a Gaudí day
+- [ ] (later) Buildings mapped as artworks (`artwork_type=architecture`: Casa Batlló, Casa Milà) are outdoor monuments with short visits
 - [ ] Drag-and-drop stops with route recalculation (reuse the Phase 6.5 day edit)
 - [ ] Mapbox GL instead of Leaflet (if needed)
 
