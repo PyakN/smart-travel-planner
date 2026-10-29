@@ -34,6 +34,22 @@ CITIES: dict[str, City] = {
         timezone="Europe/Lisbon",
         country="PT",
     ),
+    # The state of Berlin. Its bbox takes in a rim of Brandenburg (Babelsberg, Teltow).
+    "berlin": City(
+        "berlin",
+        "Berlin",
+        BBox(52.3382, 13.0883, 52.6756, 13.7612),
+        timezone="Europe/Berlin",
+        country="DE",
+    ),
+    # Barcelona municipality, Montjuïc and Collserola included.
+    "barcelona": City(
+        "barcelona",
+        "Barcelona",
+        BBox(41.3170, 2.0524, 41.4680, 2.2284),
+        timezone="Europe/Madrid",
+        country="ES",
+    ),
 }
 
 

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -47,6 +47,23 @@ def test_public_holidays_of_the_city() -> None:
     hours = "Mo-Su 10:00-18:00; PH off"
     assert state(hours, datetime(2026, 12, 1, 12, 0, tzinfo=LISBON.tz)) == "closed"
     assert state(hours, datetime(2026, 12, 2, 12, 0, tzinfo=LISBON.tz)) == "open"
+
+
+@pytest.mark.parametrize(
+    ("slug", "point", "holiday"),
+    [
+        ("berlin", (52.5163, 13.3777), date(2026, 10, 3)),  # German Unity Day
+        ("barcelona", (41.4036, 2.1744), date(2026, 10, 12)),  # Spain's National Day
+    ],
+)
+def test_public_holidays_of_other_countries(
+    slug: str, point: tuple[float, float], holiday: date
+) -> None:
+    city = CITIES[slug]
+    hours = read_hours("Mo-Su 10:00-18:00; PH off", city, *point)
+    noon = datetime.combine(holiday, time(12), city.tz)
+    assert open_state(hours, noon) == "closed"
+    assert open_state(hours, noon + timedelta(days=1)) == "open"
 
 
 def test_daylight_hours_follow_the_sun() -> None:

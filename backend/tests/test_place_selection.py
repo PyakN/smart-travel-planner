@@ -144,6 +144,8 @@ def test_rejects_empty_or_huge_requests(text: str) -> None:
 
 def test_city_aliases_resolve() -> None:
     assert resolve_city("Lisboa") is resolve_city(" lisbon ") is CITIES["lisbon"]
+    assert resolve_city("Berlin") is CITIES["berlin"]
+    assert resolve_city("barcelona") is CITIES["barcelona"]
     assert resolve_city("tokyo") is None
 
 
