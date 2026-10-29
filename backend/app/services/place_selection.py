@@ -116,7 +116,8 @@ HOURS_GUIDE = """When places can be visited (marked after the category): "day" c
 HOURS_PROMPT = f"{HOURS_GUIDE} The days' hours, in local time:"
 HOURS_RULE = "Choose for each part of the day places that can be visited then."
 VENUE_NOTE = (
-    "Plans suggest sights only: add the restaurants and bars you want as must-visit places."
+    "Plans suggest sights only: save the trip to find places to eat and drink near your "
+    "stops, or add the restaurants and bars you want as must-visit places."
 )
 
 # The weather of a trip's days in a city, by number of days; None without a forecast.

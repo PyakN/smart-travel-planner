@@ -168,4 +168,6 @@ def test_pools_merge_into_one_ranking() -> None:
 def test_food_and_drink_requests_get_a_note() -> None:
     assert venue_notes(trip(interests=["nightlife", "viewpoint"])) == [VENUE_NOTE]
     assert venue_notes(trip(interests=["restaurant"])) == [VENUE_NOTE]
+    assert venue_notes(trip(interests=["cafe"])) == [VENUE_NOTE]
+    assert "find places to eat and drink" in VENUE_NOTE
     assert venue_notes(trip(interests=["viewpoint"], avoid=["nightlife"])) == []
