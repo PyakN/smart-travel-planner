@@ -1,5 +1,5 @@
-// Mirrors backend/app/schemas/plan.py (POST /plan, GET /plans/{id}, POST /plans/{id}/replace)
-// and backend/app/schemas/place.py (GET /places).
+// Mirrors backend/app/schemas/plan.py (POST /plan, GET /plans/{id}, POST /plans/{id}/replace),
+// backend/app/schemas/place.py (GET /places) and backend/app/schemas/account.py (/auth).
 
 export type TravelMode = "walk" | "transit";
 export type TransitVehicle =
@@ -233,4 +233,21 @@ export interface PlanResponse {
   day_start: string;
   day_end: string;
   first_day_start: string | null;
+}
+
+/** The logged-in user (GET /auth/me). */
+export interface User {
+  id: number;
+  email: string;
+  display_name: string;
+  created_at: string;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface SignupRequest extends LoginRequest {
+  display_name: string;
 }

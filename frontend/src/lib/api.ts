@@ -1,4 +1,12 @@
-import type { PlacePage, PlanRequest, PlanResponse, ReplaceRequest } from "./types";
+import type {
+  LoginRequest,
+  PlacePage,
+  PlanRequest,
+  PlanResponse,
+  ReplaceRequest,
+  SignupRequest,
+  User,
+} from "./types";
 
 /** Same-origin prefix; next.config.ts proxies it to the FastAPI backend. */
 export const API_BASE = "/api";
@@ -77,4 +85,27 @@ export function searchPlaces(
 ) {
   const params = new URLSearchParams({ q: query, city, limit: String(limit) });
   return request<PlacePage>(`/places?${params}`, { method: "GET", signal }, fetchImpl);
+}
+
+/** Creates an account and logs in: the backend sets an HttpOnly session cookie. */
+export function signUp(body: SignupRequest, fetchImpl: typeof fetch = fetch) {
+  return request<User>("/auth/signup", sendJson("POST", body), fetchImpl);
+}
+
+export function logIn(body: LoginRequest, fetchImpl: typeof fetch = fetch) {
+  return request<User>("/auth/login", sendJson("POST", body), fetchImpl);
+}
+
+export async function logOut(fetchImpl: typeof fetch = fetch): Promise<void> {
+  await request<null>("/auth/logout", { method: "POST" }, fetchImpl);
+}
+
+/** The logged-in user, or null when nobody is. */
+export async function getMe(fetchImpl: typeof fetch = fetch): Promise<User | null> {
+  try {
+    return await request<User>("/auth/me", { method: "GET" }, fetchImpl);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return null;
+    throw error;
+  }
 }

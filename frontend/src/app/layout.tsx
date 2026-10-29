@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
+
+import { AuthProvider } from "@/components/AuthProvider";
+import SiteHeader, { HeaderShell } from "@/components/SiteHeader";
 
 import "./globals.css";
 
@@ -17,7 +20,15 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
-      <body className="h-full">{children}</body>
+      <body className="flex h-full flex-col">
+        <AuthProvider>
+          {/* The header reads the URL (to come back after logging in): a Suspense boundary. */}
+          <Suspense fallback={<HeaderShell />}>
+            <SiteHeader />
+          </Suspense>
+          <div className="min-h-0 flex-1">{children}</div>
+        </AuthProvider>
+      </body>
     </html>
   );
 }

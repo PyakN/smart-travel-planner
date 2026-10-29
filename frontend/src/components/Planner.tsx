@@ -147,7 +147,7 @@ export default function Planner() {
   }
 
   return (
-    <div className="flex h-dvh flex-col lg:flex-row">
+    <div className="flex h-full flex-col lg:flex-row">
       <main className="relative order-1 h-[42dvh] shrink-0 lg:order-2 lg:h-auto lg:flex-1">
         <RouteMap
           plan={plan}
@@ -174,10 +174,10 @@ export default function Planner() {
         <div className="space-y-5 p-4 lg:p-6">
           <header>
             <h1 className="text-xl font-semibold tracking-tight text-zinc-900">
-              Smart Travel Planner
+              Plan your Lisbon trip
             </h1>
             <p className="text-sm text-zinc-500">
-              Lisbon · an AI picks the places, an optimizer plans the walk.
+              An AI picks the places, an optimizer plans the walk.
             </p>
           </header>
 

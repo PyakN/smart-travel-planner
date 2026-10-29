@@ -1,6 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiError, createPlan, errorMessage, getPlan, replaceStops, searchPlaces } from "./api";
+import {
+  ApiError,
+  createPlan,
+  errorMessage,
+  getMe,
+  getPlan,
+  logIn,
+  logOut,
+  replaceStops,
+  searchPlaces,
+  signUp,
+} from "./api";
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(async () => new Response(JSON.stringify(body), { status }));
@@ -59,6 +70,38 @@ describe("searchPlaces", () => {
     await searchPlaces("São Jorge & co", { limit: 5 }, fetchImpl);
     const [url] = fetchImpl.mock.calls[0] as unknown as [string];
     expect(url).toBe("/api/places?q=S%C3%A3o+Jorge+%26+co&city=lisbon&limit=5");
+  });
+});
+
+describe("accounts", () => {
+  it("signs up and logs in with JSON", async () => {
+    const user = { id: 1, email: "ana@example.com", display_name: "Ana", created_at: "" };
+    const fetchImpl = fakeFetch(201, user);
+    await expect(
+      signUp({ email: "ana@example.com", password: "secret12", display_name: "Ana" }, fetchImpl),
+    ).resolves.toEqual(user);
+    await logIn({ email: "ana@example.com", password: "secret12" }, fetchImpl);
+    const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([url, init]) => [url, init.method])).toEqual([
+      ["/api/auth/signup", "POST"],
+      ["/api/auth/login", "POST"],
+    ]);
+    expect(JSON.parse(calls[1][1].body as string)).toEqual({
+      email: "ana@example.com",
+      password: "secret12",
+    });
+  });
+
+  it("reads a logged-out visitor as null", async () => {
+    await expect(getMe(fakeFetch(401, { detail: "Log in first." }))).resolves.toBeNull();
+    await expect(getMe(fakeFetch(503, null))).rejects.toMatchObject({ status: 503 });
+  });
+
+  it("logs out with an empty answer", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+    await expect(logOut(fetchImpl)).resolves.toBeUndefined();
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect([url, init.method]).toEqual(["/api/auth/logout", "POST"]);
   });
 });
 
