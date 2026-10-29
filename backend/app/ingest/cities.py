@@ -13,6 +13,8 @@ class City:
     aliases: tuple[str, ...] = field(default=())
     # IANA name: trip dates, weather hours and daylight are in the city's local time.
     timezone: str = "UTC"
+    # ISO 3166-1 alpha-2: the public holidays of opening hours ("PH off").
+    country: str | None = None
 
     @property
     def tz(self) -> ZoneInfo:
@@ -30,6 +32,7 @@ CITIES: dict[str, City] = {
         BBox(38.6913, -9.2298, 38.7964, -9.0866),
         aliases=("lisboa",),
         timezone="Europe/Lisbon",
+        country="PT",
     ),
 }
 

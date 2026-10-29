@@ -16,6 +16,7 @@ dependencies = [
     "openai>=1.60",
     "argon2-cffi>=23.1",  # password hashes (argon2id)
     "tzdata>=2024.1",  # time zones for zoneinfo where the OS has none (Windows, slim images)
+    "opening-hours-py>=2.1",  # OSM opening_hours parser
 ]
 
 [project.optional-dependencies]
