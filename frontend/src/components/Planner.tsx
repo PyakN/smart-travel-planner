@@ -267,7 +267,7 @@ export default function Planner() {
   }
 
   async function replace(day: number, placeIds: number[]) {
-    if (!plan) return;
+    if (!plan) return false;
     setReplacing(true);
     setEditError(null);
     try {
@@ -282,8 +282,10 @@ export default function Planner() {
         window.history.pushState(null, "", `?plan=${next.id}`);
       }
       setSelectedDay(day);
+      return true;
     } catch (error) {
       setEditError(describe(error));
+      return false;
     } finally {
       setReplacing(false);
     }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import DayWeather from "@/components/DayWeather";
 import PlaceSearch from "@/components/PlaceSearch";
@@ -66,8 +67,9 @@ export interface PlanResultProps {
   selectedDay: number;
   onSelectDay: (day: number) => void;
   onHoverStop: (placeId: number | null) => void;
-  /** Replace the given stops of a day; the parent swaps in the new plan version. */
-  onReplace: (day: number, placeIds: number[]) => void;
+  /** Replace the given stops of a day; the parent swaps in the new plan version (or a draft
+   * of the trip). Resolves to whether it did. */
+  onReplace: (day: number, placeIds: number[]) => Promise<boolean>;
   replacing: boolean;
   /** Why the last change to the plan failed. */
   editError: string | null;
@@ -139,7 +141,10 @@ function EditSummary({ edit, onUndo }: { edit: PlanEdit; onUndo: PlanResultProps
   );
 }
 
-/** Asks before saving a draft that drops planned stops, and says why each goes. */
+/**
+ * Asks before saving a draft that drops planned stops, and says why each goes. Rendered on
+ * the page's body: the draft bar's backdrop blur would make it the box `fixed` is relative to.
+ */
 function ConfirmDrop({
   dropped,
   onConfirm,
@@ -161,7 +166,7 @@ function ConfirmDrop({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const stops = dropped.length === 1 ? "stop" : "stops";
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[2000] flex items-end justify-center bg-zinc-900/40 p-4 sm:items-center"
       onClick={onCancel}
@@ -203,7 +208,8 @@ function ConfirmDrop({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -232,29 +238,32 @@ function DraftBar({
       <p className="text-xs font-semibold tracking-wide text-amber-800 uppercase">
         Draft · not saved yet
       </p>
-      {edit && <p className="text-zinc-800">{describeEdit(edit)}</p>}
-      {edit?.adjustments.map((a) => (
-        <p key={`${a.removed?.place_id}-${a.added?.place_id}`} className="text-xs text-zinc-700">
-          {describeAdjustment(a)}
-        </p>
-      ))}
-      {dropped.length > 0 && (
-        <div className="text-xs text-amber-900">
-          <p className="font-medium">
-            Drops {dropped.length} planned {dropped.length === 1 ? "stop" : "stops"}:
+      {/* Long lists scroll: Save and Discard stay in view. */}
+      <div className="max-h-[40dvh] space-y-1 overflow-y-auto">
+        {edit && <p className="text-zinc-800">{describeEdit(edit)}</p>}
+        {edit?.adjustments.map((a) => (
+          <p key={`${a.removed?.place_id}-${a.added?.place_id}`} className="text-xs text-zinc-700">
+            {describeAdjustment(a)}
           </p>
-          <ul className="list-disc pl-4">
-            {dropped.map((stop) => (
-              <li key={stop.place_id}>{describeDropped(stop)}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {edit?.warnings.map((w) => (
-        <p key={w} className="text-xs text-amber-800">
-          {w}
-        </p>
-      ))}
+        ))}
+        {dropped.length > 0 && (
+          <div className="text-xs text-amber-900">
+            <p className="font-medium">
+              Drops {dropped.length} planned {dropped.length === 1 ? "stop" : "stops"}:
+            </p>
+            <ul className="list-disc pl-4">
+              {dropped.map((stop) => (
+                <li key={stop.place_id}>{describeDropped(stop)}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {edit?.warnings.map((w) => (
+          <p key={w} className="text-xs text-amber-800">
+            {w}
+          </p>
+        ))}
+      </div>
       {error && (
         <p role="alert" className="text-xs text-red-700">
           {error}
@@ -760,7 +769,10 @@ export default function PlanResult({
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => onReplace(day.day, selected)}
+                onClick={async () => {
+                  // The ticks became a new version: Discard or Undo must not bring them back.
+                  if (await onReplace(day.day, selected)) setPicked({ key: selectionKey, ids: [] });
+                }}
                 disabled={replacing}
                 className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-wait disabled:bg-blue-400"
               >
