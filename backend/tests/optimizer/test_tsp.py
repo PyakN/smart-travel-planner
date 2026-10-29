@@ -45,6 +45,27 @@ def test_round_trip_does_not_repeat_start() -> None:
     assert cost_of(m, order, 0, round_trip=True) == pytest.approx(40)
 
 
+def test_path_to_another_end() -> None:
+    # From the corner, the nearer stop 2 comes first, unless the path ends beside it (1).
+    m = euclidean([(0, 0), (10, 1), (10, 0), (0, 11)])
+    assert order_stops(m, [2, 3], start=0) == [2, 3]
+    assert order_stops(m, [2, 3], start=0, end=1) == [3, 2]
+    assert order_stops(m, [2, 3], end=1) == [3, 2]  # a free start too
+
+
+@pytest.mark.parametrize("start", [0, None], ids=["fixed", "free"])
+def test_paths_to_an_end_match_brute_force(start: int | None) -> None:
+    rng = random.Random(3)
+    for _ in range(30):
+        m = random_matrix(rng, 8)
+        nodes = list(range(1, 7))
+        order = order_stops(m, nodes, start=start, end=7)
+        assert sorted(order) == nodes
+        head = [start] if start is not None else []
+        optimum = min(path_cost(m, [*head, *perm, 7]) for perm in permutations(nodes))
+        assert path_cost(m, [*head, *order, 7]) <= optimum * 1.05
+
+
 def test_free_start_picks_an_end_of_the_line() -> None:
     m = euclidean([(20, 0), (0, 0), (40, 0), (10, 0), (30, 0)])
     order = order_stops(m, [0, 1, 2, 3, 4])

@@ -117,12 +117,17 @@ def order_stops(
     nodes: Sequence[int],
     *,
     start: int | None = None,
+    end: int | None = None,
     round_trip: bool = False,
     initial: Sequence[int] | None = None,
 ) -> list[int]:
-    """Visiting order of `nodes` (the start node itself is not included)."""
+    """Visiting order of `nodes` (the start and end nodes themselves are not included). The
+    path ends at `end` if given, back at `start` on a round trip, else at its last node."""
+    if round_trip:
+        end = start
     if start is None:
         extended, dummy = with_free_start(matrix)
-        return solve_path(extended, nodes, dummy, initial=initial)[1:]
-    path = solve_path(matrix, nodes, start, end=start if round_trip else None, initial=initial)
-    return path[1:-1] if round_trip else path[1:]
+        path = solve_path(extended, nodes, dummy, end=end, initial=initial)
+    else:
+        path = solve_path(matrix, nodes, start, end=end, initial=initial)
+    return path[1:-1] if end is not None else path[1:]

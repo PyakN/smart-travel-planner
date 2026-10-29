@@ -32,6 +32,13 @@ outdoor visit's share of bad minutes costs up to OUTDOOR_PENALTY_MIN more minute
 reordered, and outdoor stops caught in bad weather move to another day, alone or in
 exchange for an indoor stop, while that lowers travel time plus penalty. No day goes over
 its time budget for it, and dry days keep the plan they had without weather.
+
+A day of a trip can also be re-planned as it goes (replan_day). Its visited stops stay first,
+in their order; the rest begins where the traveller is, at the time given, visits one stop
+first if asked, and ends back at the hotel on round trips (a path to another end). The pace
+no longer limits it, only the end of the day's hours plus REPLAN_GRACE_MIN: stops are dropped
+only when the day would really run long (or reach them closed or dark), least important
+first, and never the ones the traveller asked for.
 """
 
 from collections.abc import Collection, Iterator, Mapping, Sequence
@@ -91,6 +98,8 @@ OUTDOOR_PENALTY_MIN = 45
 LATE_PENALTY_MIN = 100
 # Outdoor stops moved between days per plan, at most.
 MAX_WEATHER_TRADES = 12
+# A re-planned day may run this long past the end of its hours before stops are dropped.
+REPLAN_GRACE_MIN = 30
 
 
 class NothingFitsError(ValueError):
@@ -113,6 +122,8 @@ class Stop:
     # When it can be visited: any time, by day (until NIGHT_START_MIN), in daylight, or at
     # night (from NIGHT_START_MIN).
     hours: VisitHours = "any"
+    # Minutes there, if the traveller chose; else the visit its category takes (VISIT_MIN).
+    stay_min: int | None = None
 
 
 @dataclass(frozen=True)
@@ -184,6 +195,17 @@ class StartPoint:
     round_trip: bool = False
 
 
+@dataclass(frozen=True)
+class Origin:
+    """Where the rest of a re-planned day begins (the traveller's location), and when, in
+    minutes since the day's midnight; None: when it would begin anyway (where the visited
+    stops end, or as the day starts)."""
+
+    lat: float
+    lon: float
+    minute: int | None = None
+
+
 TravelMode = Literal["walk", "transit"]
 ALL_MODES: tuple[TravelMode, ...] = ("walk", "transit")
 
@@ -243,6 +265,8 @@ class Visit:
     leave_min: int
     # Free time before setting off for it: the place opens later.
     wait_min: int = 0
+    # Where its leg starts when not at the previous stop: the origin of a re-planned day.
+    origin: Origin | None = None
 
 
 @dataclass(frozen=True)
@@ -304,25 +328,33 @@ class _DayCost:
 
 
 class _Problem:
-    """Matrix indices: stops are 0..n-1, the start point (if any) is n.
+    """Matrix indices: stops are 0..n-1, then the points days start or end at, if any.
 
+    Every day begins at node `start` (None: at its first stop) when its hours begin, and
+    ends at node `end` (None: at its last stop; `start` itself on round trips). `first`, a
+    stop, comes first on any day that has it; `protected` stops are never dropped.
     `legs[a][b]` is how to get from a to b and `distance` is in metres on foot. `matrix`
     holds the travel minutes the solvers minimise, averaged over both directions (they
     need it symmetric). `routes` are the transit routes fetched so far, by (from, to).
-    `windows` are the hours of the trip days in date order, and `conditions` their weather,
-    for weather-aware plans; `day` arguments index them (0 is the first trip day).
+    `windows` are the hours of the trip days in date order, `budgets` the minutes of travel
+    and visits each may take, and `conditions` their weather, for weather-aware plans; `day`
+    arguments index them (0 is the first trip day).
     """
 
     def __init__(
         self,
         distance: Matrix,
         stops: Sequence[Stop],
-        start: StartPoint | None,
+        *,
+        start: int | None,
+        end: int | None,
         modes: Collection[TravelMode],
         routes: Routes,
         windows: Sequence[DayWindow],
-        pace: Pace,
+        budgets: Sequence[int],
         conditions: Sequence[DayConditions] | None = None,
+        first: int | None = None,
+        protected: Collection[int] = (),
     ) -> None:
         self.distance = distance
         self.transit_from_m = transit_threshold_m(modes)
@@ -332,13 +364,16 @@ class _Problem:
         self.legs = [[self._leg(a, b, walking) for b in range(n)] for a in range(n)]
         self.matrix = symmetrize([[leg.minutes for leg in row] for row in self.legs])
         self.stops = stops
-        self.start = len(stops) if start else None
-        self.round_trip = bool(start and start.round_trip)
+        self.start = start
+        self.end = end
+        self.round_trip = end is not None and end == start
+        self.first = first
+        self.protected = frozenset(protected)
         self.rank = {i: stops[i].priority for i in range(len(stops))}
         self.conditions = conditions
-        self.visit_min = [visit_minutes(s.category) for s in stops]
+        self.visit_min = [s.stay_min or visit_minutes(s.category) for s in stops]
         self.windows = list(windows)
-        self.budgets = [w.budget(pace) for w in self.windows]
+        self.budgets = list(budgets)
         # opening[day][i]: when stop i may be visited that day, as DayWindow.opening.
         self.opening = [[w.opening(s.hours) for s in stops] for w in self.windows]
         self.timed = any(o != (-inf, inf) for day in self.opening for o in day)
@@ -366,7 +401,7 @@ class _Problem:
 
     def path(self, order: Sequence[int]) -> list[int]:
         prefix = [self.start] if self.start is not None else []
-        suffix = [self.start] if self.start is not None and self.round_trip and order else []
+        suffix = [self.end] if self.end is not None and order else []
         return prefix + list(order) + suffix
 
     def cost(self, order: Sequence[int]) -> float:
@@ -379,16 +414,25 @@ class _Problem:
 
     def solve_day(self, group: Sequence[int], day: int) -> list[int]:
         """The shortest order of a day's stops that keeps to their opening hours, if any
-        does: the TSP order, reordered when a visit runs late (weather aside)."""
+        does: the TSP order (from the first stop, if the day has it), reordered when a visit
+        runs late (weather aside)."""
         if not group:
             return []
         initial = sorted(group, key=lambda i: self.rank[i])
-        order = order_stops(
-            self.matrix, group, start=self.start, round_trip=self.round_trip, initial=initial
-        )
+        first = self.first
+        if first is not None and first in group:
+            rest = [i for i in initial if i != first]
+            path = order_stops(self.matrix, rest, start=first, end=self.end, initial=rest)
+            order = [first, *path]
+        else:
+            order = order_stops(self.matrix, group, start=self.start, end=self.end, initial=initial)
         if self.timed and self.day_cost(order, day, weather=False).late:
             order = _reorder(self, order, day, weather=False)
         return order
+
+    def fixed(self, order: Sequence[int]) -> int:
+        """How many stops at the head of `order` keep their place: the first stop, if any."""
+        return int(bool(order) and order[0] == self.first)
 
     def day_cost(
         self,
@@ -424,8 +468,8 @@ class _Problem:
                 wait = round(begin - clock) if previous is not None else 0
                 visits.append(Visit(self.stops[i], leg, round(begin), round(leave), wait))
             clock, previous = leave, i
-        if self.round_trip and order and self.start is not None:
-            minutes = self.legs[order[-1]][self.start].minutes
+        if self.end is not None and order:
+            minutes = self.legs[order[-1]][self.end].minutes
             clock += minutes
             travel += minutes
         slack = window.length_min - self.budgets[day]
@@ -516,16 +560,18 @@ def _fit_budget(
     While a visit runs past closing time or sunset, the least important stop with such hours
     goes (one that cannot be visited that day at all first); while the day is too long, the
     least important stop. Optional stops go first, must-visit ones only when nothing
-    optional is left.
+    optional is left; protected ones never do.
     """
     over: list[int] = []
     closed: list[int] = []
     while order:
         cost = problem.day_cost(order, day, weather=False)
-        if cost.late:
-            candidates, dropped = problem.timed_stops(order, day), closed
-        elif cost.length > problem.budgets[day] and len(order) > 1:
-            candidates, dropped = order, over
+        timed = [i for i in problem.timed_stops(order, day) if i not in problem.protected]
+        droppable = [i for i in order if i not in problem.protected]
+        if cost.late and timed:
+            candidates, dropped = timed, closed
+        elif cost.length > problem.budgets[day] and len(order) > 1 and droppable:
+            candidates, dropped = droppable, over
         else:
             break
         worst = max(candidates, key=lambda i: (not problem.stops[i].required, problem.rank[i]))
@@ -630,22 +676,24 @@ def _rebalance(problem: _Problem, day_orders: list[list[int]]) -> list[list[int]
     return days
 
 
-def _reorderings(order: Sequence[int]) -> Iterator[list[int]]:
-    """Orders one move away: a stop moved elsewhere, two stops swapped, a run reversed."""
-    n = len(order)
+def _reorderings(order: Sequence[int], keep: int = 0) -> Iterator[list[int]]:
+    """Orders one move away: a stop moved elsewhere, two stops swapped, a run reversed. The
+    first `keep` stops stay where they are."""
+    head, tail = list(order[:keep]), list(order[keep:])
+    n = len(tail)
     for i in range(n):
-        rest = [*order[:i], *order[i + 1 :]]
+        rest = [*tail[:i], *tail[i + 1 :]]
         for j in range(n):
             if j != i:
-                yield [*rest[:j], order[i], *rest[j:]]
+                yield [*head, *rest[:j], tail[i], *rest[j:]]
     for i in range(n):
         for j in range(i + 1, n):
-            swapped = list(order)
+            swapped = list(tail)
             swapped[i], swapped[j] = swapped[j], swapped[i]
-            yield swapped
+            yield [*head, *swapped]
     for i in range(n):
         for j in range(i + 3, n + 1):  # runs of two are swaps
-            yield [*order[:i], *reversed(order[i:j]), *order[j:]]
+            yield [*head, *tail[:i], *reversed(tail[i:j]), *tail[j:]]
 
 
 def _improve_day(
@@ -658,7 +706,7 @@ def _improve_day(
     improved = True
     while improved:
         improved = False
-        for candidate in _reorderings(best):
+        for candidate in _reorderings(best, problem.fixed(best)):
             cost = problem.day_cost(candidate, day, weather=weather)
             if cost.total < best_cost - EPS and cost.length <= limit:
                 best, best_cost, improved = candidate, cost.total, True
@@ -678,19 +726,21 @@ def _reorder(
 
     The day keeps to `limit`: the budget (or its current length, if that is longer already).
     Also tried from the reversed order, as a day often just needs turning around, and for
-    late visits from the order of closing times.
+    late visits from the order of closing times. The first stop, if any, stays first.
     """
     current = problem.day_cost(order, day, weather=weather)
     if current.bad <= EPS and not current.late:
         return list(order)
     if limit is None:
         limit = max(problem.budgets[day], current.length)
+    keep = problem.fixed(order)
+    head, tail = list(order[:keep]), list(order[keep:])
     seeds = [list(order)]
-    if problem.day_cost(order[::-1], day, weather=weather).length <= limit:
-        seeds.append(list(order[::-1]))
+    if problem.day_cost(head + tail[::-1], day, weather=weather).length <= limit:
+        seeds.append(head + tail[::-1])
     if current.late:
         # Stable: stops that close at the same time keep their order.
-        seeds.append(sorted(order, key=lambda i: problem.opening[day][i][::-1]))
+        seeds.append(head + sorted(tail, key=lambda i: problem.opening[day][i][::-1]))
     improved = [_improve_day(problem, seed, day, limit, weather=weather) for seed in seeds]
     return min(improved, key=lambda o: problem.day_cost(o, day, weather=weather).total)
 
@@ -887,9 +937,20 @@ async def plan_route(
     )
     distances = await provider.matrix(points)
 
+    home = len(stops) if start else None
     routes: dict[tuple[int, int], TransitRoute | None] = {}
     for attempt in range(TRANSIT_ROUNDS + 1):
-        problem = _Problem(distances.matrix, stops, start, modes, routes, hours, pace, conditions)
+        problem = _Problem(
+            distances.matrix,
+            stops,
+            start=home,
+            end=home if start and start.round_trip else None,
+            modes=modes,
+            routes=routes,
+            windows=hours,
+            budgets=[w.budget(pace) for w in hours],
+            conditions=conditions,
+        )
         solution = _solve(problem, days, enforce_budget)
         if transit is None or attempt == TRANSIT_ROUNDS:
             break
@@ -931,4 +992,162 @@ async def plan_route(
         distance_source=distances.source,
         dropped=sorted((stops[i] for i in dropped), key=lambda s: s.priority),
         warnings=warnings,
+    )
+
+
+@dataclass(frozen=True)
+class DayReplan:
+    day: DayPlan
+    distance_source: DistanceSource
+    # Stops of the rest left out because the day would run past its end (`full_end_min`:
+    # when it would end with every stop), or reach them closed or dark.
+    over: list[Stop]
+    closed: list[Stop]
+    full_end_min: int
+    # When the day ends (back at the hotel on round trips): past the end of its hours plus
+    # REPLAN_GRACE_MIN only when the stops that are never dropped take that long.
+    end_min: int
+    # Stops that are never dropped but still run past closing time or sunset.
+    late: list[Stop]
+
+
+async def replan_day(
+    done: Sequence[Stop],
+    stops: Sequence[Stop],
+    *,
+    window: DayWindow,
+    provider: DistanceProvider,
+    start: StartPoint | None = None,
+    origin: Origin | None = None,
+    first: int | None = None,
+    protected: Collection[int] = (),
+    modes: Collection[TravelMode] = ALL_MODES,
+    transit: TransitProvider | None = None,
+    conditions: DayConditions | None = None,
+) -> DayReplan:
+    """Plan the rest of a day again. `done`, the visited stops, stay first in their order,
+    from `start` (the hotel, if any) as the day's hours begin. The rest, `stops`, begins at
+    `origin` if given, else where `done` ends (or where the day starts); `first`, a stop id,
+    comes first, and the day ends at `start` on round trips.
+
+    The rest may take until the end of the day's hours plus REPLAN_GRACE_MIN. Stops are
+    dropped only beyond that, or when they would be reached closed or dark: least important
+    first, and never must-visit stops, `protected` ones (ids) or `first`.
+
+    Raises NothingFitsError when the rest would begin after that, or no stop is left.
+    """
+    if not done and not stops:
+        raise ValueError("no stops to plan")
+    if first is not None and first not in {s.id for s in stops}:
+        raise ValueError("the first stop must be one of the stops to plan")
+    transit_threshold_m(modes)  # fail on no modes before any routing request
+    everything = [*done, *stops]
+    points = [LatLon(s.lat, s.lon) for s in everything]
+    home = here = None
+    if start:
+        home = len(points)
+        points.append(LatLon(start.lat, start.lon))
+    if origin:
+        here = len(points)
+        points.append(LatLon(origin.lat, origin.lon))
+    distances = await provider.matrix(points)
+
+    k = len(done)
+    rest = list(range(k, len(everything)))
+    index = {s.id: i for i, s in enumerate(everything)}
+    head = index[first] if first is not None else None
+    keep = {index[i] for i in protected if i in index} | {i for i in rest if everything[i].required}
+    keep |= {head} if head is not None else set()
+    end = home if start and start.round_trip else None
+
+    routes: dict[tuple[int, int], TransitRoute | None] = {}
+    for attempt in range(TRANSIT_ROUNDS + 1):
+        before = _Problem(
+            distances.matrix,
+            everything,
+            start=home,
+            end=None,
+            modes=modes,
+            routes=routes,
+            windows=[window],
+            budgets=[window.length_min],
+        )
+        visited, visited_cost = before.schedule(range(k), 0)
+        begin = here if here is not None else (k - 1 if done else home)
+        begin_min = visited[-1].leave_min if visited else window.start_min
+        if origin and origin.minute is not None:
+            begin_min = origin.minute
+        until = min(window.end_min + REPLAN_GRACE_MIN, begin_min + MINUTES_PER_DAY)
+        if begin_min >= until:
+            raise NothingFitsError("the day's hours are over before the rest of it begins")
+        hours = DayWindow(begin_min, until, window.sunrise_min, window.sunset_min)
+        after = _Problem(
+            distances.matrix,
+            everything,
+            start=begin,
+            end=end,
+            modes=modes,
+            routes=routes,
+            windows=[hours],
+            budgets=[hours.length_min],  # the end of the hours, not the pace
+            conditions=[conditions] if conditions else None,
+            first=head,
+            protected=keep,
+        )
+        order = after.solve_day(rest, 0)
+        full_end_min = begin_min + after.day_cost(order, 0, weather=False).length
+        order, over, closed = _fit_budget(after, order, 0)
+        if conditions is not None:
+            order = _reorder(after, order, 0)
+        if after.timed:
+            order = _reorder(after, order, 0)
+            order, more_over, more_closed = _fit_budget(after, order, 0)
+            over, closed = over + more_over, closed + more_closed
+        if transit is None or attempt == TRANSIT_ROUNDS:
+            break
+        pairs = before.unknown_rides([list(range(k))]) + after.unknown_rides([order])
+        unknown = list(dict.fromkeys(pairs))
+        if not unknown:
+            break
+        found = await transit.routes([(points[a], points[b]) for a, b in unknown])
+        routes.update(zip(unknown, found, strict=True))
+
+    later, cost = after.schedule(order, 0)
+    if origin and later:
+        later[0] = replace(later[0], origin=replace(origin, minute=begin_min))
+    visits = visited + later
+    if not visits:
+        raise NothingFitsError("none of the stops can be visited in the rest of the day")
+    last = order[-1] if order else k - 1
+    return_leg = after.legs[last][end] if end is not None else None
+    if order:
+        rest_min = cost.length  # the way back included
+        end_min = begin_min + cost.length
+    else:
+        rest_min = round(return_leg.minutes) if return_leg else 0
+        end_min = visited[-1].leave_min + rest_min
+    legs = [v.leg for v in visits if v.leg is not None] + ([return_leg] if return_leg else [])
+    path_points = [points[i] for i in before.path(range(k))]
+    if here is not None and later:
+        path_points.append(points[here])
+    path_points += [points[i] for i in order] + ([points[end]] if end is not None else [])
+    closes = [after.opening[0][i][1] for i in order]
+    return DayReplan(
+        day=DayPlan(
+            day=1,
+            visits=visits,
+            return_leg=return_leg,
+            distance_m=sum(leg.distance_m for leg in legs),
+            walking_m=sum(leg.walking_m for leg in legs),
+            transit_legs=sum(leg.mode == "transit" for leg in legs),
+            total_min=visited_cost.length + rest_min,
+            self_intersections=count_self_intersections(path_points),
+            window=window,
+        ),
+        distance_source=distances.source,
+        over=sorted((everything[i] for i in over), key=lambda s: s.priority),
+        closed=sorted((everything[i] for i in closed), key=lambda s: s.priority),
+        full_end_min=full_end_min,
+        end_min=end_min,
+        late=[v.stop for v, close in zip(later, closes, strict=True) if v.leave_min > close],
     )
