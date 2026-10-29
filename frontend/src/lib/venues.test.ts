@@ -4,8 +4,10 @@ import type { PlannedDay, PlannedStop } from "./types";
 import {
   cuisineLabel,
   defaultSearchPoint,
+  dayUnderWay,
   dietLabels,
   openingLabel,
+  stayOptions,
   venueIcon,
   venueTypeLabel,
   walkLabel,
@@ -86,5 +88,37 @@ describe("defaultSearchPoint", () => {
       label: "your start point",
     });
     expect(defaultSearchPoint(DAY, [], null)?.label).toBe("Rossio, the first stop");
+  });
+});
+
+describe("dayUnderWay", () => {
+  it("is true from the day's midnight until its end", () => {
+    expect(dayUnderWay(DAY, { date: "2026-11-02", minutes: 7 * 60 })).toBe(true);
+    expect(dayUnderWay(DAY, { date: "2026-11-02", minutes: 21 * 60 + 29 })).toBe(true);
+    expect(dayUnderWay(DAY, { date: "2026-11-02", minutes: 21 * 60 + 30 })).toBe(false);
+    expect(dayUnderWay(DAY, { date: "2026-11-01", minutes: 12 * 60 })).toBe(false);
+    expect(dayUnderWay(DAY, { date: "2026-11-03", minutes: 60 })).toBe(false);
+  });
+
+  it("runs into the next morning for days that end after midnight", () => {
+    const overnight = { ...DAY, start: "16:00", end: "03:00" };
+    expect(dayUnderWay(overnight, { date: "2026-11-03", minutes: 2 * 60 + 30 })).toBe(true);
+    expect(dayUnderWay(overnight, { date: "2026-11-03", minutes: 3 * 60 })).toBe(false);
+  });
+
+  it("is false for plans without dates", () => {
+    expect(dayUnderWay({ ...DAY, date: null }, { date: "2026-11-02", minutes: 600 })).toBe(false);
+  });
+});
+
+describe("stayOptions", () => {
+  it("includes the venue's usual stay", () => {
+    expect(stayOptions(75).map((o) => o.minutes)).toEqual([15, 30, 45, 60, 75, 90, 120, 150, 180]);
+    expect(
+      stayOptions(20)
+        .map((o) => o.minutes)
+        .slice(0, 3),
+    ).toEqual([15, 20, 30]);
+    expect(stayOptions(90).find((o) => o.minutes === 90)?.label).toBe("1 h 30 min");
   });
 });

@@ -24,6 +24,7 @@ import {
 import { DEFAULT_DAY_END, DEFAULT_DAY_START, cityDate, cityNow, startingNow } from "@/lib/format";
 import { authHref } from "@/lib/navigation";
 import type {
+  DayEditRequest,
   PlaceRef,
   PlannedStop,
   PlanResponse,
@@ -34,7 +35,7 @@ import type {
   Venue,
   VenueKind,
 } from "@/lib/types";
-import { DEFAULT_RADIUS_M, type SearchPoint, defaultSearchPoint } from "@/lib/venues";
+import { DEFAULT_RADIUS_M, type SearchPoint, dayUnderWay, defaultSearchPoint } from "@/lib/venues";
 
 // Leaflet touches `window`, so the map only renders in the browser.
 const RouteMap = dynamic(() => import("@/components/RouteMap"), {
@@ -322,7 +323,7 @@ export default function Planner() {
   }
 
   /** Change a day of the trip (no AI); the result is a draft to save or discard. */
-  async function editDay(day: number, change: { remove: number[]; add: number[] }) {
+  async function editDay(day: number, change: Omit<DayEditRequest, "day">) {
     if (!trip) return false;
     setEditingDay(true);
     setEditError(null);
@@ -406,6 +407,7 @@ export default function Planner() {
   function closeVenues() {
     setPicking(null);
     setHighlightedVenue(null);
+    setEditError(null);
     if (pushedSearch.current) {
       pushedSearch.current = false;
       window.history.back();
@@ -424,6 +426,27 @@ export default function Planner() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [searching]);
+
+  // On a day under way, a place to eat is the next stop, from where the traveller is now;
+  // otherwise the day takes it when it suits (restaurants and bars in the evening).
+  const liveSearch = searchDay ? dayUnderWay(searchDay, cityNow()) : false;
+
+  /** Re-plan the search's day with a venue (no AI): a draft that opens on the route. */
+  async function addVenue(venue: Venue, stayMin: number) {
+    if (!searchDay) return false;
+    const change: Omit<DayEditRequest, "day"> =
+      liveSearch && searchPoint
+        ? {
+            add: [venue.id],
+            next: venue.id,
+            start: { lat: searchPoint.lat, lon: searchPoint.lon },
+            stay_min: stayMin,
+          }
+        : { add: [venue.id], stay_min: stayMin };
+    const added = await editDay(searchDay.day, change);
+    if (added) closeVenues();
+    return added;
+  }
 
   function selectVenue(venueId: number) {
     setHighlightedVenue(venueId);
@@ -524,6 +547,10 @@ export default function Planner() {
               onHover={setHighlightedVenue}
               planned={plannedDays}
               onBack={closeVenues}
+              live={liveSearch}
+              onAdd={addVenue}
+              adding={editingDay}
+              error={editError}
             />
           </div>
         ) : (

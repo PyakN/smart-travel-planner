@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 
 import { searchVenues } from "@/lib/api";
 import { formatDate } from "@/lib/format";
@@ -11,6 +11,7 @@ import {
   cuisineLabel,
   dietLabels,
   openingLabel,
+  stayOptions,
   venueIcon,
   venueTypeLabel,
   walkLabel,
@@ -39,6 +40,14 @@ export interface VenueSearchProps {
   /** Places on the trip already, and their day. */
   planned: ReadonlyMap<number, number>;
   onBack: () => void;
+  /** The day is under way: an added place is the next stop, from the search point now. */
+  live: boolean;
+  /** Add a venue to the day for a stay of `stayMin`, as a draft; resolves to whether it did. */
+  onAdd: (venue: Venue, stayMin: number) => Promise<boolean>;
+  /** The day is being planned again with a venue. */
+  adding: boolean;
+  /** Why adding a venue failed. */
+  error: string | null;
 }
 
 interface Filters {
@@ -78,16 +87,83 @@ const OPEN_STYLES = {
   unknown: "text-zinc-500",
 };
 
+/** How long to stay, and the button that adds the venue to the day. */
+function AddToRoute({
+  venue,
+  day,
+  live,
+  onAdd,
+  onCancel,
+  adding,
+}: {
+  venue: Venue;
+  day: number;
+  live: boolean;
+  onAdd: (stayMin: number) => void;
+  onCancel: () => void;
+  adding: boolean;
+}) {
+  const stayId = useId();
+  const [stay, setStay] = useState(venue.stay_min);
+  return (
+    <div className="mt-2 space-y-2 rounded-md bg-orange-50 p-2.5 text-xs text-zinc-700">
+      <label htmlFor={stayId} className="flex items-center gap-2">
+        Stay for
+        <select
+          id={stayId}
+          value={stay}
+          onChange={(event) => setStay(Number(event.target.value))}
+          disabled={adding}
+          className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm"
+        >
+          {stayOptions(venue.stay_min).map((option) => (
+            <option key={option.minutes} value={option.minutes}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p>
+        {live
+          ? `It becomes your next stop: day ${day} is planned again from here, now.`
+          : `Day ${day} is planned again with it, when it suits the day (restaurants and bars in the evening).`}{" "}
+        You see the changes before they are saved.
+      </p>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => onAdd(stay)}
+          disabled={adding}
+          className="rounded-lg bg-orange-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:cursor-wait disabled:bg-orange-400"
+        >
+          {adding ? "Planning the day…" : live ? "Go here next" : `Add to day ${day}`}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={adding}
+          className="text-sm text-zinc-600 hover:text-zinc-900"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function VenueCard({
   venue,
   highlighted,
   plannedDay,
   onHover,
+  children,
 }: {
   venue: Venue;
   highlighted: boolean;
   plannedDay: number | undefined;
   onHover: (venueId: number | null) => void;
+  /** The add-to-route controls. */
+  children: ReactNode;
 }) {
   const opening = openingLabel(venue);
   const details = [
@@ -146,6 +222,7 @@ function VenueCard({
           )}
         </div>
       </div>
+      {children}
     </article>
   );
 }
@@ -174,6 +251,10 @@ export default function VenueSearch({
   onHover,
   planned,
   onBack,
+  live,
+  onAdd,
+  adding,
+  error,
 }: VenueSearchProps) {
   const radiusId = useId();
   const cuisineId = useId();
@@ -189,6 +270,8 @@ export default function VenueSearch({
   const [results, setResults] = useState<Results>({ key: "", page: null, failed: false });
   const [locating, setLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
+  // The venue whose stay is being chosen.
+  const [choosing, setChoosing] = useState<number | null>(null);
 
   const query = point
     ? { lat: point.lat, lon: point.lon, radius_m: radius, ...filters, limit }
@@ -395,7 +478,34 @@ export default function VenueSearch({
                 highlighted={highlighted === venue.id}
                 plannedDay={planned.get(venue.id)}
                 onHover={onHover}
-              />
+              >
+                {planned.has(venue.id) ? null : choosing === venue.id ? (
+                  <AddToRoute
+                    venue={venue}
+                    day={day.day}
+                    live={live}
+                    onAdd={(stay) => onAdd(venue, stay)}
+                    onCancel={() => setChoosing(null)}
+                    adding={adding}
+                  />
+                ) : (
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setChoosing(venue.id)}
+                      disabled={adding}
+                      className="rounded-md bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-900 hover:bg-orange-200"
+                    >
+                      Add to route
+                    </button>
+                  </div>
+                )}
+                {choosing === venue.id && error && (
+                  <p role="alert" className="mt-2 text-xs text-red-700">
+                    {error}
+                  </p>
+                )}
+              </VenueCard>
             </li>
           ))}
         </ul>

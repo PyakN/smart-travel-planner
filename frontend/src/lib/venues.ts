@@ -1,4 +1,4 @@
-import { formatDistance } from "./format";
+import { clockMinutes, dayLength, formatDistance, formatDuration } from "./format";
 import type { OpenState, PlannedDay, StartPoint, TripVisit, Venue, VenueType } from "./types";
 
 const VENUE_TYPES: Record<VenueType, { label: string; icon: string }> = {
@@ -96,3 +96,35 @@ export function defaultSearchPoint(
 /** Search radius choices, in metres (the backend takes 250 m to 2 km). */
 export const RADIUS_OPTIONS = [250, 500, 1000, 2000];
 export const DEFAULT_RADIUS_M = 500;
+
+const MINUTES_PER_DAY = 24 * 60;
+
+/** Days between two "YYYY-MM-DD" dates. */
+function daysBetween(from: string, to: string): number {
+  const utc = (date: string) => {
+    const [year, month, day] = date.split("-").map(Number);
+    return Date.UTC(year, month - 1, day);
+  };
+  return Math.round((utc(to) - utc(from)) / (MINUTES_PER_DAY * 60_000));
+}
+
+/**
+ * Whether trip day `day` is today and not over yet (it may not have begun): then a place
+ * added to it is the next stop, from where the traveller is now. `now` is the city's.
+ */
+export function dayUnderWay(
+  day: Pick<PlannedDay, "date" | "start" | "end">,
+  now: { date: string; minutes: number },
+): boolean {
+  if (!day.date || !day.start || !day.end) return false;
+  const elapsed = daysBetween(day.date, now.date) * MINUTES_PER_DAY + now.minutes;
+  return elapsed >= 0 && elapsed < clockMinutes(day.start) + dayLength(day.start, day.end);
+}
+
+const STAYS = [15, 30, 45, 60, 75, 90, 120, 150, 180];
+
+/** Stays to choose from, with the venue's usual one among them. */
+export function stayOptions(usual: number): { minutes: number; label: string }[] {
+  const minutes = [...new Set([...STAYS, usual])].sort((a, b) => a - b);
+  return minutes.map((m) => ({ minutes: m, label: formatDuration(m) }));
+}
