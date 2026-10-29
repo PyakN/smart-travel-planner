@@ -245,7 +245,10 @@ export default function RouteMap({
           ))}
           {active.stops.map((s, i) => (
             <Marker
-              key={s.place_id}
+              // While a point is picked, a click on a marker sets it there: markers let
+              // clicks through then. Leaflet reads `interactive` once, hence the key.
+              key={`${s.place_id}-${picking}`}
+              interactive={!picking}
               position={[s.lat, s.lon]}
               icon={stopIcon(i + 1, dayColor(active.day), highlightedStop === s.place_id)}
               zIndexOffset={highlightedStop === s.place_id ? 1000 : 0}
@@ -279,7 +282,8 @@ export default function RouteMap({
           />
           {venues.map((venue) => (
             <Marker
-              key={venue.id}
+              key={`${venue.id}-${picking}`}
+              interactive={!picking}
               position={[venue.lat, venue.lon]}
               icon={venueMarker(venue, highlightedVenue === venue.id)}
               zIndexOffset={highlightedVenue === venue.id ? 1000 : 500}
