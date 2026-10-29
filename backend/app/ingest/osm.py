@@ -61,10 +61,17 @@ CATEGORY_RULES: list[tuple[str, frozenset[str], str]] = [
 # Small memorials that are not worth a walk.
 SKIP_MEMORIAL_TYPES = frozenset({"plaque", "blue_plaque", "stolperstein"})
 SKIP_ACCESS = frozenset({"private", "no"})
-# Venues OSM still maps after they closed, named like "Alma (closed)", "Solmar (Fechada)".
-CLOSED_NAME = re.compile(r"\((closed|fechad[ao]s?|encerrad[ao]s?)\)", re.IGNORECASE)
-# ...or with opening hours that say so ("Fechado permanentemente", "Fechado temporariamente").
-CLOSED_HOURS = re.compile(r"\s*(off|closed|fechad[ao]|encerrad[ao])\b", re.IGNORECASE)
+# Closed, in English, Portuguese, German, Spanish and Catalan.
+_CLOSED = r"closed|fechad[ao]s?|encerrad[ao]s?|geschlossen|cerrad[ao]s?|tancats?|tancad[ae]s?"
+# Places OSM still maps after they closed, named like "Alma (closed)", "Solmar (Fechada)",
+# "Kantine (bis vsl 2027 geschlossen)".
+CLOSED_NAME = re.compile(rf"\((?:[^()]*\s)?({_CLOSED})\)", re.IGNORECASE)
+# ...or venues with opening hours that say so ("Fechado permanentemente", "Cerrado
+# temporalmente", "vorübergehend geschlossen"), unlike "Su off" or "Mo geschlossen".
+CLOSED_HOURS = re.compile(
+    rf"\s*((vorübergehend|temporär|zurzeit|dauerhaft|bis auf weiteres)\s+)?(off|{_CLOSED})\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)

@@ -105,6 +105,27 @@ class TestParseElements:
         )
         assert [r.name for r in records] == ["Tasca", "Museu do Azulejo"]
 
+    def test_skips_closed_places_in_german_spanish_and_catalan(self) -> None:
+        def cafe(osm_id: int, name: str, **tags: str) -> dict[str, Any]:
+            return node(osm_id, 52.5, 13.4, name=name, amenity="cafe", **tags)
+
+        records = parse_elements(
+            [
+                node(1, 52.5, 13.4, name="Das Verborgene Museum (geschlossen)", tourism="museum"),
+                cafe(2, "Kantine (bis vsl 2027 geschlossen)"),
+                cafe(3, "Bar Pinotxo (Tancat)"),
+                cafe(4, "Casa Lola (cerrada)"),
+                cafe(5, "AM to PM", opening_hours="zurzeit geschlossen"),
+                cafe(6, "Ma Maison", opening_hours="Vorübergehend geschlossen"),
+                cafe(7, "Planxados", opening_hours="Cerrado permanentemente"),
+                cafe(8, "Xurreria", opening_hours="Tancat temporalment"),
+                # Closed on one day only, and a memorial to a sit-in ("tancada"), stay.
+                cafe(9, "Curry 36", opening_hours="Mo geschlossen"),
+                node(10, 41.4, 2.2, name="La tancada de dones", historic="memorial"),
+            ]
+        )
+        assert [r.name for r in records] == ["Curry 36", "La tancada de dones"]
+
     def test_every_named_venue(self) -> None:
         records = parse_elements(
             [
