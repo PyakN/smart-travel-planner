@@ -78,6 +78,8 @@ async def save_trip(
     session: AsyncSession, user: User, plan: PlanResponse, title: str | None
 ) -> tuple[Trip, bool]:
     """Save `plan` as a trip; True if new. A plan the user saved already gives that trip."""
+    # One save at a time per user: two saves of a plan at once still make one trip.
+    await session.execute(select(User.id).where(User.id == user.id).with_for_update())
     saved = await session.scalar(
         select(Trip).where(Trip.user_id == user.id, Trip.plan_id == plan.id).order_by(Trip.id)
     )

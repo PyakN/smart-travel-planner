@@ -7,8 +7,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
-from app.db.models import Trip
+from app.db.models import Trip, User
 from app.ingest.cities import CITIES
+from app.services.saved_trips import save_trip
+from app.services.trip_planner import get_plan
 from tests.fakes import FakeProvider
 from tests.integration.conftest import SessionFactory, session_token, sign_up, use_session
 from tests.integration.test_replace_api import FIRST_DAY, TESTVILLE, create_plan, picks, replace
@@ -56,6 +58,27 @@ def test_save_and_open_a_trip(visitor: TestClient, plan: dict[str, Any]) -> None
     assert again.status_code == 200 and again.json()["id"] == trip["id"]
     sign_up(visitor, "Bo")
     assert save(visitor, plan["id"], title="  Testville with Bo ")["title"] == "Testville with Bo"
+
+
+def test_saving_twice_at_once_makes_one_trip(
+    visitor: TestClient, plan: dict[str, Any], db_session: SessionFactory
+) -> None:
+    user_id = sign_up(visitor)["id"]
+
+    async def save_once() -> int:
+        async with db_session() as session:
+            user = await session.get(User, user_id)
+            saved = await get_plan(session, plan["id"])
+            assert user is not None and saved is not None
+            trip, _ = await save_trip(session, user, saved, None)
+            return trip.id
+
+    async def race() -> list[int]:
+        return list(await asyncio.gather(save_once(), save_once()))
+
+    first, second = asyncio.run(race())
+    assert first == second
+    assert [t["id"] for t in visitor.get("/trips").json()] == [first]
 
 
 def test_trips_are_listed_newest_change_first(
