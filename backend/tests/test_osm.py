@@ -1,11 +1,16 @@
+import asyncio
 from typing import Any
+
+import httpx
 
 from app.ingest.cities import CITIES
 from app.ingest.osm import (
+    OVERPASS_URLS,
     PlaceRecord,
     build_query,
     categorize,
     deduplicate,
+    fetch_elements,
     normalize_name,
     parse_elements,
 )
@@ -172,3 +177,22 @@ def test_build_query_covers_every_rule_and_bbox() -> None:
     assert "viewpoint" in query and "place_of_worship" in query and "nightclub" in query
     assert "ice_cream" in query and "pastry" in query
     assert query.endswith("out center tags;")
+
+
+def test_fetch_elements_skips_a_mirror_whose_query_ran_out_of_time() -> None:
+    answers = {
+        OVERPASS_URLS[0]: {
+            "elements": [{"id": 1}],
+            "remark": 'runtime error: Query timed out in "query" at line 3 after 181 seconds.',
+        },
+        OVERPASS_URLS[1]: {"elements": [{"id": 1}, {"id": 2}]},
+    }
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, json=answers[str(request.url)])
+    )
+
+    async def fetch() -> list[dict[str, Any]]:
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await fetch_elements("[out:json];", client)
+
+    assert asyncio.run(fetch()) == [{"id": 1}, {"id": 2}]

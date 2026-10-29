@@ -113,7 +113,12 @@ async def fetch_elements(query: str, client: httpx.AsyncClient) -> list[dict[str
                 url, data={"data": query}, headers={"User-Agent": USER_AGENT}, timeout=240
             )
             response.raise_for_status()
-            return cast(list[dict[str, Any]], response.json()["elements"])
+            payload = response.json()
+            # A query that runs out of time or memory still answers 200, with only part of
+            # the elements and a remark that says so.
+            if "runtime error" in payload.get("remark", ""):
+                raise ValueError(payload["remark"])
+            return cast(list[dict[str, Any]], payload["elements"])
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             last_error = exc
     raise RuntimeError("All Overpass mirrors failed") from last_error
