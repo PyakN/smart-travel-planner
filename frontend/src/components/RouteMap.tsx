@@ -3,7 +3,7 @@
 import "leaflet/dist/leaflet.css";
 
 import L from "leaflet";
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import {
   CircleMarker,
   MapContainer,
@@ -104,6 +104,23 @@ function PickStart({ enabled, onPick }: { enabled: boolean; onPick: RouteMapProp
   return null;
 }
 
+/**
+ * Whether the map is on screen. Next.js keeps a page it navigates away from (React Activity):
+ * hidden, with its effects cleaned up, then shown again on the way back. react-leaflet removes
+ * its Leaflet map in that cleanup but never makes a new one, and the layers would then draw on
+ * the removed map. So the map is unmounted while hidden and made afresh each time it is shown.
+ */
+function useShown(): boolean {
+  const [shown, setShown] = useState(false);
+  useLayoutEffect(() => {
+    // The effect is the only signal that the page was shown again, so it sets the state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setShown(true);
+    return () => setShown(false);
+  }, []);
+  return shown;
+}
+
 export default function RouteMap({
   plan,
   selectedDay,
@@ -113,6 +130,7 @@ export default function RouteMap({
   onPick,
   highlightedStop,
 }: RouteMapProps) {
+  const shown = useShown();
   const days = plan?.days ?? [];
   const active = days.find((d) => d.day === selectedDay);
   const fitPoints: L.LatLngTuple[] = active
@@ -122,6 +140,7 @@ export default function RouteMap({
       ]
     : [];
 
+  if (!shown) return <div className="h-full w-full bg-zinc-200" />;
   return (
     <MapContainer
       center={LISBON}
