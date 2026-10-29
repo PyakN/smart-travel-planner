@@ -34,7 +34,7 @@ pip install -e ".[dev]" pre-commit
 
 # 4. Schema + data (from backend/)
 alembic upgrade head
-python -m app.ingest lisbon        # ~2.7k POIs from OpenStreetMap, ~1 min
+python -m app.ingest lisbon        # ~7.2k places from OpenStreetMap (5k to eat and drink), ~1 min
 python -m app.ingest.enrich lisbon # photos + descriptions from Wikimedia, ~1 min
 
 # 5. Frontend
@@ -79,6 +79,7 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 | `DELETE /trips/{id}` | Delete a trip (its plans stay readable by their links) |
 | `PUT` · `DELETE /trips/{id}/visits/{place_id}` | Tick a stop of the trip's current plan visited · untick it |
 | `POST /trips/{id}/edit` | **Edit a day of a trip** (no AI): `{"day", "remove"?: [place ids], "add"?: [place ids], "next"?: place id, "start"?: {"lat", "lon"}, "stay_min"?}` → a draft: a new plan version the trip uses once `PATCH` saves it, with an `edit` listing what was removed, added and dropped (and why) |
+| `GET /venues` | **Places to eat and drink** near `lat`+`lon` within `radius_m` (250–2000, default 500): `kind` (`food` or `drinks`), `cuisine`, `vegetarian`, `vegan`, `open_now`, `outdoor_seating`, `limit`; closest first, with the cuisines in range |
 
 Example: museums and viewpoints within 400 m of Praça do Comércio:
 
@@ -93,7 +94,7 @@ curl -X POST localhost:8000/plan -H "Content-Type: application/json" \
   -d '{"text": "2 days in Lisbon: viewpoints, the castle and Belém", "start": {"lat": 38.7139, "lon": -9.1394}}'
 ```
 
-Plans suggest sights only: never restaurants, bars, pubs, clubs or fado houses, even when the request names them (a request that asks for food or nightlife gets a note saying so). Add the ones you want as must-visit places: they are planned when they open, dinner and bars from 20:00.
+Plans suggest sights only: never restaurants, cafés, bars, pubs, clubs or fado houses, even when the request names them (a request that asks for food or nightlife gets a note saying so). On a saved trip, [find places to eat and drink](#places-to-eat-and-drink) near your stops and add them to the day; or add the ones you want as must-visit places: they are planned when they open, dinner and bars from 20:00.
 
 Must-visit places are ids from `GET /places?q=...`. They always get a slot on some day if they fit its time budget: trimmed only after every optional stop, and moved to another day when their own day overflows. `modes`: walking only rides nothing, transit only rides every leg over 1 km, both (the default) ride legs over 2.5 km.
 
@@ -131,13 +132,26 @@ The frontend has log-in and sign-up pages, My trips (rename, delete, delete the 
 
 - **Visited stops stay first**, in their planned order, as they were.
 - **Where the rest begins:** with `start` (the traveller's location), from there: from now on when the day is under way, else from where the visited stops end. Without it, from the last visited stop, or as the day begins. A day whose hours are over cannot be planned from now (422).
-- **`next`** (a stop of the day, or a place to add) is visited first; the other stops are reordered from it. The day keeps its end: back at the hotel on round trips, else open.
+- **`next`** (a stop of the day, or a place to add) is visited first; the other stops are reordered from it. The day keeps its end: back at the hotel on round trips, else open. A place to eat or drink chosen as the next stop is visited when you get there, not held to the hours its kind usually keeps (dinner and bars from 20:00).
 - **Stays:** `stay_min` sets how long to stay at the added places and the next stop (5 min to 8 h; by default the usual visit of their kind). Chosen stays stay with the plan in later edits.
 - **When stops drop:** the pace no longer limits the day, only its end time plus 30 minutes. Beyond that, or when a place would be reached closed or dark, the least important stop goes, but only one whose leaving makes the day shorter (an afternoon sight stays when the evening runs long). Visited, must-visit, added and next stops never drop; when they alone run long, the draft warns instead.
 - **Every dropped stop says why** in `edit.dropped`: "The day would end at 23:10 instead of 21:30." or "It would be closed, or dark, by the time you get there."
+- **Opening hours** of the places chosen in the edit (OSM `opening_hours`) are checked against their visits: the draft warns when one is closed when you get there, or closes before you leave ("By its opening hours, Corner Pub is closed at 15:35.").
 - A stop whose way starts at the traveller's location has a `departure` (where and when); the map draws nothing between the last visited stop and there.
 
-The frontend offers taking stops out and adding places; the traveller's location and the next stop come with the search for places to eat (see the roadmap).
+The frontend's "Edit day" takes stops out and adds places; the traveller's location and the next stop come from the search for places to eat and drink.
+
+### Places to eat and drink
+
+`GET /venues` searches the city's places to eat and drink near a point (`ST_DWithin` on the GIST index, ~100 ms for the 2,100 venues within 2 km of Rossio):
+
+- **Data:** every named venue in OpenStreetMap: restaurants and fast food (`restaurant`), cafés, ice cream and pastry shops (`cafe`), bars, pubs, clubs and music venues (`nightlife`), skipping those whose name or opening hours say they closed. In Lisbon: 3,167, 1,392 and ~400. Their cuisine, `diet:*`, `opening_hours` and `outdoor_seating` tags come along. OSM has no ratings or prices.
+- **Opening hours** are read with [opening-hours-py](https://pypi.org/project/opening-hours-py/), in the city's time and with its public holidays: each venue is open, closed or unknown now and when you walk there, and says when that changes (within a day). About 3% of Lisbon's hours are written as prose: they count as unknown, like venues without hours.
+- **Filters:** `kind` (`food`: restaurants and cafés; `drinks`: bars and nightlife), `cuisine` (an OSM value, e.g. `portuguese`), `vegetarian` (vegan places count), `vegan`, `open_now` (open by the time you walk there; unknown hours do not count) and `outdoor_seating`. The page lists the cuisines in range that the other filters leave, most common first.
+- **Order:** by the minute of walking (straight line × 1.3 at 4 km/h), then the venues with the most complete data (hours, cuisine, diets, seating, website, phone), then distance.
+- **Each venue** has its kind (`venue_type`), cuisines, diets (`"only"` for a vegetarian restaurant), outdoor seating, opening hours with `open_now`, `open_on_arrival` and `changes_at`, distance, walk and a usual stay (`stay_min`: café 30 min, bar 60, restaurant 75).
+
+In the frontend, "Find places to eat" on a saved day turns the sidebar into the search (`?trip=<id>&eat=1`), with the route still on the map: near your location ("Use my location"), a pin on the map, or by default the day's last visited stop. Results are cards and markers; "← Back to route", the browser's Back and Esc leave it. A free evening links to the search around the day's last stop. **Add to route** asks how long to stay and edits the day through `POST /trips/{id}/edit`: on a day under way, with the pin as `start` and the venue as `next` (go there now, then the rest, back to the hotel); on another day, as a place added to it, which the optimizer fits in when it suits (restaurants and bars in the evening). The draft opens on the route, with the approval step for any stops it drops.
 
 ## LLM layer
 
@@ -190,9 +204,10 @@ and says so in the warnings).
   of a 12 h day at a moderate pace); a day from 16:00 to 21:30 gets 3 h 40 min and 3 places
   instead of 6.
 - **When places can be visited** (`app/catalog.py`, `hours` on every stop): indoor sights
-  close at 20:00 (`day`), outdoor sights need daylight (`daylight`), bars, pubs, clubs, fado
-  houses and restaurants open at 20:00 (`night`; planned only as must-visit places), and lit
-  squares and places whose OSM opening hours run past 22:00 suit both (`any`). Sunrise and
+  and cafés close at 20:00 (`day`), outdoor sights need daylight (`daylight`), bars, pubs,
+  clubs, fado houses and restaurants open at 20:00 (`night`; planned only when you choose
+  them, and visited at once as the next stop of a day edit), and lit squares and places
+  whose OSM opening hours run past 22:00 suit both (`any`). Sunrise and
   sunset come from the sunrise equation for every trip day (`app/sun.py`), or from the
   forecast on weather-aware plans.
 - **Routing with time windows:** a visit that comes early waits for the place to open (the
@@ -211,10 +226,10 @@ and says so in the warnings).
   last stop gets `free_from`, and the plan shows "Free time from 21:40 until 03:00" after
   that stop. A day from 16:00 to 03:00 has afternoon sights, a lit square or two, and a free
   evening.
-- **Data:** `python -m app.ingest lisbon --refresh` imports bars, pubs, clubs and music
-  venues (`nightlife`), fado and Wikidata-notable restaurants (`restaurant`) and named
-  squares (`landmark`), skipping venues named as closed: 406, 48 and ~90 in Lisbon. Bars
-  and restaurants are there for the must-visit search.
+- **Data:** `python -m app.ingest lisbon --refresh` imports named squares (`landmark`,
+  ~90 in Lisbon) and every place to eat and drink (see
+  [Places to eat and drink](#places-to-eat-and-drink)), which plans never suggest: they are
+  there for the venue search and the must-visit search.
 
 Limits: indoor sights all close at 20:00 and open whenever the day starts, whatever their
 own opening hours say (Museu do Fado closes at 18:00); a day only waits for places to
