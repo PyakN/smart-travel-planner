@@ -3,11 +3,12 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { useAuth } from "@/components/AuthProvider";
 import PlanForm from "@/components/PlanForm";
 import PlanResult from "@/components/PlanResult";
+import VenueSearch, { venueCardId } from "@/components/VenueSearch";
 import {
   ApiError,
   createPlan,
@@ -22,7 +23,18 @@ import {
 } from "@/lib/api";
 import { DEFAULT_DAY_END, DEFAULT_DAY_START, cityDate, cityNow, startingNow } from "@/lib/format";
 import { authHref } from "@/lib/navigation";
-import type { PlaceRef, PlanResponse, StartPoint, TravelMode, Trip, TripVisit } from "@/lib/types";
+import type {
+  PlaceRef,
+  PlannedStop,
+  PlanResponse,
+  StartPoint,
+  TravelMode,
+  Trip,
+  TripVisit,
+  Venue,
+  VenueKind,
+} from "@/lib/types";
+import { DEFAULT_RADIUS_M, type SearchPoint, defaultSearchPoint } from "@/lib/venues";
 
 // Leaflet touches `window`, so the map only renders in the browser.
 const RouteMap = dynamic(() => import("@/components/RouteMap"), {
@@ -91,9 +103,20 @@ export default function Planner() {
   const [editError, setEditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [picking, setPicking] = useState(false);
+  // Picking a point on the map: the trip's start, or where the venue search looks.
+  const [picking, setPicking] = useState<"start" | "venues" | null>(null);
   const [selectedDay, setSelectedDay] = useState(1);
   const [highlightedStop, setHighlightedStop] = useState<number | null>(null);
+  // The venue search of a saved trip (?trip=<id>&eat=1): what it looks for and where (null:
+  // the default point), and what it found.
+  const [venueKind, setVenueKind] = useState<VenueKind | null>("food");
+  const [venuePoint, setVenuePoint] = useState<SearchPoint | null>(null);
+  const [radius, setRadius] = useState(DEFAULT_RADIUS_M);
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [highlightedVenue, setHighlightedVenue] = useState<number | null>(null);
+  // The search was opened from the route, so Back to route is the browser's Back.
+  const pushedSearch = useRef(false);
+  const sidebar = useRef<HTMLElement>(null);
 
   const sharedId = idParam(params.get("plan"));
   const tripId = idParam(params.get("trip"));
@@ -110,6 +133,13 @@ export default function Planner() {
       ? draft.plan
       : null;
   const shown = tripDraft ?? plan;
+  // Live editing needs a saved trip: the search is for trips only.
+  const searching = trip !== null && shown !== null && params.get("eat") === "1";
+  const searchDay = shown?.days.find((d) => d.day === selectedDay) ?? shown?.days[0];
+  const searchPoint =
+    venuePoint ??
+    (trip && searchDay ? defaultSearchPoint(searchDay, trip.visits, shown?.start ?? null) : null);
+  const pickingNow = picking === (searching ? "venues" : "start");
 
   /** Show a saved plan, with its request in the form for planning it again. */
   const showSaved = useEffectEvent((saved: PlanResponse) => {
@@ -242,7 +272,7 @@ export default function Planner() {
 
   async function submit() {
     setStatus({ kind: "loading" });
-    setPicking(false);
+    setPicking(null);
     try {
       const created = await createPlan({
         text: text.trim(),
@@ -356,6 +386,52 @@ export default function Planner() {
     }
   }
 
+  /** Search places to eat and drink for a day of the trip, around a stop or where the
+   * traveller is (by default, the stop they visited last). */
+  function openVenues(day: number, kind: VenueKind | null, near: PlannedStop | null) {
+    if (!trip) return;
+    setSelectedDay(day);
+    setVenueKind(kind);
+    setVenuePoint(
+      near && { lat: near.lat, lon: near.lon, label: `${near.name}, the day's last stop` },
+    );
+    setVenues([]);
+    setHighlightedVenue(null);
+    setPicking(null);
+    window.history.pushState(null, "", `?trip=${trip.id}&eat=1`);
+    pushedSearch.current = true;
+    sidebar.current?.scrollTo({ top: 0 });
+  }
+
+  function closeVenues() {
+    setPicking(null);
+    setHighlightedVenue(null);
+    if (pushedSearch.current) {
+      pushedSearch.current = false;
+      window.history.back();
+    } else if (trip) {
+      window.history.replaceState(null, "", `?trip=${trip.id}`);
+    }
+  }
+
+  // Esc leaves the search (or stops pinning a point first), like Back to route.
+  const onEscape = useEffectEvent(() => (picking ? setPicking(null) : closeVenues()));
+  useEffect(() => {
+    if (!searching) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onEscape();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [searching]);
+
+  function selectVenue(venueId: number) {
+    setHighlightedVenue(venueId);
+    document
+      .getElementById(venueCardId(venueId))
+      ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
   /** Tick a stop of the trip visited, or untick it; shown at once, undone if it fails. */
   async function toggleVisited(placeId: number, visited: boolean) {
     if (!trip) return;
@@ -391,6 +467,11 @@ export default function Planner() {
     }
   }
 
+  // Places on the trip already, by day: the search says so instead of adding them again.
+  const plannedDays = new Map(
+    (shown?.days ?? []).flatMap((d) => d.stops.map((s) => [s.place_id, d.day] as const)),
+  );
+
   return (
     <div className="flex h-full flex-col lg:flex-row">
       <main className="relative order-1 h-[42dvh] shrink-0 lg:order-2 lg:h-auto lg:flex-1">
@@ -399,106 +480,140 @@ export default function Planner() {
           selectedDay={selectedDay}
           onSelectDay={setSelectedDay}
           start={start}
-          picking={picking}
+          picking={pickingNow}
           onPick={(lat, lon) => {
-            setStart({ lat, lon, round_trip: start?.round_trip ?? false });
-            setPicking(false);
+            if (picking === "venues") {
+              setVenuePoint({ lat, lon, label: "the pin on the map" });
+            } else {
+              setStart({ lat, lon, round_trip: start?.round_trip ?? false });
+            }
+            setPicking(null);
           }}
           highlightedStop={highlightedStop}
+          venues={searching ? venues : []}
+          search={searching && searchPoint ? { ...searchPoint, radius_m: radius } : null}
+          highlightedVenue={highlightedVenue}
+          onSelectVenue={selectVenue}
         />
-        {picking && (
+        {pickingNow && (
           <div className="pointer-events-none absolute inset-x-0 top-3 z-[1000] flex justify-center">
             <span className="rounded-full bg-zinc-900/85 px-3 py-1.5 text-xs text-white shadow">
-              Click the map to set your start point
+              {searching ? "Click the map where you are" : "Click the map to set your start point"}
             </span>
           </div>
         )}
       </main>
 
-      <aside className="order-2 min-h-0 flex-1 overflow-y-auto border-zinc-200 bg-zinc-50 lg:order-1 lg:w-[440px] lg:flex-none lg:border-r">
-        <div className="space-y-5 p-4 lg:p-6">
-          <header>
-            <h1 className="text-xl font-semibold tracking-tight text-zinc-900">
-              Plan your Lisbon trip
-            </h1>
-            <p className="text-sm text-zinc-500">
-              An AI picks the places, an optimizer plans the walk.
-            </p>
-          </header>
-
-          {tripNeedsLogIn && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-              This link opens a saved trip, which only its owner can see.{" "}
-              <Link
-                href={authHref("/login", `/?trip=${tripId}`)}
-                className="font-medium underline hover:text-blue-950"
-              >
-                Log in
-              </Link>{" "}
-              to open it.
-            </div>
-          )}
-
-          <PlanForm
-            text={text}
-            onTextChange={setText}
-            start={start}
-            picking={picking}
-            onTogglePicking={() => setPicking((p) => !p)}
-            onClearStart={() => setStart(null)}
-            onToggleRoundTrip={() => setStart((s) => (s ? { ...s, round_trip: !s.round_trip } : s))}
-            mustVisit={mustVisit}
-            onMustVisitChange={setMustVisit}
-            modes={modes}
-            onModesChange={setModes}
-            startDate={startDate}
-            onStartDateChange={changeStartDate}
-            weatherAware={weatherAware}
-            onWeatherAwareChange={setWeatherAware}
-            startTime={startTime}
-            onStartTimeChange={setPickedStart}
-            endTime={endTime}
-            onEndTimeChange={setEndTime}
-            laterStartTime={today ? laterStart : null}
-            onLaterStartTimeChange={setLaterStart}
-            nowMinutes={today ? now.minutes : null}
-            loading={status.kind === "loading"}
-            onSubmit={submit}
-          />
-
-          {status.kind === "error" && (
-            <div
-              role="alert"
-              className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
-            >
-              {status.message}
-            </div>
-          )}
-
-          {shown && (
-            <PlanResult
-              plan={shown}
-              trip={trip}
-              draft={tripDraft !== null}
-              onSaveDraft={saveDraft}
-              onDiscardDraft={discardDraft}
-              applying={applying}
-              onEditDay={trip ? editDay : null}
-              editingDay={editingDay}
-              onToggleVisited={toggleVisited}
-              onSave={save}
-              saving={saving}
-              saveError={saveError}
-              selectedDay={selectedDay}
-              onSelectDay={setSelectedDay}
-              onHoverStop={setHighlightedStop}
-              onReplace={replace}
-              replacing={replacing}
-              editError={editError}
-              onUndo={shown.parent_id && !tripDraft ? undo : null}
+      <aside
+        ref={sidebar}
+        className="order-2 min-h-0 flex-1 overflow-y-auto border-zinc-200 bg-zinc-50 lg:order-1 lg:w-[440px] lg:flex-none lg:border-r"
+      >
+        {searching && searchDay ? (
+          <div className="p-4 lg:p-6">
+            <VenueSearch
+              day={searchDay}
+              point={searchPoint}
+              onPointChange={setVenuePoint}
+              radius={radius}
+              onRadiusChange={setRadius}
+              picking={pickingNow}
+              onTogglePicking={() => setPicking((p) => (p === "venues" ? null : "venues"))}
+              initialKind={venueKind}
+              onResults={setVenues}
+              highlighted={highlightedVenue}
+              onHover={setHighlightedVenue}
+              planned={plannedDays}
+              onBack={closeVenues}
             />
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="space-y-5 p-4 lg:p-6">
+            <header>
+              <h1 className="text-xl font-semibold tracking-tight text-zinc-900">
+                Plan your Lisbon trip
+              </h1>
+              <p className="text-sm text-zinc-500">
+                An AI picks the places, an optimizer plans the walk.
+              </p>
+            </header>
+
+            {tripNeedsLogIn && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                This link opens a saved trip, which only its owner can see.{" "}
+                <Link
+                  href={authHref("/login", `/?trip=${tripId}`)}
+                  className="font-medium underline hover:text-blue-950"
+                >
+                  Log in
+                </Link>{" "}
+                to open it.
+              </div>
+            )}
+
+            <PlanForm
+              text={text}
+              onTextChange={setText}
+              start={start}
+              picking={pickingNow}
+              onTogglePicking={() => setPicking((p) => (p === "start" ? null : "start"))}
+              onClearStart={() => setStart(null)}
+              onToggleRoundTrip={() =>
+                setStart((s) => (s ? { ...s, round_trip: !s.round_trip } : s))
+              }
+              mustVisit={mustVisit}
+              onMustVisitChange={setMustVisit}
+              modes={modes}
+              onModesChange={setModes}
+              startDate={startDate}
+              onStartDateChange={changeStartDate}
+              weatherAware={weatherAware}
+              onWeatherAwareChange={setWeatherAware}
+              startTime={startTime}
+              onStartTimeChange={setPickedStart}
+              endTime={endTime}
+              onEndTimeChange={setEndTime}
+              laterStartTime={today ? laterStart : null}
+              onLaterStartTimeChange={setLaterStart}
+              nowMinutes={today ? now.minutes : null}
+              loading={status.kind === "loading"}
+              onSubmit={submit}
+            />
+
+            {status.kind === "error" && (
+              <div
+                role="alert"
+                className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+              >
+                {status.message}
+              </div>
+            )}
+
+            {shown && (
+              <PlanResult
+                plan={shown}
+                trip={trip}
+                draft={tripDraft !== null}
+                onSaveDraft={saveDraft}
+                onDiscardDraft={discardDraft}
+                applying={applying}
+                onEditDay={trip ? editDay : null}
+                editingDay={editingDay}
+                onFindVenues={trip ? openVenues : null}
+                onToggleVisited={toggleVisited}
+                onSave={save}
+                saving={saving}
+                saveError={saveError}
+                selectedDay={selectedDay}
+                onSelectDay={setSelectedDay}
+                onHoverStop={setHighlightedStop}
+                onReplace={replace}
+                replacing={replacing}
+                editError={editError}
+                onUndo={shown.parent_id && !tripDraft ? undo : null}
+              />
+            )}
+          </div>
+        )}
       </aside>
     </div>
   );

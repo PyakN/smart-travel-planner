@@ -31,3 +31,33 @@ body {
   height: 30px;
   background: var(--color-zinc-900);
 }
+
+.venue-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid white;
+  border-radius: 9999px;
+  font-size: 14px;
+  line-height: 1;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  transition:
+    width 0.15s,
+    height 0.15s;
+}
+
+.venue-marker-food {
+  background: var(--color-orange-100);
+  border-color: var(--color-orange-500);
+}
+
+.venue-marker-drinks {
+  background: var(--color-violet-100);
+  border-color: var(--color-violet-500);
+}
+
+.search-pin {
+  font-size: 26px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.4));
+}

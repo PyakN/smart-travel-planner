@@ -11,6 +11,8 @@ import type {
   TripUpdate,
   TripVisit,
   User,
+  VenuePage,
+  VenueQuery,
 } from "./types";
 
 /** Same-origin prefix; next.config.ts proxies it to the FastAPI backend. */
@@ -90,6 +92,19 @@ export function searchPlaces(
 ) {
   const params = new URLSearchParams({ q: query, city, limit: String(limit) });
   return request<PlacePage>(`/places?${params}`, { method: "GET", signal }, fetchImpl);
+}
+
+/** Places to eat and drink near a point, closest first; filters left out (or false) are off. */
+export function searchVenues(
+  query: VenueQuery,
+  { signal }: { signal?: AbortSignal } = {},
+  fetchImpl: typeof fetch = fetch,
+) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && value !== false) params.set(key, String(value));
+  }
+  return request<VenuePage>(`/venues?${params}`, { method: "GET", signal }, fetchImpl);
 }
 
 /** Creates an account and logs in: the backend sets an HttpOnly session cookie. */

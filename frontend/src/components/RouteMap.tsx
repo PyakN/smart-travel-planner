@@ -5,6 +5,7 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useEffect, useLayoutEffect, useState } from "react";
 import {
+  Circle,
   CircleMarker,
   MapContainer,
   Marker,
@@ -17,7 +18,8 @@ import {
 } from "react-leaflet";
 
 import { categoryLabel, dayColor, rideName } from "@/lib/format";
-import type { LonLat, PlanResponse, RouteSegment, StartPoint } from "@/lib/types";
+import type { LonLat, PlanResponse, RouteSegment, StartPoint, Venue } from "@/lib/types";
+import { openingLabel, venueIcon, venueTypeLabel } from "@/lib/venues";
 
 const LISBON: L.LatLngTuple = [38.7223, -9.1393];
 const INACTIVE = "#94a3b8";
@@ -39,6 +41,12 @@ export interface RouteMapProps {
   picking: boolean;
   onPick: (lat: number, lon: number) => void;
   highlightedStop: number | null;
+  /** Places to eat and drink found around `search`, shown while searching. */
+  venues?: Venue[];
+  /** Where the venue search looks, and how far. */
+  search?: { lat: number; lon: number; radius_m: number } | null;
+  highlightedVenue?: number | null;
+  onSelectVenue?: (venueId: number) => void;
 }
 
 function toLatLng([lon, lat]: LonLat): L.LatLngTuple {
@@ -54,6 +62,24 @@ function stopIcon(label: number, color: string, highlighted: boolean): L.DivIcon
     iconAnchor: [size / 2, size / 2],
   });
 }
+
+function venueMarker(venue: Venue, highlighted: boolean): L.DivIcon {
+  const size = highlighted ? 34 : 26;
+  const kind = venue.category === "nightlife" ? "drinks" : "food";
+  return L.divIcon({
+    className: "",
+    html: `<div class="venue-marker venue-marker-${kind}" style="width:${size}px;height:${size}px">${venueIcon(venue.venue_type)}</div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+const pinIcon = L.divIcon({
+  className: "",
+  html: '<div class="search-pin" title="Where the search looks">📍</div>',
+  iconSize: [28, 28],
+  iconAnchor: [14, 26],
+});
 
 const hotelIcon = L.divIcon({
   className: "",
@@ -95,6 +121,15 @@ function RideStops({ segment, color }: { segment: RouteSegment; color: string })
   ));
 }
 
+/** Zooms to the search area whenever its point or radius changes. */
+function FitToSearch({ lat, lon, radius_m }: { lat: number; lon: number; radius_m: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.fitBounds(L.latLng(lat, lon).toBounds(radius_m * 2), { padding: [24, 24] });
+  }, [map, lat, lon, radius_m]);
+  return null;
+}
+
 function PickStart({ enabled, onPick }: { enabled: boolean; onPick: RouteMapProps["onPick"] }) {
   useMapEvents({
     click(event) {
@@ -129,6 +164,10 @@ export default function RouteMap({
   picking,
   onPick,
   highlightedStop,
+  venues = [],
+  search = null,
+  highlightedVenue = null,
+  onSelectVenue,
 }: RouteMapProps) {
   const shown = useShown();
   const days = plan?.days ?? [];
@@ -150,7 +189,9 @@ export default function RouteMap({
     >
       <TileLayer attribution={TILE_ATTRIBUTION} url={TILE_URL} />
       <PickStart enabled={picking} onPick={onPick} />
-      {plan && active && <FitToDay points={fitPoints} fitKey={`${plan.id}:${selectedDay}`} />}
+      {plan && active && !search && (
+        <FitToDay points={fitPoints} fitKey={`${plan.id}:${selectedDay}`} />
+      )}
 
       {/* Other days stay visible but muted; click one to switch to it. */}
       {days
@@ -220,6 +261,45 @@ export default function RouteMap({
       )}
 
       {start && <Marker position={[start.lat, start.lon]} icon={hotelIcon} />}
+
+      {search && (
+        <>
+          <FitToSearch {...search} />
+          <Circle
+            center={[search.lat, search.lon]}
+            radius={search.radius_m}
+            pathOptions={{
+              color: "#0f172a",
+              weight: 1,
+              opacity: 0.5,
+              dashArray: "4 6",
+              fill: false,
+            }}
+            interactive={false}
+          />
+          {venues.map((venue) => (
+            <Marker
+              key={venue.id}
+              position={[venue.lat, venue.lon]}
+              icon={venueMarker(venue, highlightedVenue === venue.id)}
+              zIndexOffset={highlightedVenue === venue.id ? 1000 : 500}
+              eventHandlers={{ click: () => onSelectVenue?.(venue.id) }}
+            >
+              <Tooltip direction="top" offset={[0, -12]}>
+                <strong>{venue.name}</strong>
+                <br />
+                {venueTypeLabel(venue.venue_type)} · {openingLabel(venue).text}
+              </Tooltip>
+            </Marker>
+          ))}
+          <Marker
+            position={[search.lat, search.lon]}
+            icon={pinIcon}
+            zIndexOffset={1500}
+            interactive={false}
+          />
+        </>
+      )}
     </MapContainer>
   );
 }

@@ -38,9 +38,11 @@ import type {
   PlaceRef,
   PlanEdit,
   PlannedDay,
+  PlannedStop,
   PlanResponse,
   TransitRide,
   Trip,
+  VenueKind,
 } from "@/lib/types";
 
 export interface PlanResultProps {
@@ -59,6 +61,9 @@ export interface PlanResultProps {
     ((day: number, change: { remove: number[]; add: number[] }) => Promise<boolean>) | null;
   /** The day edit is being planned. */
   editingDay: boolean;
+  /** Search places to eat and drink for a day of the saved trip, around a stop (or where
+   * the traveller is, by default). Null for a plan not saved. */
+  onFindVenues: ((day: number, kind: VenueKind | null, near: PlannedStop | null) => void) | null;
   /** Tick a stop of the trip visited (true) or untick it. */
   onToggleVisited: (placeId: number, visited: boolean) => void;
   /** Save the plan to My trips. */
@@ -447,6 +452,7 @@ function DayStops({
   removed,
   onToggleRemoved,
   onHoverStop,
+  onFindVenues,
 }: {
   day: PlannedDay;
   selected: number[];
@@ -462,8 +468,11 @@ function DayStops({
   removed: number[];
   onToggleRemoved: (placeId: number) => void;
   onHoverStop: PlanResultProps["onHoverStop"];
+  /** Search places to eat and drink near the day's last stop; null when it cannot. */
+  onFindVenues: ((near: PlannedStop) => void) | null;
 }) {
   const color = dayColor(day.day);
+  const lastStop = day.stops.at(-1);
   const freeEvening = freeEveningLabel(day);
   return (
     <ol className="space-y-1">
@@ -520,6 +529,18 @@ function DayStops({
         <li className="py-1 pl-[13px] text-xs text-zinc-500">
           <span aria-hidden>🌙 </span>
           {freeEvening}
+          {onFindVenues && lastStop && (
+            <>
+              {" · "}
+              <button
+                type="button"
+                onClick={() => onFindVenues(lastStop)}
+                className="font-medium text-blue-700 hover:text-blue-900 hover:underline"
+              >
+                Find places to eat &amp; drink
+              </button>
+            </>
+          )}
         </li>
       )}
     </ol>
@@ -535,6 +556,7 @@ export default function PlanResult({
   applying,
   onEditDay,
   editingDay,
+  onFindVenues,
   onToggleVisited,
   onSave,
   saving,
@@ -676,16 +698,27 @@ export default function PlanResult({
               : !draft && " · tick stops to replace them"}
           </p>
           {canEdit && !editing && (
-            <button
-              type="button"
-              onClick={() => {
-                setPicked({ key: selectionKey, ids: [] });
-                changeEdit({});
-              }}
-              className="shrink-0 rounded-md bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200"
-            >
-              Edit day
-            </button>
+            <div className="flex shrink-0 gap-1.5">
+              {onFindVenues && (
+                <button
+                  type="button"
+                  onClick={() => onFindVenues(day.day, "food", null)}
+                  className="rounded-md bg-orange-50 px-2 py-1 text-xs font-medium text-orange-800 hover:bg-orange-100"
+                >
+                  Find places to eat
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setPicked({ key: selectionKey, ids: [] });
+                  changeEdit({});
+                }}
+                className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200"
+              >
+                Edit day
+              </button>
+            </div>
           )}
         </div>
         <DayStops
@@ -708,6 +741,9 @@ export default function PlanResult({
             });
           }}
           onHoverStop={onHoverStop}
+          onFindVenues={
+            canEdit && !editing && onFindVenues ? (near) => onFindVenues(day.day, null, near) : null
+          }
         />
         {editing && (
           <AddPlaces

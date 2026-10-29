@@ -1,6 +1,7 @@
 // Mirrors backend/app/schemas/plan.py (POST /plan, GET /plans/{id}, POST /plans/{id}/replace),
-// backend/app/schemas/place.py (GET /places), backend/app/schemas/account.py (/auth) and
-// backend/app/schemas/saved_trip.py (/trips, POST /trips/{id}/edit).
+// backend/app/schemas/place.py (GET /places), backend/app/schemas/account.py (/auth),
+// backend/app/schemas/saved_trip.py (/trips, POST /trips/{id}/edit) and
+// backend/app/schemas/venue.py (GET /venues).
 
 export type TravelMode = "walk" | "transit";
 export type TransitVehicle =
@@ -333,4 +334,81 @@ export interface TripUpdate {
   title?: string;
   /** Another version of the trip's plan: a draft made from it (save), or an earlier one (undo). */
   plan_id?: number;
+}
+
+/** Food: restaurants, fast food, cafés, ice cream, pastry shops. Drinks: bars, pubs, clubs. */
+export type VenueKind = "food" | "drinks";
+/** The OSM amenity (or shop) a venue is. */
+export type VenueType =
+  | "restaurant"
+  | "fast_food"
+  | "cafe"
+  | "ice_cream"
+  | "pastry"
+  | "bar"
+  | "pub"
+  | "nightclub"
+  | "music_venue";
+export type OpenState = "open" | "closed" | "unknown";
+
+/** A place to eat or drink from GET /venues (backend/app/schemas/venue.py). */
+export interface Venue {
+  /** Place id: add it to a day with POST /trips/{id}/edit. */
+  id: number;
+  name: string;
+  /** "restaurant", "cafe" or "nightlife". */
+  category: string;
+  venue_type: VenueType;
+  lat: number;
+  lon: number;
+  /** Straight-line distance from the search point. */
+  distance_m: number;
+  /** Estimated walk from the search point. */
+  walk_min: number;
+  /** OSM cuisine values, e.g. "portuguese", "coffee_shop". */
+  cuisines: string[];
+  /** Diets catered for: "only" means nothing else is served. */
+  diets: Record<string, "yes" | "only">;
+  /** Null when unknown. */
+  outdoor_seating: boolean | null;
+  /** OSM opening_hours syntax, as mapped. */
+  opening_hours: string | null;
+  open_now: OpenState;
+  /** When the walk from the search point ends. */
+  open_on_arrival: OpenState;
+  /** "HH:MM": when it opens or closes next, if within a day. */
+  changes_at: string | null;
+  website: string | null;
+  phone: string | null;
+  /** A usual stay: café 30 min, bar 60, restaurant 75. */
+  stay_min: number;
+}
+
+export interface CuisineCount {
+  cuisine: string;
+  count: number;
+}
+
+export interface VenuePage {
+  items: Venue[];
+  /** Venues that match, before the limit. */
+  total: number;
+  /** Cuisines in range that the other filters leave, most common first. */
+  cuisines: CuisineCount[];
+}
+
+/** GET /venues: places to eat and drink within `radius_m` (250 m – 2 km) of a point. */
+export interface VenueQuery {
+  lat: number;
+  lon: number;
+  radius_m?: number;
+  /** Null or missing: both. */
+  kind?: VenueKind | null;
+  cuisine?: string | null;
+  vegetarian?: boolean;
+  vegan?: boolean;
+  /** Open by the time you walk there. */
+  open_now?: boolean;
+  outdoor_seating?: boolean;
+  limit?: number;
 }

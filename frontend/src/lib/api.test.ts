@@ -17,6 +17,7 @@ import {
   replaceStops,
   saveTrip,
   searchPlaces,
+  searchVenues,
   signUp,
   unmarkVisited,
   updateTrip,
@@ -187,5 +188,18 @@ describe("editTripDay", () => {
     expect(url).toBe("/api/trips/5/edit");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({ day: 2, remove: [7], add: [9] });
+  });
+});
+
+describe("searchVenues", () => {
+  it("sends the filters that are on", async () => {
+    const fetchImpl = fakeFetch(200, { items: [], total: 0, cuisines: [] });
+    await searchVenues(
+      { lat: 38.71, lon: -9.14, radius_m: 500, kind: null, vegetarian: true, vegan: false },
+      {},
+      fetchImpl,
+    );
+    const [url] = fetchImpl.mock.calls[0] as unknown as [string];
+    expect(url).toBe("/api/venues?lat=38.71&lon=-9.14&radius_m=500&vegetarian=true");
   });
 });

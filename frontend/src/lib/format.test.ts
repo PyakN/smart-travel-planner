@@ -376,7 +376,7 @@ describe("day hours", () => {
   it("explains the hours", () => {
     expect(hoursHint("09:30", "21:30")).toBe("12 h a day.");
     expect(hoursHint("16:00", "03:00")).toBe(
-      "11 h a day, until 03:00 the next morning. After 20:00 the plan has a few lit squares and sights open late, and the rest of the evening is free: add restaurants and bars as must-visit places.",
+      "11 h a day, until 03:00 the next morning. After 20:00 the plan has a few lit squares and sights open late, and the rest of the evening is free: find places to eat and drink from your saved trip, or add them as must-visit places.",
     );
     expect(hoursHint("10:00", "23:30")).toMatch(/^13 h 30 min a day\. After 20:00/);
     expect(hoursHint("10:00", "10:00")).toBe("Pick an end time after the start.");
@@ -416,8 +416,10 @@ describe("day hours", () => {
     );
   });
 
-  it("labels evening places", () => {
+  it("labels places to eat and drink", () => {
     expect(categoryLabel("nightlife")).toBe("Bar & nightlife");
     expect(categoryIcon("restaurant")).toBe("🍽️");
+    expect(categoryLabel("cafe")).toBe("Café");
+    expect(categoryIcon("cafe")).toBe("☕");
   });
 });

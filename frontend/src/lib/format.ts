@@ -38,6 +38,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   attraction: "Attraction",
   nightlife: "Bar & nightlife",
   restaurant: "Restaurant",
+  cafe: "Café",
 };
 
 export function categoryLabel(slug: string): string {
@@ -136,6 +137,7 @@ const CATEGORY_ICONS: Record<string, string> = {
   attraction: "🎡",
   nightlife: "🍸",
   restaurant: "🍽️",
+  cafe: "☕",
 };
 
 /** Stand-in picture for places without a photo. */
@@ -303,7 +305,7 @@ export function hoursHint(start: string, end: string, laterStart: string | null 
     : `${formatDuration(length)} ${days}.`;
   // Past 22:00 an evening is long enough to plan with places open at night.
   if (!overnight && clockMinutes(end) <= 22 * 60) return hint;
-  return `${hint} After 20:00 the plan has a few lit squares and sights open late, and the rest of the evening is free: add restaurants and bars as must-visit places.`;
+  return `${hint} After 20:00 the plan has a few lit squares and sights open late, and the rest of the evening is free: find places to eat and drink from your saved trip, or add them as must-visit places.`;
 }
 
 /** "16:00–03:00" for a day's hours; null on plans saved before days had hours. */
