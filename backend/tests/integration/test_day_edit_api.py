@@ -307,3 +307,59 @@ def test_only_the_owner_edits(
     assert edit(visitor, trip, **body).status_code == 404
     visitor.cookies.clear()
     assert edit(visitor, trip, **body).status_code == 401
+
+
+def test_eat_and_drink_on_the_way(
+    visitor: TestClient, llm: FakeProvider, place_ids: dict[str, int]
+) -> None:
+    # A round trip from a hotel. Mid-day, two stops visited, the traveller finds a café near
+    # where they are and goes there next; later, a bar.
+    trip = saved_trip(visitor, llm, place_ids, FIRST_DAY, start=HOTEL, start_date=MONDAY)
+    planned = [s["place_id"] for s in stops(trip["plan"])]
+    for place_id in planned[:2]:
+        visit(visitor, trip, place_id)
+    at(visitor, datetime(2026, 11, 2, 12, 30, tzinfo=UTC))
+    pin = {"lat": 45.0040, "lon": 7.0060}
+    cafe = place_ids["Green Leaf Café"]
+    draft = drafted(visitor, trip, add=[cafe], next=cafe, start=pin, stay_min=30)
+
+    day = stops(draft)
+    assert [s["place_id"] for s in day[:3]] == [*planned[:2], cafe]
+    assert day[2]["departure"] == {**pin, "time": "12:30"}
+    assert {s["place_id"] for s in day[3:]} == set(planned[2:])
+    hotel = [HOTEL["lon"], HOTEL["lat"]]
+    assert draft["days"][0]["segments"][-1]["geometry"][-1] == hotel
+    assert stops(draft)[-1]["leave"] <= "21:30"
+    assert draft["edit"]["dropped"] == [] and draft["edit"]["warnings"] == []
+    assert visitor.patch(f"/trips/{trip['id']}", json={"plan_id": draft["id"]}).is_success
+
+    # A bar keeps the evening as its usual hours, but this one is the next stop: it is
+    # visited now, and its own hours say it is open.
+    visit(visitor, trip, cafe)
+    at(visitor, datetime(2026, 11, 2, 13, 30, tzinfo=UTC))
+    bar = place_ids["Harbour Bar"]
+    later = drafted(visitor, trip, add=[bar], next=bar, start=pin, stay_min=45)
+    day = stops(later)
+    assert [s["place_id"] for s in day[:4]] == [*planned[:2], cafe, bar]
+    assert day[3]["wait_min"] == 0 and day[3]["arrive"] < "14:00"
+    assert minutes(day[3]["leave"]) - minutes(day[3]["arrive"]) == 45
+    assert {s["place_id"] for s in day[4:]} == set(planned[2:])
+    assert later["edit"]["dropped"] == [] and later["edit"]["warnings"] == []
+    assert visitor.patch(f"/trips/{trip['id']}", json={"plan_id": later["id"]}).is_success
+
+
+def test_the_opening_hours_of_places_you_choose(
+    visitor: TestClient, llm: FakeProvider, place_ids: dict[str, int]
+) -> None:
+    trip = saved_trip(visitor, llm, place_ids, FIRST_DAY, start=HOTEL, start_date=MONDAY)
+    at(visitor, datetime(2026, 11, 2, 14, 0, tzinfo=UTC))
+    pin = {"lat": 45.0040, "lon": 7.0060}
+    # The pub opens at 17:00; the vegetarian place closes at 15:00 until dinner.
+    pub, garden = place_ids["Corner Pub"], place_ids["Veggie Garden"]
+    draft = drafted(visitor, trip, add=[pub], next=pub, start=pin, stay_min=30)
+    [warning] = draft["edit"]["warnings"]
+    assert re.fullmatch(r"By its opening hours, Corner Pub is closed at 14:0\d\.", warning)
+
+    draft = drafted(visitor, trip, add=[garden], next=garden, start=pin, stay_min=75)
+    [warning] = draft["edit"]["warnings"]
+    assert warning == "By its opening hours, Veggie Garden closes at 15:00, before the visit ends."

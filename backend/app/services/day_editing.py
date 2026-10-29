@@ -9,18 +9,23 @@ what it drops, and why.
 - Visited stops stay first, in their planned order.
 - The rest of the day is planned from `start` (the traveller's location), from now on when
   the day is under way; else from where the visited stops end, or as the day begins.
-- `next` comes first after the visited stops; the others are reordered from it.
+- `next` comes first after the visited stops; the others are reordered from it. It is
+  visited when the traveller gets there: a place to eat or drink is not held to the hours
+  its kind usually keeps (dinner and bars from 20:00).
 - The day keeps its end: back at the hotel on round trips, else wherever its last stop is.
 - The day may run until the end of its hours plus REPLAN_GRACE_MIN, whatever the pace.
   Stops drop only beyond that, or when they would be reached closed or dark: least
   important first, and never visited, must-visit, added or next stops.
+- The opening hours of the places the traveller chose (OSM `opening_hours`) are checked
+  against their visits: the draft warns when one is closed by then, or closes during it.
 """
 
-from collections.abc import Collection, Sequence
-from datetime import datetime
+from collections.abc import Collection, Mapping, Sequence
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.catalog import VENUE_CATEGORIES, VisitHours
 from app.db.models import Route
 from app.ingest.cities import CITIES, City
 from app.optimizer.distance import DistanceProvider
@@ -32,11 +37,13 @@ from app.optimizer.planner import (
     Origin,
     StartPoint,
     Stop,
+    Visit,
     replan_day,
 )
 from app.optimizer.transit import TransitProvider
+from app.osm_hours import next_change, open_state, read_hours
 from app.repositories.candidates import get_candidates
-from app.repositories.places import place_details
+from app.repositories.places import PlaceDetails, place_details
 from app.schemas.plan import (
     DroppedStop,
     PlaceRef,
@@ -81,6 +88,41 @@ def minute_now(day: PlannedDay, window: DayWindow, city: City, now: datetime) ->
     if elapsed >= window.end_min:
         raise PlanningError(f"Day {day.day} is over: its hours ended at {hhmm(window.end_min)}.")
     return elapsed
+
+
+def opening_warnings(
+    visits: Sequence[Visit],
+    chosen: Collection[int],
+    names: Mapping[int, str],
+    details: Mapping[int, PlaceDetails],
+    on: date | None,
+    city: City,
+) -> list[str]:
+    """What the opening hours of the places the traveller chose say about their visits on
+    day `on`: closed when they get there, or closing before they leave. Nothing for plans
+    without dates, or hours that are unknown."""
+    if on is None:
+        return []
+    midnight = datetime.combine(on, time(), city.tz)
+    warnings = []
+    for visit in visits:
+        place = visit.stop
+        detail = details.get(place.id)
+        if place.id not in chosen or detail is None:
+            continue
+        hours = read_hours(detail.opening_hours, city, place.lat, place.lon)
+        arrive = midnight + timedelta(minutes=visit.arrive_min)
+        state = open_state(hours, arrive)
+        name = names[place.id]
+        if state == "closed":
+            warnings.append(f"By its opening hours, {name} is closed at {hhmm(visit.arrive_min)}.")
+        elif state == "open":
+            closes = next_change(hours, arrive)
+            if closes and closes < midnight + timedelta(minutes=visit.leave_min):
+                warnings.append(
+                    f"By its opening hours, {name} closes at {closes:%H:%M}, before the visit ends."
+                )
+    return warnings
 
 
 async def edit_day(
@@ -129,10 +171,16 @@ async def edit_day(
     params = saved.params
     ranking = {pid: i for i, pid in enumerate(params.get("ranking", []))}
     stays = stays_of(params)
+    # The places the traveller chose in this edit.
+    chosen = [*adding, *([edit.next] if edit.next is not None else [])]
     if edit.stay_min is not None:
-        chosen = [*adding, *([edit.next] if edit.next is not None else [])]
         stays |= dict.fromkeys(chosen, edit.stay_min)
     removing = set(edit.remove)
+
+    def hours_of(place_id: int, category: str, hours: VisitHours) -> VisitHours:
+        if place_id == edit.next and category in VENUE_CATEGORIES:
+            return "any"  # visited now, not when places of its kind usually are
+        return hours
 
     def planned_stop_of(s: PlannedStop, i: int) -> Stop:
         return Stop(
@@ -143,7 +191,7 @@ async def edit_day(
             priority=ranking.get(s.place_id, len(ranking) + i),
             required=s.must_visit,
             outdoor=s.outdoor,
-            hours=s.hours,
+            hours=hours_of(s.place_id, s.category, s.hours),
             stay_min=stays.get(s.place_id),
         )
 
@@ -165,7 +213,7 @@ async def edit_day(
             c.category,
             priority=rank + i,
             outdoor=c.outdoor,
-            hours=c.hours,
+            hours=hours_of(c.id, c.category, c.hours),
             stay_min=stays.get(c.id),
         )
         for i, c in enumerate(places[p] for p in adding)
@@ -235,6 +283,7 @@ async def edit_day(
     warnings += [
         f"{names[s.id]} closes, or it gets dark, before the visit ends." for s in result.late
     ]
+    warnings += opening_warnings(current.visits, chosen, names, details, target.date, city)
     change = PlanEdit(
         day=day,
         kind="edit",
