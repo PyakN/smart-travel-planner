@@ -3,14 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   createPlan,
+  deleteAccount,
+  deleteTrip,
   errorMessage,
   getMe,
   getPlan,
+  getTrip,
+  listTrips,
   logIn,
   logOut,
   replaceStops,
+  saveTrip,
   searchPlaces,
   signUp,
+  updateTrip,
 } from "./api";
 
 function fakeFetch(status: number, body: unknown) {
@@ -102,6 +108,45 @@ describe("accounts", () => {
     await expect(logOut(fetchImpl)).resolves.toBeUndefined();
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect([url, init.method]).toEqual(["/api/auth/logout", "POST"]);
+  });
+});
+
+describe("trips", () => {
+  it("saves a plan by its id", async () => {
+    const fetchImpl = fakeFetch(201, { id: 4 });
+    await saveTrip(12, fetchImpl);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect([url, init.method]).toEqual(["/api/trips", "POST"]);
+    expect(JSON.parse(init.body as string)).toEqual({ plan_id: 12 });
+  });
+
+  it("switches a trip to another version", async () => {
+    const fetchImpl = fakeFetch(200, { id: 4 });
+    await updateTrip(4, { plan_id: 13 }, fetchImpl);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect([url, init.method]).toEqual(["/api/trips/4", "PATCH"]);
+    expect(JSON.parse(init.body as string)).toEqual({ plan_id: 13 });
+  });
+
+  it("lists, opens and deletes trips", async () => {
+    const fetchImpl = vi.fn(async () => new Response("[]", { status: 200 }));
+    await listTrips(fetchImpl);
+    await getTrip(4, fetchImpl);
+    await deleteTrip(4, fetchImpl);
+    await deleteAccount(fetchImpl);
+    const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([url, init]) => `${init.method} ${url}`)).toEqual([
+      "GET /api/trips",
+      "GET /api/trips/4",
+      "DELETE /api/trips/4",
+      "DELETE /api/auth/me",
+    ]);
+  });
+
+  it("surfaces other users' trips as not found", async () => {
+    await expect(getTrip(9, fakeFetch(404, { detail: "trip not found" }))).rejects.toEqual(
+      new ApiError(404, "trip not found"),
+    );
   });
 });
 

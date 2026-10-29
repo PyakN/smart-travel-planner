@@ -5,6 +5,9 @@ import type {
   PlanResponse,
   ReplaceRequest,
   SignupRequest,
+  Trip,
+  TripSummary,
+  TripUpdate,
   User,
 } from "./types";
 
@@ -100,6 +103,11 @@ export async function logOut(fetchImpl: typeof fetch = fetch): Promise<void> {
   await request<null>("/auth/logout", { method: "POST" }, fetchImpl);
 }
 
+/** Deletes the account and its saved trips; plans stay reachable by their share links. */
+export async function deleteAccount(fetchImpl: typeof fetch = fetch): Promise<void> {
+  await request<null>("/auth/me", { method: "DELETE" }, fetchImpl);
+}
+
 /** The logged-in user, or null when nobody is. */
 export async function getMe(fetchImpl: typeof fetch = fetch): Promise<User | null> {
   try {
@@ -108,4 +116,26 @@ export async function getMe(fetchImpl: typeof fetch = fetch): Promise<User | nul
     if (error instanceof ApiError && error.status === 401) return null;
     throw error;
   }
+}
+
+/** Saves a plan to My trips; a plan saved already resolves to that trip. */
+export function saveTrip(planId: number, fetchImpl: typeof fetch = fetch) {
+  return request<Trip>("/trips", sendJson("POST", { plan_id: planId }), fetchImpl);
+}
+
+export function listTrips(fetchImpl: typeof fetch = fetch) {
+  return request<TripSummary[]>("/trips", { method: "GET" }, fetchImpl);
+}
+
+export function getTrip(id: number, fetchImpl: typeof fetch = fetch) {
+  return request<Trip>(`/trips/${id}`, { method: "GET" }, fetchImpl);
+}
+
+/** Renames a trip, or switches it to another version of its plan. */
+export function updateTrip(id: number, body: TripUpdate, fetchImpl: typeof fetch = fetch) {
+  return request<Trip>(`/trips/${id}`, sendJson("PATCH", body), fetchImpl);
+}
+
+export async function deleteTrip(id: number, fetchImpl: typeof fetch = fetch): Promise<void> {
+  await request<null>(`/trips/${id}`, { method: "DELETE" }, fetchImpl);
 }

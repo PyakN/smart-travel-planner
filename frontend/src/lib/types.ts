@@ -1,5 +1,6 @@
 // Mirrors backend/app/schemas/plan.py (POST /plan, GET /plans/{id}, POST /plans/{id}/replace),
-// backend/app/schemas/place.py (GET /places) and backend/app/schemas/account.py (/auth).
+// backend/app/schemas/place.py (GET /places), backend/app/schemas/account.py (/auth) and
+// backend/app/schemas/saved_trip.py (/trips).
 
 export type TravelMode = "walk" | "transit";
 export type TransitVehicle =
@@ -250,4 +251,34 @@ export interface LoginRequest {
 
 export interface SignupRequest extends LoginRequest {
   display_name: string;
+}
+
+/** A saved trip with its current plan (GET /trips/{id}). */
+export interface Trip {
+  id: number;
+  title: string;
+  /** The current version of the plan. */
+  plan: PlanResponse;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A saved trip in My trips (GET /trips). */
+export interface TripSummary {
+  id: number;
+  title: string;
+  /** The current version of the plan. */
+  plan_id: number;
+  city: string;
+  request_text: string;
+  days: number;
+  start_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TripUpdate {
+  title?: string;
+  /** Another version of the trip's plan: a new version made from it, or an earlier one (undo). */
+  plan_id?: number;
 }

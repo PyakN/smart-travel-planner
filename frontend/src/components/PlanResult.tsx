@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import DayWeather from "@/components/DayWeather";
@@ -26,17 +27,24 @@ import {
   travelLabel,
   weatherIcon,
 } from "@/lib/format";
-import type { PlanEdit, PlannedDay, PlanResponse, TransitRide } from "@/lib/types";
+import type { PlanEdit, PlannedDay, PlanResponse, TransitRide, Trip } from "@/lib/types";
 
 export interface PlanResultProps {
   plan: PlanResponse;
+  /** The saved trip this plan is the current version of; null for a plan not saved. */
+  trip: Trip | null;
+  /** Save the plan to My trips. */
+  onSave: () => void;
+  saving: boolean;
+  saveError: string | null;
   selectedDay: number;
   onSelectDay: (day: number) => void;
   onHoverStop: (placeId: number | null) => void;
   /** Replace the given stops of a day; the parent swaps in the new plan version. */
   onReplace: (day: number, placeIds: number[]) => void;
   replacing: boolean;
-  replaceError: string | null;
+  /** Why the last change to the plan failed. */
+  editError: string | null;
   /** Go back to the version this plan was made from, if any. */
   onUndo: (() => void) | null;
 }
@@ -47,6 +55,7 @@ function ShareButton({ planId }: { planId: number }) {
     <button
       type="button"
       onClick={async () => {
+        // Share links open the plan, public and read-only, even for a saved trip.
         const url = `${window.location.origin}/?plan=${planId}`;
         await navigator.clipboard.writeText(url).catch(() => undefined);
         setCopied(true);
@@ -55,6 +64,29 @@ function ShareButton({ planId }: { planId: number }) {
       className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200"
     >
       {copied ? "Link copied" : "Copy share link"}
+    </button>
+  );
+}
+
+function SaveButton({ trip, onSave, saving }: Pick<PlanResultProps, "trip" | "onSave" | "saving">) {
+  if (trip) {
+    return (
+      <Link
+        href="/trips"
+        className="rounded-md px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+      >
+        ✓ In My trips
+      </Link>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onSave}
+      disabled={saving}
+      className="rounded-md bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-wait disabled:bg-blue-400"
+    >
+      {saving ? "Saving…" : "Save to my trips"}
     </button>
   );
 }
@@ -214,15 +246,22 @@ function DayStops({
 
 export default function PlanResult({
   plan,
+  trip,
+  onSave,
+  saving,
+  saveError,
   selectedDay,
   onSelectDay,
   onHoverStop,
   onReplace,
   replacing,
-  replaceError,
+  editError,
   onUndo,
 }: PlanResultProps) {
   const day = plan.days.find((d) => d.day === selectedDay) ?? plan.days[0];
+  const city = plan.city.charAt(0).toUpperCase() + plan.city.slice(1);
+  const title =
+    trip?.title ?? `${plan.days.length} ${plan.days.length === 1 ? "day" : "days"} in ${city}`;
   const walking = plan.days.reduce((sum, d) => sum + d.walking_m, 0);
   const transitLegs = plan.days.reduce((sum, d) => sum + d.transit_legs, 0);
 
@@ -242,11 +281,13 @@ export default function PlanResult({
     <section className="space-y-4" aria-label="Trip plan">
       <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-zinc-900">
-              {plan.days.length} {plan.days.length === 1 ? "day" : "days"} in{" "}
-              {plan.city.charAt(0).toUpperCase() + plan.city.slice(1)}
-            </h2>
+          <div className="min-w-0">
+            {trip && (
+              <p className="text-xs font-medium tracking-wide text-emerald-700 uppercase">
+                Saved trip
+              </p>
+            )}
+            <h2 className="text-base font-semibold text-zinc-900">{title}</h2>
             <p className="text-sm text-zinc-600">
               {formatDistance(walking)} on foot
               {transitLegs > 0 &&
@@ -258,8 +299,16 @@ export default function PlanResult({
               {plan.weather_aware && " · planned with the weather"}
             </p>
           </div>
-          <ShareButton planId={plan.id} />
+          <div className="flex shrink-0 flex-col items-end gap-1.5">
+            <SaveButton trip={trip} onSave={onSave} saving={saving} />
+            <ShareButton planId={plan.id} />
+          </div>
         </div>
+        {saveError && (
+          <p role="alert" className="mt-2 text-xs text-red-700">
+            {saveError}
+          </p>
+        )}
         {plan.rationale && <p className="mt-3 text-sm text-zinc-700">{plan.rationale}</p>}
         <WeatherNotes plan={plan} />
         <HoursNotes plan={plan} />
@@ -328,11 +377,11 @@ export default function PlanResult({
         />
       </div>
 
-      {(selected.length > 0 || replaceError) && (
+      {(selected.length > 0 || editError) && (
         <div className="sticky bottom-0 -mx-4 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] backdrop-blur lg:-mx-6 lg:px-6">
-          {replaceError && (
+          {editError && (
             <p role="alert" className="mb-2 text-xs text-red-700">
-              {replaceError}
+              {editError}
             </p>
           )}
           {selected.length > 0 && (
