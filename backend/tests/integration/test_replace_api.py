@@ -307,3 +307,21 @@ def test_filler_that_does_not_fit_is_skipped_for_the_next(
     assert adjustment["added"]["name"] != "City Museum"
     assert "City Museum" not in names(new)
     assert len(new["days"][0]["stops"]) == 4
+
+
+def test_stops_the_day_loses_are_listed_with_why(
+    client: TestClient,
+    llm: FakeProvider,
+    place_ids: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = create_plan(client, llm, place_ids, FIRST_DAY)
+    monkeypatch.setitem(DAY_BUDGET_MIN, "relaxed", 60)  # too short for the stops that stay
+    new = replace(client, plan, 1, [place_ids["Clock Tower"]]).json()
+
+    dropped = new["edit"]["dropped"]
+    assert dropped
+    assert {d["reason"] for d in dropped} == {"It does not fit day 1's 1 h budget."}
+    lost = {d["place_id"] for d in dropped}
+    assert lost <= {d["place_id"] for d in new["dropped"]}
+    assert not lost & {s["place_id"] for s in new["days"][0]["stops"]}

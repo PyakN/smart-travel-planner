@@ -49,6 +49,7 @@ from app.repositories.candidates import Candidate, find_candidates
 from app.repositories.places import place_details
 from app.schemas.plan import (
     Adjustment,
+    DroppedStop,
     PlaceRef,
     PlanEdit,
     PlannedStop,
@@ -433,6 +434,14 @@ async def replace_stops(
         replaced=[PlaceRef(place_id=s.place_id, name=s.name) for s in removed],
         added=[_ref(c.id, names) for c in chosen if c.id in final_ids],
         adjustments=adjustments,
+        dropped=[
+            DroppedStop(
+                place_id=s.place_id,
+                name=s.name,
+                reason=f"It does not fit day {day}'s {duration_label(budget)} budget.",
+            )
+            for s in lost
+        ],
     )
     new_params = {
         **params,
