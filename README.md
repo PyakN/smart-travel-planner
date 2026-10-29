@@ -67,7 +67,7 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 | `GET /categories` | Categories with place counts (optional `city`) |
 | `POST /plan` | **Plan a trip from text**: `{"text", "start"?: {"lat", "lon", "round_trip"}, "must_visit"?: [place ids], "modes"?: ["walk", "transit"], "start_date"?: "YYYY-MM-DD", "weather_aware"?: bool, "day_start"?: "HH:MM", "day_end"?: "HH:MM", "first_day_start"?: "HH:MM"}` → dated days with their hours and ordered, timed stops (photo, description, personal note, opening hours, free time before them, forecast) and map geometry. Saved; returns `id` |
 | `GET /plans/{id}` | A saved plan |
-| `POST /plans/{id}/replace` | **Replace stops of a day**: `{"day", "place_ids"}` → a new saved version (`parent_id` = this plan), with an `edit` listing what was replaced, added and adjusted |
+| `POST /plans/{id}/replace` | **Replace stops of a day**: `{"day", "place_ids"}` → a new saved version (`parent_id` = this plan), with an `edit` listing what was replaced, added, adjusted and dropped |
 | `POST /auth/signup` | Create an account and log in: `{"email", "password", "display_name"}` (password 8+ characters); 409 if the email has an account |
 | `POST /auth/login` | Log in: `{"email", "password"}`; 401 on a wrong email or password, 429 after 5 failed log-ins in 15 minutes |
 | `POST /auth/logout` | End this session |
@@ -75,9 +75,10 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 | `POST /trips` | **Save a plan** to my trips: `{"plan_id", "title"?}`; a plan saved already gives that trip (200) |
 | `GET /trips` | My trips, the most recently changed first |
 | `GET /trips/{id}` | A trip with its current plan and visited places |
-| `PATCH /trips/{id}` | Rename (`{"title"}`) or switch to another version of its plan (`{"plan_id"}`: a new version made from it, or an earlier one for undo) |
+| `PATCH /trips/{id}` | Rename (`{"title"}`) or switch to another version of its plan (`{"plan_id"}`: a draft made from its current version to save it, or a version the current one was made from to undo); 409 for a draft made from an outdated version |
 | `DELETE /trips/{id}` | Delete a trip (its plans stay readable by their links) |
 | `PUT` · `DELETE /trips/{id}/visits/{place_id}` | Tick a stop of the trip's current plan visited · untick it |
+| `POST /trips/{id}/edit` | **Edit a day of a trip** (no AI): `{"day", "remove"?: [place ids], "add"?: [place ids], "next"?: place id, "start"?: {"lat", "lon"}, "stay_min"?}` → a draft: a new plan version the trip uses once `PATCH` saves it, with an `edit` listing what was removed, added and dropped (and why) |
 
 Example: museums and viewpoints within 400 m of Praça do Comércio:
 
@@ -103,7 +104,7 @@ Replacing stops (`POST /plans/{id}/replace`):
 Error statuses:
 - **401:** not logged in (`/auth/me` and `/trips`).
 - **404:** no such plan, or a trip that does not exist or belongs to someone else.
-- **409:** an email that has an account; a trip version that leaves out a visited place.
+- **409:** an email that has an account; a trip version that leaves out a visited place, or a draft made from an outdated version.
 - **422:** the request can't be planned, for example an unsupported city.
 - **429:** the daily LLM token budget is used up.
 - **502:** the LLM rejected the request.
@@ -118,8 +119,23 @@ Plans are public: anyone with a plan's link can read it (`GET /plans/{id}`, the 
 - **Failed log-ins:** at most 5 per email in 15 minutes, then 429 with `Retry-After`, even with the right password. Every attempt counts until its password checks out, so guesses sent at once cannot slip past. The count is kept in memory, per process.
 - **Saved trips:** a trip (`trips`) is a user's plan, by its current version. Replacing stops makes a new plan version that names the one it came from (`parent_id`); versions that go back to the same first plan are versions of the same trip, and `PATCH /trips/{id}` switches between them (save a new version, undo). Other users' trips answer 404.
 - **Visited places** (`trip_visits`) live on the trip, not on a version: there is one record of them, and switching to a version that leaves a visited place out is refused (409).
+- **Drafts:** changing a saved trip (a day edit, or replacing stops) makes a new version the trip does not use until `PATCH /trips/{id}` saves it. Only a draft made from the trip's current version can be saved: one made before another change was saved (another tab) is refused with 409. Undo switches back to a version the current one was made from.
 
-The frontend has log-in and sign-up pages, My trips (rename, delete, delete the account), "Save to my trips" on a plan (logged out: log in or sign up first, then it saves), `?trip=<id>` for a saved trip, and a "Visited" tick on its stop cards. On a saved trip, replacing stops moves the trip to the new version and Undo moves it back.
+The frontend has log-in and sign-up pages, My trips (rename, delete, delete the account), "Save to my trips" on a plan (logged out: log in or sign up first, then it saves), `?trip=<id>` for a saved trip, and a "Visited" tick on its stop cards. On a saved trip, "Edit day" takes stops out and adds places (the must-visit place search), and replacing stops works as before; either opens a draft on the map and in the plan, with a bar that lists the stops it drops and why. Save changes asks first when it drops stops; Discard keeps the trip as it was; Undo goes back after saving.
+
+### Editing a saved day
+
+`POST /trips/{id}/edit` changes one day as the trip goes, with the optimizer only (no LLM, about a second with OSRM):
+
+- **Visited stops stay first**, in their planned order, as they were.
+- **Where the rest begins:** with `start` (the traveller's location), from there: from now on when the day is under way, else from where the visited stops end. Without it, from the last visited stop, or as the day begins. A day whose hours are over cannot be planned from now (422).
+- **`next`** (a stop of the day, or a place to add) is visited first; the other stops are reordered from it. The day keeps its end: back at the hotel on round trips, else open.
+- **Stays:** `stay_min` sets how long to stay at the added places and the next stop (5 min to 8 h; by default the usual visit of their kind). Chosen stays stay with the plan in later edits.
+- **When stops drop:** the pace no longer limits the day, only its end time plus 30 minutes. Beyond that, or when a place would be reached closed or dark, the least important stop goes, but only one whose leaving makes the day shorter (an afternoon sight stays when the evening runs long). Visited, must-visit, added and next stops never drop; when they alone run long, the draft warns instead.
+- **Every dropped stop says why** in `edit.dropped`: "The day would end at 23:10 instead of 21:30." or "It would be closed, or dark, by the time you get there."
+- A stop whose way starts at the traveller's location has a `departure` (where and when); the map draws nothing between the last visited stop and there.
+
+The frontend offers taking stops out and adding places; the traveller's location and the next stop come with the search for places to eat (see the roadmap).
 
 ## LLM layer
 
