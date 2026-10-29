@@ -113,6 +113,29 @@ class TestFitHours:
             "It closes at 20:00, and more of your day is in the evening."
         }
 
+    def test_the_evening_pool_is_for_the_evening(self) -> None:
+        # Seen live: four squares from the evening's pool, and one museum for the afternoon.
+        squares = [place(i, "any") for i in (20, 21, 22, 23)]
+        picks = [place(1, "day"), *squares]
+        evening = {s.id for s in squares}
+        places, swaps = fit_hours(picks, picks + self.POOL, self.SLOTS, evening_pool=evening)
+        assert ids(places) == [1, 20, 21, 11, 10]  # the least important squares went
+        assert [(a.id, b.id) for a, b, _ in swaps] == [(23, 10), (22, 11)]
+        assert swaps[0][2] == "Your evening has its places already: a sight for the day instead."
+        # With no sight for the day left (a viewpoint has no daylight for it), they stay.
+        viewpoints = [place(30, "daylight"), place(31, "daylight")]
+        places, swaps = fit_hours(picks, picks + viewpoints, self.SLOTS, evening_pool=evening)
+        assert (ids(places), swaps) == (ids(picks), [])
+
+    def test_no_swap_undoes_another(self) -> None:
+        # Seen live: a square made way for an outdoor sight, which then made way for another
+        # square, as the daylight was taken. Now the daylight goes first, and to a museum.
+        picks = [place(i, "daylight") for i in (1, 2)] + [place(i, "any") for i in (20, 21, 22)]
+        pool = [*picks, place(30, "daylight"), *self.POOL, place(23, "any")]
+        places, swaps = fit_hours(picks, pool, self.SLOTS, evening_pool={20, 21, 22, 23})
+        assert ids(places) == [1, 10, 20, 21, 11]
+        assert [(a.id, b.id) for a, b, _ in swaps] == [(2, 10), (22, 11)]
+
     def test_must_visit_places_count_but_stay(self) -> None:
         must = [place(1, "daylight")]
         picks = [place(2, "daylight"), place(3, "day")]

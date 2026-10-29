@@ -307,18 +307,28 @@ def fit_hours(
     candidates: Sequence[Candidate],
     slots: Sequence[DaySlots],
     must: Sequence[Candidate] = (),
+    evening_pool: Collection[int] = (),
 ) -> tuple[list[Candidate], list[tuple[Candidate, Candidate, str]]]:
     """Swap picks the days' hours cannot take: outdoor sights beyond what daylight leaves
-    room for, then places closed at night beyond the time before 20:00 (for places open at
+    room for, picks from the evenings' own pool (ids in `evening_pool`) beyond the evenings'
+    places, then places closed at night beyond the time before 20:00 (for places open at
     night). Must-visit places count, but are never swapped. Returns the places and the
     (old, new, reason) swaps."""
     Rule = tuple[Callable[[Candidate], bool], int, Callable[[Candidate, Candidate], bool], str]
+    # In this order no swap undoes another: only the last rule brings in evening places.
     rules: list[Rule] = [
         (
             lambda c: c.hours == "daylight",
             sum(s.outdoor for s in slots),
-            lambda _, new: new.hours in ("day", "any"),
+            lambda _, new: new.hours in ("day", "any") and new.id not in evening_pool,
             "Your hours leave too little daylight for it.",
+        ),
+        (
+            # Seen live: four squares in a row for an afternoon and an evening of two.
+            lambda c: c.id in evening_pool or c.hours == "night",
+            sum(s.night for s in slots),
+            lambda _, new: new.hours in ("day", "any"),
+            "Your evening has its places already: a sight for the day instead.",
         ),
         (
             lambda c: c.hours in ("day", "daylight"),
@@ -549,11 +559,15 @@ async def select_places(
         )
 
     # Days with evenings get places open at night in a pool of their own, so the day's
-    # ranking does not crowd them out: few squares are notable.
+    # ranking does not crowd them out: few squares are notable. The places only that pool
+    # brings are for the evenings (fit_hours).
     candidates = await ranked(pool)
+    evening_pool: set[int] = set()
     if night := sum(s.night for s in slots):
-        evening_pool = max(MIN_EVENING_POOL, min(MAX_POOL, night * POOL_PER_STOP))
-        candidates = merge_ranked(candidates, await ranked(evening_pool, open_at_night=True))
+        size = max(MIN_EVENING_POOL, min(MAX_POOL, night * POOL_PER_STOP))
+        evening = await ranked(size, open_at_night=True)
+        evening_pool = {c.id for c in evening} - {c.id for c in candidates}
+        candidates = merge_ranked(candidates, evening)
     candidates = without_names(candidates, [m.name for m in must])
     if not candidates:
         if not must:
@@ -577,7 +591,7 @@ async def select_places(
         schema=PlaceSelection,
     )
     places, warnings = validate_selection(selection.place_ids, candidates, target)
-    places, hours_swaps = fit_hours(places, candidates, slots, must)
+    places, hours_swaps = fit_hours(places, candidates, slots, must, evening_pool)
     swaps: list[tuple[Candidate, Candidate]] = []
     if note is not None:
         places, swaps = limit_outdoor(places, candidates, note.max_outdoor, [m.name for m in must])
