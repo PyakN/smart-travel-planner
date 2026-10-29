@@ -51,7 +51,16 @@ SEED_PLACES: list[tuple[int, str, str, str, float, float, str | None, dict[str, 
     (102, "testville", "Old Town Square", "landmark", 45.0010, 7.0020, "Q900002", {}),
     (103, "testville", "Clock Tower", "landmark", 45.0020, 7.0010, None, {}),
     (104, "testville", "City Museum", "museum", 45.0030, 7.0030, "Q900004", {}),
-    (105, "testville", "Museum of Toys", "museum", 45.0040, 7.0000, None, {}),
+    (
+        105,
+        "testville",
+        "Museum of Toys",
+        "museum",
+        45.0040,
+        7.0000,
+        None,
+        {"opening_hours": "Tu-Su 10:00-18:00"},
+    ),
     (106, "testville", "Hilltop Viewpoint", "viewpoint", 45.0050, 7.0040, None, {}),
     (107, "testville", "River Park", "park", 45.0020, 7.0060, None, {}),
     (108, "testville", "Saint Anne Church", "religious", 45.0060, 7.0020, None, {}),
@@ -63,6 +72,18 @@ SEED_PLACES: list[tuple[int, str, str, str, float, float, str | None, dict[str, 
     # Open at night only: plans offer them for evenings, from 20:00.
     (114, "testville", "Harbour Bar", "nightlife", 45.0005, 7.0075, None, {"amenity": "bar"}),
     (115, "testville", "Old Town Fado", "restaurant", 45.0015, 7.0035, None, {}),
+    # Sights open at night too: a lit square, and a market hall open late.
+    (116, "testville", "Lantern Square", "landmark", 45.0012, 7.0045, None, {"place": "square"}),
+    (
+        117,
+        "testville",
+        "Night Market",
+        "market",
+        45.0025,
+        7.0050,
+        None,
+        {"building": "yes", "opening_hours": "Mo-Su 10:00-23:00"},
+    ),
 ]
 # Stop-card details (normally from OSM tags and app.ingest.enrich), by place name.
 SEED_DETAILS: dict[str, dict[str, str]] = {

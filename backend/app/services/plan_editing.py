@@ -16,9 +16,10 @@
 On weather-aware plans the edited day gets the latest forecast for its date, the LLM sees
 that day's weather and which candidates are outdoor, and the day is ordered around it.
 
-The day keeps its hours. Replacements must be open when the removed stops were visited:
-places open at night only come for stops from 20:00 on, places closed at night only for
-earlier ones, and outdoor sights only in daylight.
+The day keeps its hours. Replacements are sights, never food and drink venues (as in new
+plans), and must be open when the removed stops were visited: places closed at night only
+for stops before 20:00, and outdoor sights only in daylight. Later stops get places open
+at night (lit squares, sights open late) from a pool of their own.
 """
 
 import json
@@ -28,7 +29,7 @@ from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.catalog import EVENING_CATEGORIES
+from app.catalog import VENUE_CATEGORIES
 from app.db.models import Route
 from app.ingest.cities import CITIES
 from app.llm.service import LLMService
@@ -248,7 +249,7 @@ async def replace_stops(
     aware = await latest_day_weather(weather, plan, day) if plan.weather_aware else None
     today = aware.days[0] if aware else None
 
-    async def ranked(**filters: Sequence[str]) -> list[Candidate]:
+    async def ranked(open_at_night: bool = False) -> list[Candidate]:
         return await find_candidates(
             session,
             city=plan.city,
@@ -259,16 +260,16 @@ async def replace_stops(
             proximity_radius_m=proximity_radius_m(plan.modes),
             exclude_ids=sorted(planned | rejected),
             limit=REPLACE_POOL,
-            **filters,
+            exclude_categories=sorted(VENUE_CATEGORIES),
+            open_at_night=open_at_night,
         )
 
-    # Replacements take the removed stops' times: evening places, in a pool of their own,
-    # only for evening stops.
+    # Replacements take the removed stops' times: places open at night, in a pool of their
+    # own, for evening stops.
     slots = [slot_minute(s.arrive, window) for s in removed]
-    evening = sorted(EVENING_CATEGORIES)
-    pool = await ranked(exclude_categories=evening)
+    pool = await ranked()
     if any(t >= NIGHT_START_MIN for t in slots):
-        pool = merge_ranked(pool, await ranked(categories=evening))
+        pool = merge_ranked(pool, await ranked(open_at_night=True))
     planned_names = [s.name for d in plan.days for s in d.stops]
     fitting = [
         c

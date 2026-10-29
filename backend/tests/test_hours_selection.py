@@ -4,14 +4,15 @@ from app.catalog import VisitHours
 from app.optimizer.planner import DayWindow
 from app.repositories.candidates import Candidate
 from app.services.place_selection import (
+    VENUE_NOTE,
     DaySlots,
     day_slots,
     describe_hours,
-    evening_warnings,
     fit_hours,
     is_timed,
     limit_outdoor,
     merge_ranked,
+    venue_notes,
 )
 from tests.test_trip_schema import trip
 
@@ -65,11 +66,12 @@ def test_an_afternoon_holds_three_places() -> None:
 
 
 def test_a_day_until_three_in_the_morning() -> None:
+    # The evening holds 2 places, not the 3 its share of the pace would: the rest is free.
     slots = day_slots(OVERNIGHT, "moderate")
-    assert (slots.places, slots.night, slots.before_night, slots.outdoor) == (6, 3, 3, 1)
-    assert slots.busy == ((16 * H, 20 * H), (20 * H, 23 * H + 20))
+    assert (slots.places, slots.night, slots.before_night, slots.outdoor) == (5, 2, 3, 1)
+    assert slots.busy == ((16 * H, 20 * H), (20 * H, 22 * H + 13))
     assert describe_hours(OVERNIGHT, slots) == (
-        "16:00-03:00, dark from 17:41: 3 before 20:00 (at most 1 outdoors), 3 from 20:00"
+        "16:00-03:00, dark from 17:41: 3 before 20:00 (at most 1 outdoors), 2 from 20:00"
     )
 
 
@@ -78,11 +80,15 @@ def test_a_night_out_is_all_evening() -> None:
     slots = day_slots(night, "relaxed")
     assert (slots.places, slots.night, slots.outdoor) == (2, 2, 0)
     assert describe_hours(night, slots) == "21:00-03:00: 2 from 20:00"
+    # A few places, however intense the pace.
+    intense = day_slots(DayWindow(20 * H, 27 * H, 7 * H, SUNSET), "intense")
+    assert (intense.places, intense.night) == (2, 2)
+    assert intense.busy == ((20 * H, 22 * H + 20),)
 
 
 class TestFitHours:
-    SLOTS = [day_slots(OVERNIGHT, "moderate")]  # 3 before 20:00, at most 1 outdoors; 3 after
-    POOL = [place(i, "day") for i in (10, 11)] + [place(i, "night") for i in (12, 13, 14)]
+    SLOTS = [day_slots(OVERNIGHT, "moderate")]  # 3 before 20:00, at most 1 outdoors; 2 after
+    POOL = [place(i, "day") for i in (10, 11)] + [place(i, "any") for i in (12, 13)]
 
     def test_picks_that_fit_stay(self) -> None:
         picks = [place(1, "daylight"), place(2, "day"), place(3, "day")] + self.POOL[2:]
@@ -92,46 +98,20 @@ class TestFitHours:
     def test_outdoor_sights_beyond_daylight_go_indoors(self) -> None:
         picks = [place(i, "daylight") for i in (1, 2, 3)] + self.POOL[2:]
         places, swaps = fit_hours(picks, picks + self.POOL, self.SLOTS)
-        assert ids(places) == [1, 11, 10, 12, 13, 14]  # the least important ones went
+        assert ids(places) == [1, 11, 10, 12, 13]  # the least important ones went
         assert [(a.id, b.id) for a, b, _ in swaps] == [(3, 10), (2, 11)]
         assert swaps[0][2] == "Your hours leave too little daylight for it."
 
     def test_evenings_get_places_open_at_night(self) -> None:
-        picks = [place(i, "day") for i in (1, 2, 3, 4, 5)] + [place(6, "night")]
-        # Ranked: a lit square first, then the bars.
+        picks = [place(i, "day") for i in (1, 2, 3, 4, 5)]
+        # Ranked: a lit square first, then the other places open at night.
         pool = picks + [place(7, "any", score=0.5), *self.POOL[2:]]
         places, swaps = fit_hours(picks, pool, self.SLOTS)
-        assert ids(places) == [1, 2, 3, 12, 7, 6]
-        assert all(p.hours in ("night", "any") for p in places[3:])
+        assert ids(places) == [1, 2, 3, 12, 7]
+        assert all(p.hours == "any" for p in places[3:])
         assert {reason for *_, reason in swaps} == {
             "It closes at 20:00, and more of your day is in the evening."
         }
-
-    def test_afternoons_get_places_open_by_day(self) -> None:
-        # Seen live: five fado houses and a museum for an afternoon and an evening of three.
-        fado = [place(i, "night", category="restaurant") for i in (1, 2, 3, 4, 5)]
-        picks = [*fado, place(6, "day")]
-        pool = [*picks, place(7, "day"), place(8, "any"), place(9, "night"), place(10, "night")]
-        places, swaps = fit_hours(picks, pool, self.SLOTS)
-        assert sum(p.category == "restaurant" for p in places) == 1  # one dinner
-        assert sum(p.hours == "night" for p in places) == 3
-        assert sum(p.hours in ("day", "daylight") for p in places) <= 3
-        assert {p.id for p in places} >= {1, 6, 9, 10}  # the best fado house stays
-        assert {reason for *_, reason in swaps} == {
-            "One dinner an evening is enough: a bar or a square instead.",
-            "It opens at 20:00, and your hours have more time before then.",
-        }
-
-    def test_a_place_swapped_out_does_not_come_back(self) -> None:
-        dinners = [place(i, "night", category="restaurant") for i in (1, 2, 3)]
-        bar, other_bar, square = place(4, "night"), place(8, "night"), place(9, "any")
-        picks = [*dinners, bar, place(5, "day"), place(6, "day")]
-        pool = [*picks, place(7, "day"), other_bar, square]
-        places, swaps = fit_hours(picks, pool, self.SLOTS)
-        # The bar made way for the afternoon; the dinners after it take the other places.
-        assert bar not in places
-        assert ids(places) == [1, 9, 8, 7, 5, 6]
-        assert [old.id for old, _, _ in swaps] == [4, 3, 2]
 
     def test_must_visit_places_count_but_stay(self) -> None:
         must = [place(1, "daylight")]
@@ -139,6 +119,13 @@ class TestFitHours:
         places, swaps = fit_hours(picks, must + picks + self.POOL, self.SLOTS, must)
         assert ids(places) == [10, 3]  # the daylight slot is the must-visit place's
         assert [(a.id, b.id) for a, b, _ in swaps] == [(2, 10)]
+
+    def test_a_must_visit_bar_takes_an_evening_place(self) -> None:
+        bar = [place(1, "night")]
+        picks = [place(i, "day") for i in (2, 3, 4, 5)]
+        places, swaps = fit_hours(picks, bar + picks + self.POOL, self.SLOTS, bar)
+        assert ids(places) == [2, 3, 4, 12]  # the other evening place is a sight open then
+        assert [(a.id, b.id) for a, b, _ in swaps] == [(5, 12)]
 
 
 def test_rain_swaps_keep_the_time_of_day() -> None:
@@ -155,10 +142,7 @@ def test_pools_merge_into_one_ranking() -> None:
     assert ids(merge_ranked([a, c], [b, a])) == [2, 1, 3]
 
 
-def test_evening_interests_on_a_day_without_evening() -> None:
-    bars = trip(interests=["nightlife", "viewpoint"])
-    assert evening_warnings(bars, [day_slots(DEFAULT, "moderate")]) == [
-        "Bars, fado houses and restaurants open at 20:00: end the day later to visit them."
-    ]
-    assert evening_warnings(bars, [day_slots(OVERNIGHT, "moderate")]) == []
-    assert evening_warnings(trip(interests=["viewpoint"]), [day_slots(DEFAULT, "moderate")]) == []
+def test_food_and_drink_requests_get_a_note() -> None:
+    assert venue_notes(trip(interests=["nightlife", "viewpoint"])) == [VENUE_NOTE]
+    assert venue_notes(trip(interests=["restaurant"])) == [VENUE_NOTE]
+    assert venue_notes(trip(interests=["viewpoint"], avoid=["nightlife"])) == []

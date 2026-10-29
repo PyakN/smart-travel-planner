@@ -53,7 +53,8 @@ class PlanRequest(BaseModel):
     day_end: dt.time = Field(
         default=dt.time(21, 30),
         description="When each day ends; earlier than day_start: the next morning (16:00 to "
-        "03:00). After 20:00 the plan only has places open at night",
+        "03:00). After 20:00 the plan has a few places open at night (lit squares, sights open "
+        "late); the rest of the evening is free",
     )
     first_day_start: dt.time | None = Field(
         default=None,

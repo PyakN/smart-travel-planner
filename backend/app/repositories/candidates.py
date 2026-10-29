@@ -8,7 +8,7 @@ from geoalchemy2 import Geography
 from sqlalchemy import ColumnElement, Float, case, cast, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.catalog import VisitHours, is_outdoor, visit_hours
+from app.catalog import EVENING_CATEGORIES, VisitHours, is_outdoor, visit_hours
 from app.db.models import Category, Place
 from app.optimizer.geometry import LatLon
 from app.repositories.search import name_matches
@@ -51,6 +51,17 @@ def _hint(name: str, tags: dict[str, str]) -> str | None:
 
 def _as_score(condition: ColumnElement[bool], weight: float) -> ColumnElement[Any]:
     return case((condition, weight), else_=0.0)
+
+
+def _may_open_at_night() -> ColumnElement[bool]:
+    """In SQL, a superset of the places app.catalog.visit_hours opens after 20:00: evening
+    venues, lit places, squares, and places with opening hours (which may run late)."""
+    return or_(
+        Category.slug.in_(EVENING_CATEGORIES),
+        Place.tags["lit"].astext == "yes",
+        Place.tags["place"].astext == "square",
+        Place.tags.has_key("opening_hours"),
+    )
 
 
 def _geography(point: LatLon) -> ColumnElement[Any]:
@@ -97,11 +108,11 @@ async def find_candidates(
     proximity_radius_m: float = DEFAULT_PROXIMITY_RADIUS_M,
     exclude_ids: Collection[int] = (),
     limit: int = 60,
-    categories: Sequence[str] = (),
     exclude_categories: Sequence[str] = (),
+    open_at_night: bool = False,
 ) -> list[Candidate]:
-    """`categories`, if given, limits the candidates to those categories, and
-    `exclude_categories` leaves those out even when named (unlike `avoid`)."""
+    """`exclude_categories` leaves those out even when named (unlike `avoid`). `open_at_night`
+    keeps only places that can be visited after 20:00 (lit squares, places open late)."""
     keyword_match = name_matches(keywords)
     score = (
         _as_score(Place.wikidata.is_not(None), WEIGHT_WIKIDATA)
@@ -122,15 +133,20 @@ async def find_candidates(
         conditions.append(or_(Category.slug.not_in(avoid), keyword_match))
     if exclude_ids:
         conditions.append(Place.id.not_in(exclude_ids))
-    if categories:
-        conditions.append(Category.slug.in_(categories))
     if exclude_categories:
         conditions.append(Category.slug.not_in(exclude_categories))
+    if open_at_night:
+        conditions.append(_may_open_at_night())
 
     # Ties go to the closer place, then to the lower id (stable results).
     order_by = [score.desc(), *([distance] if anchors else []), Place.id]
-    stmt = _select(score, distance).where(*conditions).order_by(*order_by).limit(limit)
-    return [_to_candidate(row) for row in (await session.execute(stmt)).mappings()]
+    stmt = _select(score, distance).where(*conditions).order_by(*order_by)
+    if not open_at_night:
+        return [_to_candidate(row) for row in (await session.execute(stmt.limit(limit))).mappings()]
+    # The exact rule narrows the superset here, so the limit comes after it (the superset is
+    # small: a few hundred places in Lisbon).
+    found = map(_to_candidate, (await session.execute(stmt)).mappings())
+    return [c for c in found if c.hours in ("night", "any")][:limit]
 
 
 async def get_candidates(

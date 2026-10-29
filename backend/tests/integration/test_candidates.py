@@ -146,7 +146,7 @@ def test_get_candidates_keeps_order_and_city(
     assert names(asyncio.run(run())) == ["Miradouro de Santa Luzia", "Castelo de São Jorge"]
 
 
-def test_categories_only_and_never(db_session: SessionFactory) -> None:
+def test_excluded_categories_even_when_named(db_session: SessionFactory) -> None:
     def testville(**kwargs: Any) -> list[str]:
         async def run() -> list[Candidate]:
             async with db_session() as session:
@@ -157,5 +157,26 @@ def test_categories_only_and_never(db_session: SessionFactory) -> None:
     named = {"keywords": ["Harbour"]}
     assert "Harbour Bar" in testville(**named, avoid=["nightlife"])  # avoided, but named
     assert "Harbour Bar" not in testville(**named, exclude_categories=["nightlife"])
-    evening = testville(categories=["nightlife", "restaurant"])
-    assert sorted(evening) == ["Harbour Bar", "Old Town Fado"]
+
+
+def test_places_open_at_night(db_session: SessionFactory) -> None:
+    def testville(**kwargs: Any) -> list[Candidate]:
+        async def run() -> list[Candidate]:
+            async with db_session() as session:
+                return await find_candidates(
+                    session, city="testville", open_at_night=True, **kwargs
+                )
+
+        return asyncio.run(run())
+
+    found = testville()
+    # Not the Museum of Toys: it has opening hours, but they end at 18:00.
+    assert sorted(names(found)) == [
+        "Harbour Bar",
+        "Lantern Square",
+        "Night Market",
+        "Old Town Fado",
+    ]
+    assert {c.hours for c in found} == {"night", "any"}
+    sights = testville(exclude_categories=["nightlife", "restaurant"], limit=1)
+    assert names(sights) == ["Lantern Square"]  # the limit applies to places open at night

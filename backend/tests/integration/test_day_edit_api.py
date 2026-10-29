@@ -199,10 +199,14 @@ def test_the_day_is_over(visitor: TestClient, llm: FakeProvider, place_ids: dict
 def test_stops_drop_only_when_the_day_runs_long(
     visitor: TestClient, llm: FakeProvider, place_ids: dict[str, int]
 ) -> None:
-    # From 16:00 to 03:00: three sights before 20:00, then the bar.
+    # From 16:00 to 03:00: three sights before 20:00, then the bar the traveller put in place
+    # of the plan's evening sight (saved, so it is an ordinary stop of the day now).
     trip = saved_trip(visitor, llm, place_ids, PICKS, **OVERNIGHT)
     bar, fado = place_ids["Harbour Bar"], place_ids["Old Town Fado"]
-    assert bar in [s["place_id"] for s in stops(trip["plan"])]
+    evening = [s["place_id"] for s in stops(trip["plan"]) if s["hours"] == "any"]
+    with_bar = drafted(visitor, trip, remove=evening, add=[bar])
+    assert visitor.patch(f"/trips/{trip['id']}", json={"plan_id": with_bar["id"]}).is_success
+    assert bar in [s["place_id"] for s in stops(with_bar)] and len(stops(with_bar)) == 4
 
     # Five hours at a fado house: far longer than the relaxed pace allows (5 h 30 min in
     # all), but the day still ends by 03:00, so nothing is dropped.

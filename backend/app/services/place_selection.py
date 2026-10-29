@@ -3,12 +3,15 @@
 The LLM never invents places: it may only return ids from the candidate list, and
 `validate_selection` enforces that deterministically.
 
+Plans suggest sights only: food and drink venues (app.catalog.VENUE_CATEGORIES) are never
+candidates, even when the request names them, and are planned only as must-visit places.
+
 The days' hours decide how many places to choose and when they will be visited: a day
 fills its hours from the start, and from NIGHT_START_MIN on only places open at night fit.
-Days that reach into the evening get candidates open at night (bars, fado houses,
-restaurants) besides the usual ones, the LLM is told how many places go before and after
-20:00 and how many outdoor ones daylight leaves room for, and guards swap picks that the
-hours cannot take.
+Days that reach into the evening get a few of those (lit squares, sights open late) in a
+pool of their own besides the usual candidates; the rest of the evening is free time. The
+LLM is told how many places go before and after 20:00 and how many outdoor ones daylight
+leaves room for, and guards swap picks that the hours cannot take.
 """
 
 import json
@@ -18,7 +21,7 @@ from math import floor
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.catalog import EVENING_CATEGORIES
+from app.catalog import VENUE_CATEGORIES
 from app.ingest.cities import CITIES, City, resolve_city
 from app.ingest.osm import normalize_name
 from app.llm.service import LLMService
@@ -42,8 +45,10 @@ from app.schemas.trip import (
 from app.services.weather_service import TripWeather, describe_day, hhmm, with_daylight
 
 MIN_POOL, MAX_POOL, POOL_PER_STOP = 30, 100, 3
-# Candidates open at night, for days that reach into the evening.
+# Candidates open at night (lit squares, sights open late), for days that reach into the
+# evening; an evening holds a few of them, and the rest of it is free time.
 MIN_EVENING_POOL = 15
+MAX_EVENING_PLACES = 2
 NOTE_MAX_CHARS = 160
 # Supplementary places are pulled towards the hotel and the must-visit places: within
 # walking range for walkers, a few tram stops further when transit is allowed.
@@ -61,8 +66,8 @@ CATEGORY_GUIDE = {
     "culture": "theatres, arts centres",
     "market": "markets",
     "attraction": "other attractions: zoos, aquariums, famous sights",
-    "nightlife": "bars, pubs, clubs, fado and live music venues",
-    "restaurant": "fado restaurants and well-known restaurants, for dinner",
+    "nightlife": "bars, pubs, clubs, fado and live music venues, nightlife",
+    "restaurant": "restaurants and cafés: food, dinner",
 }
 
 PARSE_SYSTEM = f"""You convert a traveller's free-text request into a structured trip request.
@@ -109,7 +114,9 @@ HOURS_GUIDE = """When places can be visited (marked after the category): "day" c
 "any" suits day and night (lit squares, places open late)."""
 HOURS_PROMPT = f"{HOURS_GUIDE} The days' hours, in local time:"
 HOURS_RULE = "Choose for each part of the day places that can be visited then."
-DINNER_RULE = "At most one restaurant an evening: it is dinner."
+VENUE_NOTE = (
+    "Plans suggest sights only: add the restaurants and bars you want as must-visit places."
+)
 
 # The weather of a trip's days in a city, by number of days; None without a forecast.
 WeatherLookup = Callable[[City, int], Awaitable[TripWeather | None]]
@@ -153,9 +160,10 @@ def day_places(window: DayWindow, pace: Pace) -> int:
 @dataclass(frozen=True)
 class DaySlots:
     """What a day's hours hold at a pace: `places` in all, `night` of them from
-    NIGHT_START_MIN on (places open at night), and at most `outdoor` of the others outdoors
-    in daylight. `busy` is when the day is out: it fills its sightseeing time from its
-    start until 20:00, and the rest from 20:00."""
+    NIGHT_START_MIN on (a few places open at night: the rest of the evening is free time),
+    and at most `outdoor` of the others outdoors in daylight. `busy` is when the day is out
+    sightseeing: it fills that time from its start until 20:00, and the rest from 20:00, for
+    as long as the evening's places take."""
 
     places: int
     night: int
@@ -175,6 +183,10 @@ def day_slots(window: DayWindow, pace: Pace) -> DaySlots:
     night_end = night_from + max(0, min(budget - (day_end - start), window.end_min - night_from))
     by_day, at_night = day_end - start, night_end - night_from
     night = _half_up(places * at_night / (by_day + at_night)) if at_night else 0
+    if night > MAX_EVENING_PLACES:
+        night_end = night_from + round(at_night * MAX_EVENING_PLACES / night)
+        places -= night - MAX_EVENING_PLACES
+        night = MAX_EVENING_PLACES
     light = by_day
     if window.sunrise_min is not None and window.sunset_min is not None:
         light = max(0, min(day_end, window.sunset_min) - max(start, window.sunrise_min))
@@ -296,25 +308,12 @@ def fit_hours(
     slots: Sequence[DaySlots],
     must: Sequence[Candidate] = (),
 ) -> tuple[list[Candidate], list[tuple[Candidate, Candidate, str]]]:
-    """Swap picks the days' hours cannot take: places open only at night beyond the time
-    after 20:00, restaurants beyond one dinner an evening, outdoor sights beyond what
-    daylight leaves room for, then places closed at night beyond the time before 20:00.
-    Must-visit places count, but are never swapped. Returns the places and the (old, new,
-    reason) swaps."""
+    """Swap picks the days' hours cannot take: outdoor sights beyond what daylight leaves
+    room for, then places closed at night beyond the time before 20:00 (for places open at
+    night). Must-visit places count, but are never swapped. Returns the places and the
+    (old, new, reason) swaps."""
     Rule = tuple[Callable[[Candidate], bool], int, Callable[[Candidate, Candidate], bool], str]
     rules: list[Rule] = [
-        (
-            lambda c: c.hours == "night",
-            sum(s.night for s in slots),
-            lambda _, new: True,
-            "It opens at 20:00, and your hours have more time before then.",
-        ),
-        (
-            lambda c: c.category == "restaurant",
-            sum(bool(s.night) for s in slots),
-            lambda _, new: new.hours in ("night", "any"),
-            "One dinner an evening is enough: a bar or a square instead.",
-        ),
         (
             lambda c: c.hours == "daylight",
             sum(s.outdoor for s in slots),
@@ -324,8 +323,7 @@ def fit_hours(
         (
             lambda c: c.hours in ("day", "daylight"),
             sum(s.before_night for s in slots),
-            # Not a restaurant: the evenings have their dinners already.
-            lambda _, new: new.hours in ("night", "any") and new.category != "restaurant",
+            lambda _, new: new.hours == "any",
             "It closes at 20:00, and more of your day is in the evening.",
         ),
     ]
@@ -438,8 +436,6 @@ def _selection_prompt(
             for number, (window, slots) in enumerate(hours, start=1)
         )
         lines.append(HOURS_RULE)
-        if any(slots.night for _, slots in hours):
-            lines.append(DINNER_RULE)
     if weather is not None:
         lines.append(WEATHER_PROMPT)
         days = zip(weather.weather.days, weather.windows, strict=True)
@@ -468,11 +464,9 @@ def merge_ranked(*pools: Sequence[Candidate]) -> list[Candidate]:
     return sorted(unique.values(), key=lambda c: -c.score)
 
 
-def evening_warnings(trip: TripRequest, slots: Sequence[DaySlots]) -> list[str]:
-    """Evening places asked for on days that end before there is time for them."""
-    if not set(trip.interests) & EVENING_CATEGORIES or any(s.night for s in slots):
-        return []
-    return ["Bars, fado houses and restaurants open at 20:00: end the day later to visit them."]
+def venue_notes(trip: TripRequest) -> list[str]:
+    """For a request that asks for food or drink, which plans never suggest themselves."""
+    return [VENUE_NOTE] if set(trip.interests) & VENUE_CATEGORIES else []
 
 
 async def select_places(
@@ -516,7 +510,7 @@ async def select_places(
         windows = with_daylight(windows, forecast)
     slots = [day_slots(w, trip.pace) for w in windows]
     target = max(0, sum(s.places for s in slots) - len(must))
-    hours_warnings = evening_warnings(trip, slots)
+    venue_warnings = venue_notes(trip)
     if target == 0:
         return SelectionResult(
             trip=trip,
@@ -524,7 +518,7 @@ async def select_places(
             places=must,
             rationale="Your must-visit places fill the whole trip.",
             candidates_considered=0,
-            warnings=hours_warnings,
+            warnings=venue_warnings,
             must_visit=must,
             weather=forecast,
             windows=windows,
@@ -539,34 +533,27 @@ async def select_places(
     anchors = ([start] if start else []) + [LatLon(m.lat, m.lon) for m in must]
     pool = max(MIN_POOL, min(MAX_POOL, target * POOL_PER_STOP))
 
-    async def ranked(limit: int, **filters: Sequence[str]) -> list[Candidate]:
+    async def ranked(limit: int, open_at_night: bool = False) -> list[Candidate]:
         return await find_candidates(
             session,
             city=city,
             interests=trip.interests,
+            avoid=trip.avoid,
             keywords=trip.keywords,
             anchors=anchors,
             proximity_radius_m=proximity_radius_m(modes),
             exclude_ids=[m.id for m in must],
             limit=limit,
-            **filters,
+            exclude_categories=sorted(VENUE_CATEGORIES),
+            open_at_night=open_at_night,
         )
 
-    # Evening places come in pools of their own for days that have evenings, so neither
-    # crowds out the other (a "fado" keyword matches dozens of fado houses): the day's
-    # places, bars, and a few restaurants for one dinner an evening. Days without evenings
-    # only get the evening places the traveller names.
-    evening = sorted(EVENING_CATEGORIES)
+    # Days with evenings get places open at night in a pool of their own, so the day's
+    # ranking does not crowd them out: few squares are notable.
+    candidates = await ranked(pool)
     if night := sum(s.night for s in slots):
-        dinners = sum(bool(s.night) for s in slots)
-        bar_pool = max(MIN_EVENING_POOL, min(MAX_POOL, night * POOL_PER_STOP))
-        candidates = merge_ranked(
-            await ranked(pool, avoid=trip.avoid, exclude_categories=evening),
-            await ranked(bar_pool, avoid=trip.avoid, categories=["nightlife"]),
-            await ranked(dinners * POOL_PER_STOP, avoid=trip.avoid, categories=["restaurant"]),
-        )
-    else:
-        candidates = await ranked(pool, avoid=[*trip.avoid, *evening])
+        evening_pool = max(MIN_EVENING_POOL, min(MAX_POOL, night * POOL_PER_STOP))
+        candidates = merge_ranked(candidates, await ranked(evening_pool, open_at_night=True))
     candidates = without_names(candidates, [m.name for m in must])
     if not candidates:
         if not must:
@@ -577,7 +564,7 @@ async def select_places(
             must,
             "",
             0,
-            warnings=hours_warnings,
+            warnings=venue_warnings,
             must_visit=must,
             weather=forecast,
             windows=windows,
@@ -601,7 +588,7 @@ async def select_places(
         places=places,
         rationale=selection.rationale,
         candidates_considered=len(candidates),
-        warnings=hours_warnings + warnings,
+        warnings=venue_warnings + warnings,
         must_visit=must,
         notes=validate_notes(selection.notes, {p.id for p in places}),
         weather=forecast,

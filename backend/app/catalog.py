@@ -32,6 +32,9 @@ INDOOR_CASTLE_TYPES = frozenset({"palace", "stately", "manor"})
 # light), "night" (bars, fado houses, restaurants: open in the evening) or "any".
 VisitHours = Literal["any", "day", "daylight", "night"]
 EVENING_CATEGORIES = frozenset({"nightlife", "restaurant"})
+# Food and drink, open at night or not: plans suggest sights only, so these are planned
+# only when the traveller picks them (must-visit places, places added to a day).
+VENUE_CATEGORIES = frozenset({"nightlife", "restaurant"})
 # Open until this late on some day (or past midnight): the place suits the evening too.
 LATE_CLOSING_MIN = 22 * 60
 _CLOSING_TIME = re.compile(r"-\s*(\d{1,2}):(\d{2})")
