@@ -553,14 +553,16 @@ def _split_strategies(problem: _Problem, days: int) -> dict[str, list[list[int]]
 
 
 def _fit_budget(
-    problem: _Problem, order: list[int], day: int
+    problem: _Problem, order: list[int], day: int, *, shorten: bool = False
 ) -> tuple[list[int], list[int], list[int]]:
     """Drop stops until the day fits; returns (order, dropped for time, dropped for hours).
 
     While a visit runs past closing time or sunset, the least important stop with such hours
     goes (one that cannot be visited that day at all first); while the day is too long, the
     least important stop. Optional stops go first, must-visit ones only when nothing
-    optional is left; protected ones never do.
+    optional is left; protected ones never do. With `shorten`, a stop is dropped for time
+    only if the day is shorter without it: an afternoon sight stays when the evening runs
+    long, as the evening would wait for the bars to open anyway.
     """
     over: list[int] = []
     closed: list[int] = []
@@ -568,6 +570,13 @@ def _fit_budget(
         cost = problem.day_cost(order, day, weather=False)
         timed = [i for i in problem.timed_stops(order, day) if i not in problem.protected]
         droppable = [i for i in order if i not in problem.protected]
+        if shorten and cost.length > problem.budgets[day]:
+            droppable = [
+                i
+                for i in droppable
+                if problem.day_cost([j for j in order if j != i], day, weather=False).length
+                < cost.length
+            ]
         if cost.late and timed:
             candidates, dropped = timed, closed
         elif cost.length > problem.budgets[day] and len(order) > 1 and droppable:
@@ -1096,12 +1105,12 @@ async def replan_day(
         )
         order = after.solve_day(rest, 0)
         full_end_min = begin_min + after.day_cost(order, 0, weather=False).length
-        order, over, closed = _fit_budget(after, order, 0)
+        order, over, closed = _fit_budget(after, order, 0, shorten=True)
         if conditions is not None:
             order = _reorder(after, order, 0)
         if after.timed:
             order = _reorder(after, order, 0)
-            order, more_over, more_closed = _fit_budget(after, order, 0)
+            order, more_over, more_closed = _fit_budget(after, order, 0, shorten=True)
             over, closed = over + more_over, closed + more_closed
         if transit is None or attempt == TRANSIT_ROUNDS:
             break

@@ -177,6 +177,20 @@ def test_must_visit_protected_and_next_stops_are_never_dropped() -> None:
     assert result.over and all(s.priority < 10 for s in result.over)
 
 
+def test_only_stops_that_make_the_day_shorter_are_dropped() -> None:
+    # From 18:00, a square, then the bar and a dinner the traveller added, both from 20:00:
+    # the evening runs past 22:00. Without the square the evening would still wait for
+    # 20:00, so the bar goes, although the square matters less.
+    origin = Origin(HOTEL.lat, HOTEL.lon, minute=18 * H)
+    bar = stop(1, east=2, stay=60, category="nightlife", hours="night")
+    square = stop(2, east=1)
+    dinner = stop(3, east=3, stay=90, category="restaurant", hours="night")
+    result = replan([], [bar, square, dinner], origin=origin, protected=[dinner.id])
+    assert ids(result) == [square.id, dinner.id]
+    assert result.over == [bar]
+    assert result.full_end_min > DAY.end_min + REPLAN_GRACE_MIN >= result.end_min
+
+
 def test_protected_stops_stay_even_when_the_day_runs_long() -> None:
     stops = [stop(i, east=i, stay=120) for i in range(7)]
     result = replan([], stops, protected=[s.id for s in stops])
