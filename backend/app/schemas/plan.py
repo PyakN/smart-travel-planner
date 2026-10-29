@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.catalog import VisitHours
 from app.ingest.cities import CITIES
-from app.schemas.trip import MAX_REQUEST_CHARS, TripRequest
+from app.schemas.trip import MAX_DAYS, MAX_REQUEST_CHARS, TripRequest
 
 TravelMode = Literal["walk", "transit"]
 ALL_MODES: list[TravelMode] = ["walk", "transit"]
@@ -20,6 +20,22 @@ class StartIn(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     round_trip: bool = False
+
+
+class DayHoursIn(BaseModel):
+    start: dt.time = Field(description="When the day starts, in the city's local time")
+    end: dt.time = Field(description="When it ends; earlier than start: the next morning")
+
+    @model_validator(mode="after")
+    def _has_hours(self) -> Self:
+        if self.start == self.end:
+            raise ValueError("a day's end must differ from its start")
+        return self
+
+
+class DayHours(BaseModel):
+    start: str = Field(description="HH:MM")
+    end: str = Field(description="HH:MM; not after start: the next morning")
 
 
 class PlanRequest(BaseModel):
@@ -67,6 +83,19 @@ class PlanRequest(BaseModel):
         description="When the first day starts, if not at day_start (e.g. now, for a trip that "
         "starts today). A trip that starts today never starts before the current time",
     )
+    day_count: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_DAYS,
+        description="Number of days, in place of the one the text gives (1 if it gives none)",
+    )
+    day_hours: list[DayHoursIn] = Field(
+        default_factory=list,
+        max_length=MAX_DAYS,
+        description="Each day's own hours, day 1 first, in place of day_start, day_end and "
+        "first_day_start: one per day, and as many days as there are hours when day_count is "
+        "unset. A trip that starts today still starts no earlier than now",
+    )
 
     @field_validator("city")
     @classmethod
@@ -84,6 +113,18 @@ class PlanRequest(BaseModel):
     def _day_has_hours(self) -> Self:
         if self.day_start == self.day_end:
             raise ValueError("day_end must differ from day_start")
+        return self
+
+    @model_validator(mode="after")
+    def _hours_for_each_day(self) -> Self:
+        if not self.day_hours:
+            return self
+        if self.first_day_start is not None:
+            raise ValueError("with day_hours, the first day starts at day_hours[0].start")
+        if self.day_count is None:
+            self.day_count = len(self.day_hours)
+        elif self.day_count != len(self.day_hours):
+            raise ValueError("day_hours needs one entry per day of day_count")
         return self
 
 
@@ -298,3 +339,6 @@ class PlanResponse(BaseModel):
     day_start: str = "09:30"
     day_end: str = "21:30"
     first_day_start: str | None = None
+    day_hours: list[DayHours] = Field(default_factory=list)
+    # The number of days asked for in the request; None: the text's.
+    day_count: int | None = None

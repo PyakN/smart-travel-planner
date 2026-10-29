@@ -20,6 +20,12 @@ export interface StartPoint {
   round_trip: boolean;
 }
 
+/** A day's hours, "HH:MM" in the city's time; an end not after the start is the next morning. */
+export interface DayHours {
+  start: string;
+  end: string;
+}
+
 export interface PlanRequest {
   text: string;
   start?: StartPoint | null;
@@ -36,6 +42,10 @@ export interface PlanRequest {
   day_end?: string;
   /** "HH:MM": when the first day starts, if not at day_start (today: from now). */
   first_day_start?: string | null;
+  /** Number of days (1–7), in place of the one the text gives. */
+  day_count?: number | null;
+  /** Each day's own hours, day 1 first, in place of day_start, day_end and first_day_start. */
+  day_hours?: DayHours[];
 }
 
 export interface ReplaceRequest {
@@ -263,6 +273,10 @@ export interface PlanResponse {
   day_start: string;
   day_end: string;
   first_day_start: string | null;
+  /** Each day's own hours as asked for; empty when every day has day_start to day_end. */
+  day_hours: DayHours[];
+  /** The number of days asked for; null: the text's. */
+  day_count: number | null;
 }
 
 /** The logged-in user (GET /auth/me). */

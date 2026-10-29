@@ -211,6 +211,51 @@ def test_a_day_until_three_in_the_morning(
     assert "dropped 2 stop(s) that are closed or dark in the day's hours" in plan["warnings"]
 
 
+def test_each_day_has_its_own_hours(
+    client: TestClient, llm: FakeProvider, place_ids: dict[str, int], db_session: SessionFactory
+) -> None:
+    queue_relaxed_day(llm, place_ids)  # the text gives one day
+    hours = [{"start": "10:00", "end": "18:00"}, {"start": "16:00", "end": "21:30"}]
+    response = post_plan(client, start_date="2026-10-28", day_hours=hours)
+    assert response.status_code == 201, response.text
+    plan = response.json()
+
+    assert plan["trip"]["days"] == plan["day_count"] == 2  # a day for each hours
+    # Places per day follow each day's hours: 3 for 8 hours, 2 for 5 h 30 min (relaxed).
+    assert "Number of places to choose: 5" in str(llm.calls[1]["prompt"])
+    assert [(d["start"], d["end"]) for d in plan["days"]] == [
+        ("10:00", "18:00"),
+        ("16:00", "21:30"),
+    ]
+    for day in plan["days"]:
+        assert all(day["start"] <= s["arrive"] and s["leave"] <= day["end"] for s in day["stops"])
+    assert plan["day_hours"] == hours
+    assert client.get(f"/plans/{plan['id']}").json() == plan
+
+    async def params() -> dict[str, Any]:
+        async with db_session() as session:
+            route = await session.get(Route, plan["id"])
+            assert route is not None
+            return route.params
+
+    stored = asyncio.run(params())
+    assert (stored["day_hours"], stored["day_count"]) == (hours, 2)
+    assert [w[:2] for w in stored["windows"]] == [[10 * 60, 18 * 60], [16 * 60, 21 * 60 + 30]]
+
+
+def test_the_number_of_days_overrides_the_text(
+    client: TestClient, llm: FakeProvider, place_ids: dict[str, int]
+) -> None:
+    queue_relaxed_day(llm, place_ids)  # the text gives one day
+    response = post_plan(client, start_date="2026-10-28", day_count=2)
+    assert response.status_code == 201, response.text
+    plan = response.json()
+    assert plan["trip"]["days"] == plan["day_count"] == 2
+    assert "Number of places to choose: 8" in str(llm.calls[1]["prompt"])  # 4 a day, relaxed
+    assert '"days": 2' in str(llm.calls[1]["prompt"])
+    assert plan["day_hours"] == []
+
+
 def test_rides_follow_real_transit_routes(
     client: TestClient, llm: FakeProvider, place_ids: dict[str, int]
 ) -> None:
@@ -292,6 +337,9 @@ def test_llm_not_configured_is_503(client: TestClient) -> None:
         {"text": "ok", "must_visit": list(range(11))},
         {"text": "ok", "day_start": "10:00", "day_end": "10:00"},
         {"text": "ok", "day_start": "25:00"},
+        {"text": "ok", "day_count": 0},
+        {"text": "ok", "day_count": 8},
+        {"text": "ok", "day_count": 1, "day_hours": [{"start": "10:00", "end": "18:00"}] * 2},
     ],
     ids=[
         "empty",
@@ -302,6 +350,9 @@ def test_llm_not_configured_is_503(client: TestClient) -> None:
         "too-many-must-visit",
         "no-hours",
         "bad-hour",
+        "no-days",
+        "too-many-days",
+        "hours-of-other-days",
     ],
 )
 def test_request_validation(client: TestClient, llm: FakeProvider, body: dict[str, Any]) -> None:

@@ -72,7 +72,7 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 | `GET /places` | Search: `q` (name contains, accents ignored), `city`, `category` (repeatable), `bbox=west,south,east,north`, or `lat`+`lon`+`radius_m` (sorted by distance); `limit` / `offset` |
 | `GET /places/{id}` | One place |
 | `GET /categories` | Categories with place counts (optional `city`) |
-| `POST /plan` | **Plan a trip from text**: `{"text", "city"?: slug, "start"?: {"lat", "lon", "round_trip"}, "must_visit"?: [place ids], "modes"?: ["walk", "transit"], "start_date"?: "YYYY-MM-DD", "weather_aware"?: bool, "day_start"?: "HH:MM", "day_end"?: "HH:MM", "first_day_start"?: "HH:MM"}` → dated days with their hours, ordered, timed stops (photo, description, personal note, opening hours, free time before them, forecast), when a free evening begins (`free_from`) and map geometry. Saved; returns `id` |
+| `POST /plan` | **Plan a trip from text**: `{"text", "city"?: slug, "start"?: {"lat", "lon", "round_trip"}, "must_visit"?: [place ids], "modes"?: ["walk", "transit"], "start_date"?: "YYYY-MM-DD", "weather_aware"?: bool, "day_start"?: "HH:MM", "day_end"?: "HH:MM", "first_day_start"?: "HH:MM", "day_count"?: 1-7, "day_hours"?: [{"start", "end"}]}` → dated days with their hours, ordered, timed stops (photo, description, personal note, opening hours, free time before them, forecast), when a free evening begins (`free_from`) and map geometry. Saved; returns `id` |
 | `GET /plans/{id}` | A saved plan |
 | `POST /plans/{id}/replace` | **Replace stops of a day**: `{"day", "place_ids"}` → a new saved version (`parent_id` = this plan), with an `edit` listing what was replaced, added, adjusted and dropped |
 | `POST /auth/signup` | Create an account and log in: `{"email", "password", "display_name"}` (password 8+ characters); 409 if the email has an account |
@@ -207,6 +207,12 @@ day's hours in the city's time; an end before the start runs to the next morning
 current time in Lisbon when the trip starts today, and later days keep their own start. A
 trip that starts today never starts before now (the backend rounds up to the quarter hour
 and says so in the warnings).
+
+`day_count` (the form's Days, "As described" by default) sets the number of days in place of
+the one the text gives. `day_hours` gives each day its own hours instead, day 1 first, one per
+day (the form's "Different hours each day", offered from 2 days on): a 10:00–18:00 Friday, a
+13:00–23:30 Saturday and a short Sunday. A day may run past midnight, but not past the start of
+the next one.
 
 - **The pace is a share of the hours:** relaxed ½, moderate ⅔, intense ⅚ of them go to
   travel and visits, the rest to meals and rest. The default day plans exactly as before (8 h

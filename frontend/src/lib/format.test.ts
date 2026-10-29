@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addDays,
   categoryIcon,
   categoryLabel,
   cityDate,
@@ -10,6 +11,7 @@ import {
   dayColor,
   dayHours,
   dayLength,
+  dayLengthLabel,
   departureLabel,
   describeAdjustment,
   describeDayChange,
@@ -17,6 +19,7 @@ import {
   describeEdit,
   describeHoursSwap,
   describeWeatherSwap,
+  eachDayHint,
   exposedStops,
   formatDate,
   formatDistance,
@@ -320,6 +323,12 @@ describe("weather", () => {
     expect(cityDate(0, newYearsEve, "Europe/Kyiv")).toBe("2027-01-01");
   });
 
+  it("counts the dates of a trip's days", () => {
+    expect(addDays("2026-10-30", 0)).toBe("2026-10-30");
+    expect(addDays("2026-10-30", 2)).toBe("2026-11-01");
+    expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
+  });
+
   it("finds outdoor stops the weather spoils", () => {
     const day: DayForecast = {
       condition: "rain",
@@ -386,6 +395,31 @@ describe("day hours", () => {
     );
     expect(hoursHint("16:15", "21:30", "09:30")).toBe("5 h 15 min today.");
     expect(hoursHint("23:15", "03:00", "09:30")).toMatch(/^3 h 45 min today, until 03:00 the next/);
+  });
+
+  it("explains days that each have their own hours", () => {
+    expect(dayLengthLabel({ start: "10:00", end: "18:00" })).toBe("8 h");
+    expect(dayLengthLabel({ start: "16:00", end: "03:00" })).toBe("11 h, until the next morning");
+    expect(dayLengthLabel({ start: "10:00", end: "10:00" })).toBe("Pick an end after the start");
+    const daytime = { start: "09:30", end: "21:30" };
+    expect(eachDayHint([daytime, { start: "12:00", end: "18:00" }])).toBeNull();
+    expect(eachDayHint([daytime, { start: "16:00", end: "03:00" }])).toMatch(/^After 20:00/);
+    expect(eachDayHint([daytime, { start: "10:00", end: "23:00" }])).toMatch(/^After 20:00/);
+    expect(eachDayHint([{ start: "10:00", end: "10:00" }, daytime])).toBe(
+      "Pick an end time after the start of every day.",
+    );
+    expect(
+      eachDayHint([
+        { start: "16:00", end: "03:00" },
+        { start: "02:00", end: "12:00" },
+      ]),
+    ).toBe("Day 1 ends at 03:00 the next day, after day 2 starts at 02:00.");
+    expect(
+      eachDayHint([
+        { start: "16:00", end: "03:00" },
+        { start: "03:00", end: "12:00" },
+      ]),
+    ).toMatch(/^After 20:00/);
   });
 
   it("shows a day's hours and the free time before a place that opens later", () => {

@@ -1,6 +1,7 @@
 import type {
   Adjustment,
   Attribution,
+  DayHours,
   DroppedStop,
   ForecastSlot,
   PlanEdit,
@@ -288,6 +289,14 @@ export function dayLength(start: string, end: string): number {
   return length > 0 ? length : length + MINUTES_PER_DAY;
 }
 
+const EVENING_NOTE =
+  "After 20:00 the plan has a few lit squares and sights open late, and the rest of the evening is free: find places to eat and drink from your saved trip, or add them as must-visit places.";
+
+/** Past 22:00 an evening is long enough to plan with places open at night. */
+function lateEvening(start: string, end: string): boolean {
+  return clockMinutes(end) < clockMinutes(start) || clockMinutes(end) > 22 * 60;
+}
+
 /**
  * A day's hours in a few words: "12 h a day", "11 h a day, until 03:00 the next morning".
  * With `laterStart`, `start` is today's (from now) and later days start then: whether the
@@ -303,9 +312,27 @@ export function hoursHint(start: string, end: string, laterStart: string | null 
   const hint = overnight
     ? `${formatDuration(length)} ${days}, until ${end} the next morning.`
     : `${formatDuration(length)} ${days}.`;
-  // Past 22:00 an evening is long enough to plan with places open at night.
-  if (!overnight && clockMinutes(end) <= 22 * 60) return hint;
-  return `${hint} After 20:00 the plan has a few lit squares and sights open late, and the rest of the evening is free: find places to eat and drink from your saved trip, or add them as must-visit places.`;
+  return lateEvening(dayStart, end) ? `${hint} ${EVENING_NOTE}` : hint;
+}
+
+/** How long a day of its own hours is: "8 h", "11 h, until the next morning". */
+export function dayLengthLabel({ start, end }: DayHours): string {
+  if (start === end) return "Pick an end after the start";
+  const length = formatDuration(dayLength(start, end));
+  return clockMinutes(end) < clockMinutes(start) ? `${length}, until the next morning` : length;
+}
+
+/** The hint under days that each have their own hours; null when there is nothing to say. */
+export function eachDayHint(days: DayHours[]): string | null {
+  if (days.some((d) => d.start === d.end)) return "Pick an end time after the start of every day.";
+  for (let i = 1; i < days.length; i++) {
+    const { start, end } = days[i - 1];
+    const overnight = clockMinutes(end) < clockMinutes(start);
+    if (overnight && clockMinutes(end) > clockMinutes(days[i].start)) {
+      return `Day ${i} ends at ${end} the next day, after day ${i + 1} starts at ${days[i].start}.`;
+    }
+  }
+  return days.some((d) => lateEvening(d.start, d.end)) ? EVENING_NOTE : null;
 }
 
 /** "16:00–03:00" for a day's hours; null on plans saved before days had hours. */
@@ -373,7 +400,12 @@ export function formatDate(isoDate: string): string {
  * "today" is Lisbon's today wherever the traveller's browser is.
  */
 export function cityDate(days = 0, now: Date = new Date(), timeZone = CITY_TIME_ZONE): string {
-  const [year, month, day] = cityNow(timeZone, now).date.split("-").map(Number);
+  return addDays(cityNow(timeZone, now).date, days);
+}
+
+/** "YYYY-MM-DD" of the date `days` after `isoDate`. */
+export function addDays(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day + days));
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;

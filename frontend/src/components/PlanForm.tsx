@@ -3,8 +3,17 @@
 import { useEffect, useState } from "react";
 
 import MustVisitPicker from "@/components/MustVisitPicker";
-import { CITY_NAME, cityDate, clockTime, hoursHint } from "@/lib/format";
-import type { PlaceRef, StartPoint, TravelMode } from "@/lib/types";
+import {
+  CITY_NAME,
+  addDays,
+  cityDate,
+  clockTime,
+  dayLengthLabel,
+  eachDayHint,
+  formatDate,
+  hoursHint,
+} from "@/lib/format";
+import type { DayHours, PlaceRef, StartPoint, TravelMode } from "@/lib/types";
 
 const EXAMPLES = [
   "2 days in Lisbon, first time here. Viewpoints, the castle, Belém and one great museum.",
@@ -20,6 +29,7 @@ const LOADING_STEPS = [
 ];
 
 const MAX_CHARS = 1000;
+const MAX_DAYS = 7;
 
 const MODES: { mode: TravelMode; label: string }[] = [
   { mode: "walk", label: "Walking" },
@@ -74,6 +84,15 @@ export interface PlanFormProps {
   onLaterStartTimeChange: (time: string) => void;
   /** Minutes since midnight in the city, for a trip that starts today. */
   nowMinutes: number | null;
+  /** The number of days picked; null: as many as the description says. */
+  dayCount: number | null;
+  onDayCountChange: (days: number | null) => void;
+  /** Each day has its own hours (`dayHours`) instead of the shared start and end. */
+  eachDay: boolean;
+  onEachDayChange: (eachDay: boolean) => void;
+  /** The hours of each of the `dayCount` days, day 1 first. */
+  dayHours: DayHours[];
+  onDayHoursChange: (index: number, change: Partial<DayHours>) => void;
   loading: boolean;
   onSubmit: () => void;
 }
@@ -88,6 +107,55 @@ function LoadingSteps() {
     return () => clearInterval(timer);
   }, []);
   return <span>{LOADING_STEPS[step]}</span>;
+}
+
+function EachDayHours({
+  startDate,
+  days,
+  onChange,
+  disabled,
+}: {
+  startDate: string;
+  days: DayHours[];
+  onChange: (index: number, change: Partial<DayHours>) => void;
+  disabled: boolean;
+}) {
+  return (
+    <ol className="mt-2 space-y-2">
+      {days.map((hours, i) => (
+        <li key={i} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <div className="leading-tight">
+            <div className="text-zinc-700">
+              Day {i + 1}{" "}
+              <span className="text-xs text-zinc-500">{formatDate(addDays(startDate, i))}</span>
+            </div>
+            <div className="text-xs text-zinc-500">{dayLengthLabel(hours)}</div>
+          </div>
+          <div className="flex items-center gap-1.5 text-zinc-500">
+            <input
+              type="time"
+              aria-label={`Day ${i + 1} start`}
+              value={hours.start}
+              required
+              disabled={disabled}
+              onChange={(event) => onChange(i, { start: event.target.value })}
+              className={TIME_INPUT}
+            />
+            –
+            <input
+              type="time"
+              aria-label={`Day ${i + 1} end`}
+              value={hours.end}
+              required
+              disabled={disabled}
+              onChange={(event) => onChange(i, { end: event.target.value })}
+              className={TIME_INPUT}
+            />
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 export default function PlanForm({
@@ -113,10 +181,19 @@ export default function PlanForm({
   laterStartTime,
   onLaterStartTimeChange,
   nowMinutes,
+  dayCount,
+  onDayCountChange,
+  eachDay,
+  onEachDayChange,
+  dayHours,
+  onDayHoursChange,
   loading,
   onSubmit,
 }: PlanFormProps) {
   const canSubmit = text.trim().length > 0 && !loading;
+  const perDay = eachDay && dayHours.length > 1;
+  const perDayHint = perDay ? eachDayHint(dayHours) : null;
+  const nowNote = nowMinutes !== null && ` It is ${clockTime(nowMinutes)} in ${CITY_NAME} now.`;
 
   return (
     <form
@@ -238,47 +315,100 @@ export default function PlanForm({
             className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
           />
         </label>
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-zinc-700">
-          <label className="flex items-center gap-2">
-            {laterStartTime === null ? "Start" : "Start today"}
+        <label className="mt-2 flex items-center justify-between gap-3 text-zinc-700">
+          Days
+          <select
+            value={dayCount ?? ""}
+            disabled={loading}
+            onChange={(event) =>
+              onDayCountChange(event.target.value ? Number(event.target.value) : null)
+            }
+            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          >
+            <option value="">As described</option>
+            {Array.from({ length: MAX_DAYS }, (_, i) => i + 1).map((n) => (
+              <option key={n} value={n}>
+                {n === 1 ? "1 day" : `${n} days`}
+              </option>
+            ))}
+          </select>
+        </label>
+        {dayCount === null && (
+          <p className="mt-1 text-xs text-zinc-500">
+            As many as your description says, or 1. Pick a number to give each day its own hours.
+          </p>
+        )}
+        {dayCount !== null && dayCount > 1 && (
+          <label className="mt-2 flex items-center gap-2 text-zinc-700">
             <input
-              type="time"
-              value={startTime}
-              required
+              type="checkbox"
+              checked={eachDay}
               disabled={loading}
-              onChange={(event) => onStartTimeChange(event.target.value)}
-              className={TIME_INPUT}
+              onChange={(event) => onEachDayChange(event.target.checked)}
             />
-          </label>
-          <label className="flex items-center gap-2">
-            End
-            <input
-              type="time"
-              value={endTime}
-              required
-              disabled={loading}
-              onChange={(event) => onEndTimeChange(event.target.value)}
-              className={TIME_INPUT}
-            />
-          </label>
-        </div>
-        {laterStartTime !== null && (
-          <label className="mt-2 flex items-center justify-between gap-3 text-xs text-zinc-600">
-            Later days start at
-            <input
-              type="time"
-              value={laterStartTime}
-              required
-              disabled={loading}
-              onChange={(event) => onLaterStartTimeChange(event.target.value)}
-              className={TIME_INPUT}
-            />
+            Different hours each day
           </label>
         )}
-        <p className="mt-1 text-xs text-zinc-500">
-          {hoursHint(startTime, endTime, laterStartTime)}
-          {nowMinutes !== null && ` It is ${clockTime(nowMinutes)} in ${CITY_NAME} now.`}
-        </p>
+        {perDay ? (
+          <>
+            <EachDayHours
+              startDate={startDate}
+              days={dayHours}
+              onChange={onDayHoursChange}
+              disabled={loading}
+            />
+            {(perDayHint || nowNote) && (
+              <p className="mt-2 text-xs text-zinc-500">
+                {perDayHint}
+                {nowNote}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-zinc-700">
+              <label className="flex items-center gap-2">
+                {laterStartTime === null ? "Start" : "Start today"}
+                <input
+                  type="time"
+                  value={startTime}
+                  required
+                  disabled={loading}
+                  onChange={(event) => onStartTimeChange(event.target.value)}
+                  className={TIME_INPUT}
+                />
+              </label>
+              <label className="flex items-center gap-2">
+                End
+                <input
+                  type="time"
+                  value={endTime}
+                  required
+                  disabled={loading}
+                  onChange={(event) => onEndTimeChange(event.target.value)}
+                  className={TIME_INPUT}
+                />
+              </label>
+            </div>
+            {laterStartTime !== null && (
+              <label className="mt-2 flex items-center justify-between gap-3 text-xs text-zinc-600">
+                Later days start at
+                <input
+                  type="time"
+                  value={laterStartTime}
+                  required
+                  disabled={loading}
+                  onChange={(event) => onLaterStartTimeChange(event.target.value)}
+                  className={TIME_INPUT}
+                />
+              </label>
+            )}
+            <p className="mt-1 text-xs text-zinc-500">
+              {hoursHint(startTime, endTime, laterStartTime)}
+              {nowNote}
+            </p>
+          </>
+        )}
         <label className="mt-2 flex items-center gap-2 text-zinc-700">
           <input
             type="checkbox"

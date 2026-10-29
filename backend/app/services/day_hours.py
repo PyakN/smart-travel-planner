@@ -1,5 +1,5 @@
-"""The hours of a trip's days: the traveller's daily hours, a first day that starts later
-(today: from now on), and every day's daylight.
+"""The hours of a trip's days: the traveller's daily hours or each day's own, a first day
+that starts later (today: from now on), and every day's daylight.
 
 Times are the city's wall clock in minutes since midnight of each trip day, as in the
 optimizer; a day that ends after midnight ends past 24 * 60.
@@ -8,6 +8,7 @@ optimizer; a day that ends after midnight ends past 24 * 60.
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from math import ceil
+from typing import Any
 
 from app.ingest.cities import City
 from app.optimizer.planner import MINUTES_PER_DAY, DayWindow
@@ -28,17 +29,37 @@ def minute_of(moment: time) -> int:
 @dataclass(frozen=True)
 class DailyHours:
     """The traveller's hours: every day from `start` to `end` (the next morning when `end`
-    is not after `start`), and the first day from `first_start` if that is given."""
+    is not after `start`), and the first day from `first_start` if that is given. Days in
+    `each` (day 1 first) have their own (start, end) instead."""
 
     start: time = time(9, 30)
     end: time = time(21, 30)
     first_start: time | None = None
+    each: tuple[tuple[time, time], ...] = ()
 
-    def as_params(self) -> dict[str, str | None]:
+    def of_day(self, index: int) -> tuple[int, int]:
+        """Start and end of day `index` (0 is the first) in minutes; an end the next
+        morning is past 24 * 60."""
+        if index < len(self.each):
+            start, end = map(minute_of, self.each[index])
+        else:
+            # A later first start keeps the days' end: 09:30 to 21:30 from 16:00 ends at 21:30.
+            start, end = minute_of(self.start), minute_of(self.end)
+        if end <= start:
+            end += MINUTES_PER_DAY
+        if index == 0 and self.first_start is not None and not self.each:
+            start = minute_of(self.first_start)
+        return start, end
+
+    def as_params(self) -> dict[str, Any]:
         return {
             "day_start": hhmm(minute_of(self.start)),
             "day_end": hhmm(minute_of(self.end)),
             "first_day_start": hhmm(minute_of(self.first_start)) if self.first_start else None,
+            "day_hours": [
+                {"start": hhmm(minute_of(start)), "end": hhmm(minute_of(end))}
+                for start, end in self.each
+            ],
         }
 
 
@@ -56,17 +77,12 @@ def trip_windows(
 ) -> list[DayWindow]:
     """The hours of the trip's days from `first` on. A first day that is today in the city
     starts no earlier than `now`. Raises PlanningError for hours that leave no time."""
-    start, end = minute_of(hours.start), minute_of(hours.end)
-    if end <= start:
-        end += MINUTES_PER_DAY
     local_now = now.astimezone(city.tz)
     point = city_point(city)
-    windows = []
+    windows: list[DayWindow] = []
     for i in range(days):
         day = first + timedelta(days=i)
-        day_start = start
-        if i == 0 and hours.first_start is not None:
-            day_start = minute_of(hours.first_start)
+        day_start, end = hours.of_day(i)
         if i == 0 and day == local_now.date():
             current = _now_min(local_now)
             if current > end - MIN_DAY_MIN:
@@ -84,6 +100,11 @@ def trip_windows(
             raise PlanningError(
                 f"Day {i + 1} from {hhmm(day_start)} to {hhmm(end)} the next day is longer "
                 "than a day."
+            )
+        if windows and windows[-1].end_min - MINUTES_PER_DAY > day_start:
+            raise PlanningError(
+                f"Day {i} ends at {hhmm(windows[-1].end_min)} the next day, after day {i + 1} "
+                f"starts at {hhmm(day_start)}."
             )
         sunrise, sunset = daylight(day, point.lat, point.lon, city.tz)
         windows.append(DayWindow(day_start, end, sunrise, sunset, on=day))

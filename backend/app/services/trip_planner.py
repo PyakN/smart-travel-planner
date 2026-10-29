@@ -53,7 +53,7 @@ from app.schemas.plan import (
     TravelMode,
 )
 from app.schemas.trip import Pace
-from app.services.day_hours import DEFAULT_HOURS, DailyHours, minute_of, trip_windows
+from app.services.day_hours import DEFAULT_HOURS, DailyHours, trip_windows
 from app.services.place_selection import (
     HoursLookup,
     PlanningError,
@@ -360,7 +360,7 @@ def hours_lookup(hours: DailyHours, start_date: date | None, now: datetime | Non
 
 def late_start_warnings(hours: DailyHours, windows: Sequence[DayWindow]) -> list[str]:
     """A trip that starts today, later than asked: now is too late for that."""
-    asked = minute_of(hours.first_start or hours.start)
+    asked, _ = hours.of_day(0)
     if not windows or windows[0].start_min <= asked:
         return []
     return [f"Day 1 starts at {hhmm(windows[0].start_min)}: it is past {hhmm(asked)} already."]
@@ -434,11 +434,13 @@ async def plan_trip(
     weather_aware: bool = False,
     hours: DailyHours = DEFAULT_HOURS,
     now: datetime | None = None,
+    day_count: int | None = None,
     chosen_city: str | None = None,
 ) -> PlanResponse:
     """`weather_aware` plans with the `weather` forecast and gives every day and stop its
     forecast; other plans never ask for it. `hours` are the days' hours; a first day that
-    is today starts at `now` (the current time) or later. `chosen_city` is the trip's city (see
+    is today starts at `now` (the current time) or later. `day_count` is the number of
+    days, in place of the one the text gives; `chosen_city` the trip's city (see
     select_places)."""
     watch = Stopwatch()
     selection = await select_places(
@@ -452,6 +454,7 @@ async def plan_trip(
         weather=weather_lookup(weather, start_date) if weather and weather_aware else None,
         weather_aware=weather_aware,
         hours=hours_lookup(hours, start_date, now),
+        day_count=day_count,
         chosen_city=chosen_city,
     )
     watch.lap("selection")
@@ -529,6 +532,7 @@ async def plan_trip(
         "start_date": first.isoformat(),
         "weather_aware": weather_aware,
         **hours.as_params(),
+        "day_count": day_count,
         "windows": [window_params(w) for w in windows],
     }
     return await save_plan(
@@ -561,6 +565,7 @@ async def plan_trip(
             weather_swaps=swaps,
             hours_swaps=hours_swaps,
             **hours.as_params(),
+            day_count=day_count,
         ),
     )
 

@@ -26,6 +26,7 @@ import { DEFAULT_DAY_END, DEFAULT_DAY_START, cityDate, cityNow, startingNow } fr
 import { authHref } from "@/lib/navigation";
 import type {
   DayEditRequest,
+  DayHours,
   PlaceRef,
   PlannedStop,
   PlanResponse,
@@ -96,6 +97,12 @@ export default function Planner() {
   const [pickedStart, setPickedStart] = useState<string | null>(null);
   const [endTime, setEndTime] = useState(DEFAULT_DAY_END);
   const [laterStart, setLaterStart] = useState(DEFAULT_DAY_START);
+  // The number of days picked; null: as many as the description says.
+  const [dayCount, setDayCount] = useState<number | null>(null);
+  // Each day has its own hours: the shared ones until the traveller changes them (`ownHours`,
+  // by day index).
+  const [eachDay, setEachDay] = useState(false);
+  const [ownHours, setOwnHours] = useState<Partial<DayHours>[]>([]);
   const [replacing, setReplacing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editingDay, setEditingDay] = useState(false);
@@ -155,6 +162,9 @@ export default function Planner() {
     setPickedStart(saved.day_start === DEFAULT_DAY_START ? null : saved.day_start);
     setLaterStart(saved.day_start);
     setEndTime(saved.day_end);
+    setDayCount(saved.day_count);
+    setEachDay(saved.day_hours.length > 0);
+    setOwnHours(saved.day_hours);
     setSelectedDay(saved.edit?.day ?? 1);
     setEditError(null);
     setStatus({ kind: "idle" });
@@ -265,11 +275,27 @@ export default function Planner() {
   const now = cityNow();
   const today = startDate === now.date;
   const startTime = pickedStart ?? (today ? startingNow(now.minutes) : DEFAULT_DAY_START);
+  const dayHours: DayHours[] = Array.from({ length: dayCount ?? 0 }, (_, i) => ({
+    start: ownHours[i]?.start ?? (i === 0 || !today ? startTime : laterStart),
+    end: ownHours[i]?.end ?? endTime,
+  }));
+  const perDay = eachDay && dayHours.length > 1;
 
   function changeStartDate(date: string) {
     // Starting today or not changes what the start time means: back to its default.
-    if ((date === now.date) !== today) setPickedStart(null);
+    if ((date === now.date) !== today) {
+      setPickedStart(null);
+      setOwnHours(([first, ...rest]) => [{ ...first, start: undefined }, ...rest]);
+    }
     setStartDate(date);
+  }
+
+  function changeDayHours(index: number, change: Partial<DayHours>) {
+    setOwnHours((hours) => {
+      const changed = [...hours];
+      changed[index] = { ...changed[index], ...change };
+      return changed;
+    });
   }
 
   async function submit() {
@@ -285,7 +311,9 @@ export default function Planner() {
         weather_aware: weatherAware,
         day_start: today ? laterStart : startTime,
         day_end: endTime,
-        first_day_start: today ? startTime : null,
+        first_day_start: today && !perDay ? startTime : null,
+        day_count: dayCount,
+        day_hours: perDay ? dayHours : [],
       });
       setPlan(created);
       setSelectedDay(1);
@@ -605,6 +633,12 @@ export default function Planner() {
               laterStartTime={today ? laterStart : null}
               onLaterStartTimeChange={setLaterStart}
               nowMinutes={today ? now.minutes : null}
+              dayCount={dayCount}
+              onDayCountChange={setDayCount}
+              eachDay={eachDay}
+              onEachDayChange={setEachDay}
+              dayHours={dayHours}
+              onDayHoursChange={changeDayHours}
               loading={status.kind === "loading"}
               onSubmit={submit}
             />
