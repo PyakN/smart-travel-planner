@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -81,6 +81,11 @@ def test_moments_in_other_time_zones() -> None:
     # 13:30 in Paris is 12:30 in Lisbon (both on winter time).
     paris = datetime(2026, 11, 2, 13, 30, tzinfo=ZoneInfo("Europe/Paris"))
     assert state("Mo-Su 12:00-13:00", paris) == "open"
+    # The API's clock is in datetime.UTC, which the parser does not take as it is.
+    utc = datetime(2026, 11, 2, 12, 30, tzinfo=UTC)
+    assert state("Mo-Su 12:00-13:00", utc) == "open"
+    hours = read_hours("Mo-Su 12:00-13:00", LISBON, *ROSSIO)
+    assert next_change(hours, utc) == at(2, 13)
 
 
 def test_next_change_in_the_city_time() -> None:

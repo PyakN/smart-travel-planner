@@ -8,6 +8,7 @@ and sunrise and sunset ("sunrise-sunset") the place's coordinates.
 
 from datetime import datetime
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 # ParserError is what parsing raises, but its stubs leave it out.
 from opening_hours import (  # type: ignore[attr-defined]
@@ -23,6 +24,8 @@ OpenState = Literal["open", "closed", "unknown"]
 # for good. Enough for "opens on Monday", and it keeps odd hours fast to evaluate.
 LOOKAHEAD_DAYS = 8
 
+# The parser takes moments in IANA time zones only (not datetime.UTC).
+_UTC = ZoneInfo("UTC")
 _STATES: dict[State, OpenState] = {
     State.OPEN: "open",
     State.CLOSED: "closed",
@@ -49,10 +52,10 @@ def read_hours(raw: str | None, city: City, lat: float, lon: float) -> OpeningHo
 
 def open_state(hours: OpeningHours | None, at: datetime) -> OpenState:
     """Open, closed or unknown at `at` (an aware datetime)."""
-    return _STATES[hours.state(at)[0]] if hours else "unknown"
+    return _STATES[hours.state(at.astimezone(_UTC))[0]] if hours else "unknown"
 
 
 def next_change(hours: OpeningHours | None, at: datetime) -> datetime | None:
-    """When the state at `at` changes next, in the city's time; None when unknown, or not
-    within LOOKAHEAD_DAYS (open 24/7, closed for the season)."""
-    return hours.next_change(at) if hours else None
+    """When the state at `at` (an aware datetime) changes next, in the city's time; None
+    when unknown, or not within LOOKAHEAD_DAYS (open 24/7, closed for the season)."""
+    return hours.next_change(at.astimezone(_UTC)) if hours else None
