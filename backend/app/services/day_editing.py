@@ -55,7 +55,7 @@ from app.schemas.plan import (
 )
 from app.schemas.saved_trip import DayEdit
 from app.services.place_selection import PlanningError, own_hours
-from app.services.plan_editing import latest_day_weather
+from app.services.plan_editing import latest_day_weather, replan_reasons
 from app.services.trip_planner import (
     Stopwatch,
     day_segments,
@@ -68,8 +68,6 @@ from app.services.trip_planner import (
     window_of,
 )
 from app.services.weather_service import WeatherProvider, hhmm, outdoor_conditions
-
-CLOSED_REASON = "It would be closed, or dark, by the time you get there."
 
 
 def _names(stops: Sequence[PlannedStop]) -> str:
@@ -279,10 +277,10 @@ async def edit_day(
     )
     watch.lap("geometry")
 
-    ends = f"The day would end at {hhmm(result.full_end_min)} instead of {hhmm(window.end_min)}."
-    dropped = [DroppedStop(place_id=s.id, name=names[s.id], reason=ends) for s in result.over]
-    dropped += [
-        DroppedStop(place_id=s.id, name=names[s.id], reason=CLOSED_REASON) for s in result.closed
+    reasons = replan_reasons(result, window)
+    dropped = [
+        DroppedStop(place_id=s.id, name=names[s.id], reason=reasons[s.id])
+        for s in [*result.over, *result.closed]
     ]
     warnings = []
     if result.end_min > window.end_min + REPLAN_GRACE_MIN:

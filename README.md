@@ -86,6 +86,7 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 | `DELETE /trips/{id}` | Delete a trip (its plans stay readable by their links) |
 | `PUT` · `DELETE /trips/{id}/visits/{place_id}` | Tick a stop of the trip's current plan visited · untick it |
 | `POST /trips/{id}/edit` | **Edit a day of a trip** (no AI): `{"day", "remove"?: [place ids], "add"?: [place ids], "next"?: place id, "start"?: {"lat", "lon"}, "stay_min"?}` → a draft: a new plan version the trip uses once `PATCH` saves it, with an `edit` listing what was removed, added and dropped (and why) |
+| `POST /trips/{id}/replace` | **Replace stops of a day of a trip** (AI): `{"day", "place_ids"}`, as `POST /plans/{id}/replace` does for its current version, but visited stops cannot be replaced and stay first, as they were → a draft, as an edit makes |
 | `GET /venues` | **Places to eat and drink** near `lat`+`lon` within `radius_m` (250–2000, default 500): `kind` (`food` or `drinks`), `cuisine`, `vegetarian`, `vegan`, `open_now`, `outdoor_seating`, `limit`; closest first, with the cuisines in range |
 
 Example: museums and viewpoints within 400 m of Praça do Comércio:
@@ -109,7 +110,8 @@ Replacing stops (`POST /plans/{id}/replace`):
 - The ticked stops leave the day. Nothing planned on any day, or rejected in an earlier swap of the plan, comes back.
 - Candidates are ranked around the stops that stay and must fit the freed time; they are sights only, as in new plans. The LLM picks the replacements by id.
 - Only that day is re-optimized; the other days are copied unchanged.
-- **Last resort:** a day left sparse (fewer stops, or an hour shorter) gets nearby fillers, and a one-note day (one kind of place is over half of 4+ stops) swaps one unticked stop of that kind. Must-visit stops and the new replacements are never touched, and every adjustment is reported.
+- **On a saved trip** (`POST /trips/{id}/replace`), visited stops cannot be replaced: they stay first, in their planned order, as they were, and the rest of the day is planned again after them, as a [day edit](#editing-a-saved-day) does (until the end of the day's hours plus 30 minutes, and every dropped stop says why). The answer is a draft.
+- **Last resort:** a day left sparse (fewer stops, or an hour shorter) gets nearby fillers, and a one-note day (one kind of place is over half of 4+ stops) swaps one unticked stop of that kind. Visited and must-visit stops and the new replacements are never touched, and every adjustment is reported.
 
 Error statuses:
 - **401:** not logged in (`/auth/me` and `/trips`).
@@ -131,7 +133,7 @@ Plans are public: anyone with a plan's link can read it (`GET /plans/{id}`, the 
 - **Visited places** (`trip_visits`) live on the trip, not on a version: there is one record of them, and switching to a version that leaves a visited place out is refused (409).
 - **Drafts:** changing a saved trip (a day edit, or replacing stops) makes a new version the trip does not use until `PATCH /trips/{id}` saves it. Only a draft made from the trip's current version can be saved: one made before another change was saved (another tab) is refused with 409. Undo switches back to a version the current one was made from.
 
-The frontend has log-in and sign-up pages, My trips (rename, delete, delete the account), "Save to my trips" on a plan (logged out: log in or sign up first, then it saves), `?trip=<id>` for a saved trip, and a "Visited" tick on its stop cards. On a saved trip, "Edit day" takes stops out and adds places (the must-visit place search), and replacing stops works as before; either opens a draft on the map and in the plan, with a bar that lists the stops it drops and why. Save changes asks first when it drops stops; Discard keeps the trip as it was; Undo goes back after saving.
+The frontend has log-in and sign-up pages, My trips (rename, delete, delete the account), "Save to my trips" on a plan (logged out: log in or sign up first, then it saves), `?trip=<id>` for a saved trip, and a "Visited" tick on its stop cards. On a saved trip, "Edit day" takes stops out and adds places (the must-visit place search), and replacing stops keeps the visited ones first; either opens a draft on the map and in the plan, with a bar that lists the stops it drops and why. Save changes asks first when it drops stops; Discard keeps the trip as it was; Undo goes back after saving.
 
 ### Editing a saved day
 

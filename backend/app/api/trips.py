@@ -1,5 +1,6 @@
-"""Saved trips of the logged-in user, their visited places and day edits. Other users' trips
-answer 404; the plans themselves stay public and read-only at GET /plans/{id} (share links)."""
+"""Saved trips of the logged-in user, their visited places, day edits and AI replacements.
+Other users' trips answer 404; the plans themselves stay public and read-only at
+GET /plans/{id} (share links)."""
 
 from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import (
     CurrentUserDep,
     DistancesDep,
+    LLMDep,
     NowDep,
     SessionDep,
     SettingsDep,
@@ -15,7 +17,7 @@ from app.api.deps import (
 )
 from app.api.plans import planning_errors
 from app.db.models import Trip, User
-from app.schemas.plan import PlanResponse
+from app.schemas.plan import PlanResponse, ReplaceRequest
 from app.schemas.saved_trip import (
     DayEdit,
     SaveTripRequest,
@@ -26,6 +28,7 @@ from app.schemas.saved_trip import (
 )
 from app.services import saved_trips
 from app.services.day_editing import edit_day
+from app.services.plan_editing import replace_stops
 from app.services.saved_trips import (
     NotAStopError,
     NotAVersionError,
@@ -186,3 +189,39 @@ async def edit_trip_day(
             transit=transit,
             weather=weather,
         )
+
+
+@router.post("/{trip_id}/replace", status_code=status.HTTP_201_CREATED)
+async def replace_trip_stops(
+    trip_id: int,
+    body: ReplaceRequest,
+    user: CurrentUserDep,
+    session: SessionDep,
+    llm: LLMDep,
+    distances: DistancesDep,
+    transit: TransitDep,
+    weather: WeatherDep,
+    settings: SettingsDep,
+) -> PlanResponse:
+    """Replace stops of one day of a trip with places the AI picks, as POST
+    /plans/{id}/replace does for its current version. Visited stops cannot be replaced: they
+    stay first, as they were, and the rest of the day follows them. Answers with a draft,
+    like an edit."""
+    trip = await _trip(session, user, trip_id)
+    plan = await _plan(session, trip)
+    visits = await saved_trips.trip_visits(session, trip)
+    async with planning_errors(settings.plan_timeout_s):
+        draft = await replace_stops(
+            session=session,
+            llm=llm,
+            distances=distances,
+            plan_id=plan.id,
+            day=body.day,
+            place_ids=body.place_ids,
+            transit=transit,
+            weather=weather,
+            visited={v.place_id for v in visits},
+        )
+    if draft is None:  # the plan was read just now
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "This trip's plan can no longer be read.")
+    return draft

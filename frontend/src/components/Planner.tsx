@@ -17,6 +17,7 @@ import {
   getTrip,
   markVisited,
   replaceStops,
+  replaceTripStops,
   saveTrip,
   unmarkVisited,
   updateTrip,
@@ -302,7 +303,9 @@ export default function Planner() {
     setReplacing(true);
     setEditError(null);
     try {
-      const next = await replaceStops(plan.id, { day, place_ids: placeIds });
+      const body = { day, place_ids: placeIds };
+      // On a trip, the day's visited stops stay first.
+      const next = await (trip ? replaceTripStops(trip.id, body) : replaceStops(plan.id, body));
       if (trip) {
         // A draft: the trip moves on to it only once it is saved.
         setDraft({ tripId: trip.id, plan: next });

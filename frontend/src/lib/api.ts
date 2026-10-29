@@ -165,6 +165,18 @@ export function editTripDay(tripId: number, body: DayEditRequest, fetchImpl: typ
   return request<PlanResponse>(`/trips/${tripId}/edit`, sendJson("POST", body), fetchImpl);
 }
 
+/**
+ * Replaces stops of one day of a trip (AI): its visited stops stay first. Resolves to a draft,
+ * as editTripDay does.
+ */
+export function replaceTripStops(
+  tripId: number,
+  body: ReplaceRequest,
+  fetchImpl: typeof fetch = fetch,
+) {
+  return request<PlanResponse>(`/trips/${tripId}/replace`, sendJson("POST", body), fetchImpl);
+}
+
 /** Ticks a stop of the trip visited (again: it keeps the first time). */
 export function markVisited(tripId: number, placeId: number, fetchImpl: typeof fetch = fetch) {
   return request<TripVisit>(`/trips/${tripId}/visits/${placeId}`, { method: "PUT" }, fetchImpl);

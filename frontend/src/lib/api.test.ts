@@ -15,6 +15,7 @@ import {
   logOut,
   markVisited,
   replaceStops,
+  replaceTripStops,
   saveTrip,
   searchPlaces,
   searchVenues,
@@ -188,6 +189,18 @@ describe("editTripDay", () => {
     expect(url).toBe("/api/trips/5/edit");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({ day: 2, remove: [7], add: [9] });
+  });
+});
+
+describe("replaceTripStops", () => {
+  it("posts the day and the ticked stops to the trip", async () => {
+    const fetchImpl = fakeFetch(201, { id: 13, parent_id: 11 });
+    const draft = await replaceTripStops(5, { day: 1, place_ids: [7] }, fetchImpl);
+    expect(draft.parent_id).toBe(11);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/trips/5/replace");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ day: 1, place_ids: [7] });
   });
 });
 
