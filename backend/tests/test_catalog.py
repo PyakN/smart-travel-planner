@@ -29,6 +29,7 @@ from app.catalog import VisitHours, closes_late, is_outdoor, visit_hours
         ("attraction", {"historic": "fountain", "building": "yes"}, True),
         ("nightlife", {"amenity": "bar"}, False),
         ("restaurant", {"amenity": "restaurant"}, False),
+        ("cafe", {"amenity": "cafe", "outdoor_seating": "yes"}, False),
         ("landmark", {"place": "square"}, True),
     ],
 )
@@ -68,6 +69,9 @@ def test_closes_late(opening_hours: str | None, late: bool) -> None:
         ("monument", {"lit": "yes"}, "any"),
         ("nightlife", {"amenity": "bar"}, "night"),
         ("restaurant", {"amenity": "restaurant"}, "night"),
+        # Cafés are open by day, like indoor sights, unless their hours run late.
+        ("cafe", {"amenity": "cafe", "opening_hours": "Mo-Sa 08:00-19:00"}, "day"),
+        ("cafe", {"amenity": "cafe", "opening_hours": "Mo-Su 08:00-24:00"}, "any"),
     ],
 )
 def test_visit_hours(category: str, tags: dict[str, str], hours: VisitHours) -> None:

@@ -36,10 +36,15 @@ class TestCategorize:
     def test_unknown_tags(self) -> None:
         assert categorize({"amenity": "bench"}) is None
 
-    def test_evening_places(self) -> None:
+    def test_food_and_drink(self) -> None:
         assert categorize({"amenity": "pub"}) == "nightlife"
         assert categorize({"amenity": "music_venue"}) == "nightlife"
         assert categorize({"amenity": "restaurant", "historic": "building"}) == "restaurant"
+        assert categorize({"amenity": "fast_food"}) == "restaurant"
+        assert categorize({"amenity": "cafe", "historic": "building"}) == "cafe"
+        assert categorize({"amenity": "ice_cream"}) == "cafe"
+        # Pastéis de Belém: a pastry shop, even though it is an attraction.
+        assert categorize({"shop": "pastry", "tourism": "attraction"}) == "cafe"
 
     def test_squares_are_landmarks_unless_something_else(self) -> None:
         assert categorize({"place": "square"}) == "landmark"
@@ -82,18 +87,41 @@ class TestParseElements:
         )
         assert [r.name for r in records] == ["Pensão Amor"]
 
-    def test_only_fado_and_well_known_restaurants(self) -> None:
+    def test_skips_venues_whose_hours_say_they_closed(self) -> None:
+        closed = {"opening_hours": "Fechado permanentemente"}
+        records = parse_elements(
+            [
+                node(1, 38.7, -9.1, name="Amuse Bouche", amenity="restaurant", **closed),
+                node(2, 38.7, -9.1, name="Sushi", amenity="restaurant", opening_hours="closed"),
+                node(3, 38.7, -9.1, name="Tasca", amenity="restaurant", opening_hours="Su off"),
+                # Sights stay: a museum closed for works opens again.
+                node(4, 38.7, -9.1, name="Museu do Azulejo", tourism="museum", **closed),
+            ]
+        )
+        assert [r.name for r in records] == ["Tasca", "Museu do Azulejo"]
+
+    def test_every_named_venue(self) -> None:
         records = parse_elements(
             [
                 node(1, 38.7, -9.1, name="Tasca do Bairro", amenity="restaurant"),
                 node(2, 38.7, -9.1, name="Clube de Fado", amenity="restaurant"),
-                node(3, 38.7, -9.1, name="Tavares", amenity="restaurant", wikidata="Q10379683"),
+                node(3, 38.7, -9.1, name="A Brasileira", amenity="cafe", cuisine="coffee_shop"),
+                node(4, 38.7, -9.1, name="Santini", amenity="ice_cream"),
+                node(5, 38.7, -9.1, name="Manteigaria", shop="pastry", **{"diet:vegan": "no"}),
+                node(6, 38.7, -9.1, name="Pizza Hut", amenity="fast_food"),
+                node(7, 38.7, -9.1, amenity="cafe"),
             ]
         )
         assert [(r.name, r.category) for r in records] == [
+            ("Tasca do Bairro", "restaurant"),
             ("Clube de Fado", "restaurant"),
-            ("Tavares", "restaurant"),
+            ("A Brasileira", "cafe"),
+            ("Santini", "cafe"),
+            ("Manteigaria", "cafe"),
+            ("Pizza Hut", "restaurant"),
         ]
+        assert records[2].tags["cuisine"] == "coffee_shop"
+        assert records[4].tags["diet:vegan"] == "no"
 
     def test_extracts_detail_tags(self) -> None:
         [place] = parse_elements(
@@ -139,7 +167,8 @@ def test_normalize_name() -> None:
 def test_build_query_covers_every_rule_and_bbox() -> None:
     query = build_query(CITIES["lisbon"].bbox)
     assert "(38.6913,-9.2298,38.7964,-9.0866)" in query
-    for key in ("tourism", "historic", "amenity", "leisure", "place"):
+    for key in ("tourism", "historic", "amenity", "leisure", "place", "shop"):
         assert f'nwr["{key}"~' in query
     assert "viewpoint" in query and "place_of_worship" in query and "nightclub" in query
+    assert "ice_cream" in query and "pastry" in query
     assert query.endswith("out center tags;")

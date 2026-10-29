@@ -8,6 +8,7 @@ from typing import Any, cast
 
 import httpx
 
+from app.catalog import VENUE_CATEGORIES
 from app.geo import BBox, haversine_m
 
 OVERPASS_URLS = (
@@ -18,7 +19,8 @@ USER_AGENT = "smart-travel-planner/0.1 (pet project; POI import)"
 
 # Ordered: the first matching rule wins, so specific categories go first
 # (a museum inside a palace is a museum; a monastery that is still a church is a landmark;
-# a restaurant in a historic building is a restaurant).
+# a restaurant in a historic building is a restaurant, a pastry shop that is an attraction
+# a café).
 CATEGORY_RULES: list[tuple[str, frozenset[str], str]] = [
     ("tourism", frozenset({"museum"}), "museum"),
     ("tourism", frozenset({"gallery"}), "gallery"),
@@ -26,7 +28,9 @@ CATEGORY_RULES: list[tuple[str, frozenset[str], str]] = [
     ("tourism", frozenset({"viewpoint"}), "viewpoint"),
     ("amenity", frozenset({"marketplace"}), "market"),
     ("amenity", frozenset({"bar", "pub", "nightclub", "music_venue"}), "nightlife"),
-    ("amenity", frozenset({"restaurant"}), "restaurant"),
+    ("amenity", frozenset({"restaurant", "fast_food"}), "restaurant"),
+    ("amenity", frozenset({"cafe", "ice_cream"}), "cafe"),
+    ("shop", frozenset({"pastry"}), "cafe"),
     (
         "historic",
         frozenset(
@@ -59,6 +63,8 @@ SKIP_MEMORIAL_TYPES = frozenset({"plaque", "blue_plaque", "stolperstein"})
 SKIP_ACCESS = frozenset({"private", "no"})
 # Venues OSM still maps after they closed, named like "Alma (closed)", "Solmar (Fechada)".
 CLOSED_NAME = re.compile(r"\((closed|fechad[ao]s?|encerrad[ao]s?)\)", re.IGNORECASE)
+# ...or with opening hours that say so ("Fechado permanentemente", "Fechado temporariamente").
+CLOSED_HOURS = re.compile(r"\s*(off|closed|fechad[ao]|encerrad[ao])\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -123,9 +129,8 @@ def categorize(tags: dict[str, str]) -> str | None:
 def _is_worth_visiting(name: str, category: str, tags: dict[str, str]) -> bool:
     if tags.get("access") in SKIP_ACCESS or CLOSED_NAME.search(name):
         return False
-    if category == "restaurant":
-        # Thousands of restaurants are mapped: only fado houses and well-known ones are sights.
-        return "wikidata" in tags or "fado" in normalize_name(name)
+    if category in VENUE_CATEGORIES:
+        return not CLOSED_HOURS.match(tags.get("opening_hours", ""))
     return tags.get("memorial") not in SKIP_MEMORIAL_TYPES
 
 

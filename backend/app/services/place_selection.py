@@ -67,7 +67,8 @@ CATEGORY_GUIDE = {
     "market": "markets",
     "attraction": "other attractions: zoos, aquariums, famous sights",
     "nightlife": "bars, pubs, clubs, fado and live music venues, nightlife",
-    "restaurant": "restaurants and cafés: food, dinner",
+    "restaurant": "restaurants: food, lunch, dinner",
+    "cafe": "cafés, pastry shops, ice cream, coffee",
 }
 
 PARSE_SYSTEM = f"""You convert a traveller's free-text request into a structured trip request.

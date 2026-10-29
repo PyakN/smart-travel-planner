@@ -1,4 +1,5 @@
-"""Category slugs known to the app. Must match the rows seeded by migrations 0001 and 0005."""
+"""Category slugs known to the app. Must match the rows seeded by migrations 0001, 0005 and
+0009."""
 
 import re
 from collections.abc import Mapping
@@ -17,11 +18,12 @@ CategorySlug = Literal[
     "attraction",
     "nightlife",
     "restaurant",
+    "cafe",
 ]
 CATEGORY_SLUGS: tuple[str, ...] = get_args(CategorySlug)
 
 INDOOR_CATEGORIES = frozenset(
-    {"museum", "gallery", "religious", "culture", "nightlife", "restaurant"}
+    {"museum", "gallery", "religious", "culture", "nightlife", "restaurant", "cafe"}
 )
 # Landmarks with a building to go into, unlike walls, ruins, gates and aqueducts. OSM maps
 # Lisbon's palaces as historic=castle with a castle_type.
@@ -33,8 +35,9 @@ INDOOR_CASTLE_TYPES = frozenset({"palace", "stately", "manor"})
 VisitHours = Literal["any", "day", "daylight", "night"]
 EVENING_CATEGORIES = frozenset({"nightlife", "restaurant"})
 # Food and drink, open at night or not: plans suggest sights only, so these are planned
-# only when the traveller picks them (must-visit places, places added to a day).
-VENUE_CATEGORIES = frozenset({"nightlife", "restaurant"})
+# only when the traveller picks them (must-visit places, places added to a day). Cafés are
+# open by day, like indoor sights.
+VENUE_CATEGORIES = frozenset({"nightlife", "restaurant", "cafe"})
 # Open until this late on some day (or past midnight): the place suits the evening too.
 LATE_CLOSING_MIN = 22 * 60
 _CLOSING_TIME = re.compile(r"-\s*(\d{1,2}):(\d{2})")
