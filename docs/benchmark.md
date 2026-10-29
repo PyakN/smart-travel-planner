@@ -69,5 +69,5 @@ That turned −7% into +1% in the optimizer's favour.
 
 - **Never longer than the selection order.** One candidate split is the selection order itself, and each day's TSP is seeded with it. Unit tests check this over random trips; it holds whenever that order fits the time budget.
 - **Variance.** The LLM picks slightly different places on each run, so the per-case numbers move a few percent between runs. The conclusions above held across runs.
-- **No opening hours yet.** Visits are scheduled with fixed per-category durations, but OSM `opening_hours` are not checked.
+- **Opening hours came later.** These runs scheduled visits with fixed per-category durations and never checked OSM `opening_hours`. The optimizer now keeps them (Phase 6d), so a place closed on its day moves to another day or is dropped; the numbers above predate that.
 - **Remaining gap on multi-day trips.** Swap moves between days or a joint optimisation (VRP) would likely close the 5% case. That is future work.

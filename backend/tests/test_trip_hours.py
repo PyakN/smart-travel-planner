@@ -39,6 +39,7 @@ def test_only_the_first_day_starts_later() -> None:
     assert (first.start_min, second.start_min) == (16 * H, 9 * H + 30)
     assert first.end_min == second.end_min
     assert first.sunset_min != second.sunset_min  # each date has its daylight
+    assert (first.on, second.on) == (WEDNESDAY, date(2026, 10, 29))  # and opening hours
 
 
 def test_today_starts_no_earlier_than_now() -> None:

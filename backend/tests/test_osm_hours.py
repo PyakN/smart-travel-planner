@@ -4,7 +4,15 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.ingest.cities import CITIES
-from app.osm_hours import OpenState, next_change, open_state, read_hours
+from app.osm_hours import (
+    OpenState,
+    Spans,
+    next_change,
+    open_spans,
+    open_state,
+    opening_by_date,
+    read_hours,
+)
 
 LISBON = CITIES["lisbon"]
 ROSSIO = (38.7139, -9.1394)
@@ -120,3 +128,44 @@ def test_no_change_ahead() -> None:
     seasonal = read_hours("Apr-Sep Mo-Su 10:00-19:00", LISBON, *ROSSIO)
     assert open_state(seasonal, at(2, 12)) == "closed"
     assert next_change(seasonal, at(2, 12)) is None
+
+
+def spans(raw: str, on: date) -> Spans | None:
+    hours = read_hours(raw, LISBON, *ROSSIO)
+    assert hours is not None
+    return open_spans(hours, on, LISBON)
+
+
+H = 60
+MONDAY, FRIDAY, SUNDAY = date(2026, 11, 2), date(2026, 11, 6), date(2026, 11, 8)
+
+
+def test_open_spans_of_a_day_and_the_next_morning() -> None:
+    museum = "Tu-Su 10:00-13:00,14:00-18:00"
+    assert spans(museum, MONDAY) == ((34 * H, 37 * H), (38 * H, 42 * H))  # Tuesday's
+    assert spans(museum, SUNDAY) == ((10 * H, 13 * H), (14 * H, 18 * H))  # closed Monday
+    # Friday's night runs into Saturday, and on into Saturday's own hours as one span.
+    market = "Mo-We 10:00-00:00; Th-Sa 10:00-02:00; Su 10:00-24:00"
+    assert spans(market, FRIDAY) == ((0, 2 * H), (10 * H, 26 * H), (34 * H, 48 * H))
+    assert spans("24/7", MONDAY) == ((0, 48 * H),)
+    assert spans("closed", MONDAY) == ()
+
+
+def test_open_spans_on_the_city_clock_in_summer() -> None:
+    # Lisbon is an hour ahead of UTC in July.
+    assert spans("Mo-Su 10:00-18:00", date(2026, 7, 1)) == ((10 * H, 18 * H), (34 * H, 42 * H))
+
+
+def test_open_spans_of_hours_that_say_unknown() -> None:
+    hours = "Mo-Fr 09:00-17:00; Sa unknown"
+    assert spans(hours, MONDAY) == ((9 * H, 17 * H), (33 * H, 41 * H))
+    assert spans(hours, FRIDAY) is None  # Saturday is unknown
+
+
+def test_opening_by_date() -> None:
+    museum = "Tu-Su 10:00-18:00; Sa unknown"
+    by_date = opening_by_date(museum, LISBON, *ROSSIO, [MONDAY, SUNDAY, date(2026, 11, 7)])
+    # Saturday's hours are unknown: it is left out.
+    assert by_date == {MONDAY: ((34 * H, 42 * H),), SUNDAY: ((10 * H, 18 * H),)}
+    assert opening_by_date(None, LISBON, *ROSSIO, [MONDAY]) is None
+    assert opening_by_date("Segunda 08:00-20:00", LISBON, *ROSSIO, [MONDAY]) is None

@@ -11,13 +11,14 @@ what it drops, and why.
   the day is under way; else from where the visited stops end, or as the day begins.
 - `next` comes first after the visited stops; the others are reordered from it. It is
   visited when the traveller gets there: a place to eat or drink is not held to the hours
-  its kind usually keeps (dinner and bars from 20:00).
+  its kind usually keeps (dinner and bars from 20:00), nor to its own opening hours.
 - The day keeps its end: back at the hotel on round trips, else wherever its last stop is.
 - The day may run until the end of its hours plus REPLAN_GRACE_MIN, whatever the pace.
   Stops drop only beyond that, or when they would be reached closed or dark: least
   important first, and never visited, must-visit, added or next stops.
-- The opening hours of the places the traveller chose (OSM `opening_hours`) are checked
-  against their visits: the draft warns when one is closed by then, or closes during it.
+- Other stops keep their own opening hours (OSM `opening_hours`) on the day's date. Those
+  of the places the traveller chose are also checked against their visits: the draft warns
+  when one is closed by then, or closes during it.
 """
 
 from collections.abc import Collection, Mapping, Sequence
@@ -41,7 +42,7 @@ from app.optimizer.planner import (
     replan_day,
 )
 from app.optimizer.transit import TransitProvider
-from app.osm_hours import next_change, open_state, read_hours
+from app.osm_hours import Spans, next_change, open_state, read_hours
 from app.repositories.candidates import get_candidates
 from app.repositories.places import PlaceDetails, place_details
 from app.schemas.plan import (
@@ -53,7 +54,7 @@ from app.schemas.plan import (
     PlanResponse,
 )
 from app.schemas.saved_trip import DayEdit
-from app.services.place_selection import PlanningError
+from app.services.place_selection import PlanningError, own_hours
 from app.services.plan_editing import latest_day_weather
 from app.services.trip_planner import (
     Stopwatch,
@@ -176,11 +177,19 @@ async def edit_day(
     if edit.stay_min is not None:
         stays |= dict.fromkeys(chosen, edit.stay_min)
     removing = set(edit.remove)
+    window = window_of(params, day)
 
     def hours_of(place_id: int, category: str, hours: VisitHours) -> VisitHours:
         if place_id == edit.next and category in VENUE_CATEGORIES:
             return "any"  # visited now, not when places of its kind usually are
         return hours
+
+    def opening_of(
+        place_id: int, raw: str | None, lat: float, lon: float
+    ) -> dict[date, Spans] | None:
+        if place_id == edit.next:
+            return None  # visited now: the draft warns if it is closed (opening_warnings)
+        return own_hours(raw, city, lat, lon, [window])
 
     def planned_stop_of(s: PlannedStop, i: int) -> Stop:
         return Stop(
@@ -193,6 +202,7 @@ async def edit_day(
             outdoor=s.outdoor,
             hours=hours_of(s.place_id, s.category, s.hours),
             stay_min=stays.get(s.place_id),
+            opening_hours=opening_of(s.place_id, s.opening_hours, s.lat, s.lon),
         )
 
     done_stops = [
@@ -215,13 +225,13 @@ async def edit_day(
             outdoor=c.outdoor,
             hours=hours_of(c.id, c.category, c.hours),
             stay_min=stays.get(c.id),
+            opening_hours=opening_of(c.id, c.opening_hours, c.lat, c.lon),
         )
         for i, c in enumerate(places[p] for p in adding)
     ]
     if not (done_stops or kept or added):
         raise PlanningError(f"Keep at least one stop on day {day}.")
 
-    window = window_of(params, day)
     origin = None
     if edit.start is not None:
         origin = Origin(edit.start.lat, edit.start.lon, minute_now(target, window, city, now))

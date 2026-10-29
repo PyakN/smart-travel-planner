@@ -1,6 +1,7 @@
 """Turning optimizer output into the API response: map segments, rides, transit source."""
 
 import asyncio
+from datetime import date
 
 from app.optimizer.distance import HaversineProvider
 from app.optimizer.planner import ALL_MODES, DayPlan, DayWindow, Stop, Visit, plan_route
@@ -12,6 +13,7 @@ from app.services.trip_planner import (
     planned_stop,
     transit_ride,
     transit_source,
+    window_of,
 )
 from tests.fakes import FakeTransit
 from tests.optimizer.test_transit import fixture
@@ -125,3 +127,15 @@ def test_a_free_evening() -> None:
     # Half an hour before the end is not an evening out; nor is a day that ends at 18:00.
     assert free_evening(day_until(26 * 60 + 30, overnight)) is None
     assert free_evening(day_until(15 * 60, DayWindow(9 * 60 + 30, 18 * 60))) is None
+
+
+def test_saved_days_have_their_hours_and_dates() -> None:
+    params = {
+        "start_date": "2026-11-02",
+        "windows": [[960, 1620, 420, 1056], [570, 1290, 421, 1055]],
+    }
+    assert window_of(params, 1) == DayWindow(960, 1620, 420, 1056, on=date(2026, 11, 2))
+    assert window_of(params, 2) == DayWindow(570, 1290, 421, 1055, on=date(2026, 11, 3))
+    # Plans saved before days had their own hours, or dates.
+    assert window_of({"start_date": "2026-11-02"}, 1) == DayWindow(on=date(2026, 11, 2))
+    assert window_of({}, 1) == DayWindow()

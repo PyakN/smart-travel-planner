@@ -41,6 +41,8 @@ class Candidate:
     outdoor: bool = False
     # When it can be visited (app.catalog.visit_hours).
     hours: VisitHours = "any"
+    # Its OSM opening hours, as written (app.osm_hours reads them).
+    opening_hours: str | None = None
 
 
 def _hint(name: str, tags: dict[str, str]) -> str | None:
@@ -94,6 +96,7 @@ def _to_candidate(row: Any) -> Candidate:
         distance_m=row["distance_m"],
         outdoor=is_outdoor(row["category"], row["tags"]),
         hours=visit_hours(row["category"], row["tags"]),
+        opening_hours=row["tags"].get("opening_hours"),
     )
 
 

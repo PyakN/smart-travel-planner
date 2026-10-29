@@ -70,7 +70,7 @@
 - [x] Real walking distances: OSRM foot profile (public FOSSGIS server), haversine fallback
 - [x] OR-Tools for comparison (benchmark reference)
 - [x] Constraints: visit duration per category, daily time budget per pace (least important stops dropped)
-- [ ] Constraints: opening hours (OSM `opening_hours` not parsed yet)
+- [x] Constraints: opening hours (each place's OSM `opening_hours` on the trip's dates, see Phase 6d)
 - [x] Benchmark: LLM order vs optimizer (km, self-intersections): see `docs/benchmark.md`
 - [ ] (later) Swap moves / joint VRP for the remaining multi-day gap
 
@@ -138,7 +138,7 @@
 
 **DoD:** a 09:30–21:30 day plans as before. A plan for today at 16:00 has 2–3 places from 16:00. 16:00–03:00 fills the afternoon with sights and outdoor places before sunset, and the night with bars, fado houses, restaurants and lit squares, never a museum or a viewpoint after dark. With the checkbox off no forecast is used; with it on, only the weather within the chosen hours counts.
 **Result:** checked live (Gemini + OSRM + HERE + OpenWeatherMap) and in a browser (Playwright). 2,685 Lisbon places now, 406 of them bars, pubs and clubs, 48 fado and notable restaurants and ~90 squares. A default day plans as before; 16:00 to 21:30 gets 2–3 places (a viewpoint before the 17:41 sunset, then a museum); 16:00 to 03:00 gets an outdoor sight before dark and the Fado museum, free time, a fado dinner at 20:00 and two Bairro Alto bars; at 23:15 on the day itself the plan starts then and says so; with the checkbox on, the forecast covers 15:00 to 03:00 only. The live runs found three problems, each fixed with a regression test: a "fado" keyword filled the candidate pool with fado houses (five dinners, an empty afternoon), a day from 18:00 dropped an open museum before the viewpoint already in the dark, and the today hint misread a late start. The optimizer plans a week of 16:00–03:00 days with 49 mixed places in 0.3 s.
-- [ ] (later) Per-venue opening hours from OSM `opening_hours` (days, opening and closing times): today indoor sights all close at 20:00, so a museum that closes at 18:00 can be planned until 18:30
+- [x] Per-venue opening hours from OSM `opening_hours` (days, opening and closing times): every trip day has its date, and a place's own hours on it replace the hours of its kind (a museum that closes at 18:00 is visited before then, a visit waits out a lunch break, the castle stays open until 21:00); outdoor sights still need daylight and evening places the evening, and unreadable or `unknown` hours keep the kind's. A stop closed on its day moves to another day that is open for it, in place of less important stops if need be; places closed on every trip day are no candidates, and replacements must be open on the day's date. When a visit runs late, only stops whose leaving makes the day less late are dropped
 - [ ] (later) Breaks in the middle of a day (lunch, a rest): days only wait for places to open
 
 ## Phase 6.5. Profiles, live route editing and places to eat

@@ -20,10 +20,12 @@ its daylight. The pace is a share of those hours, so the default 09:30 to 21:30 
 it always did and a day that starts at 16:00 holds less; days with shorter hours get fewer
 stops when the trip is split. Stops have visit hours (app.catalog.visit_hours), which make
 this a routing problem with time windows: indoor sights close and evening places open at
-NIGHT_START_MIN, and outdoor sights need daylight. A visit that comes too early waits for
-the place to open (free time before it), and none may run past closing time or sunset: a
-day that breaks that is reordered by local search, and if that is not enough, its least
-important stop with such hours is dropped.
+NIGHT_START_MIN, and outdoor sights need daylight. A stop may also have opening hours of
+its own on the trip's dates (DayWindow.spans): a museum that closes at 18:00, on Mondays,
+or for lunch. A visit that comes too early waits for the place to open (free time before
+it), and none may run past closing time or sunset: a day that breaks that is reordered by
+local search, and if that is not enough, its least important stop with such hours is
+dropped, or moved to another day that is open for it.
 
 Weather-aware plans get the conditions of every trip day: how bad each minute is for
 outdoor sights (rain, snow, fog, poor visibility). The plan is made as above, then an
@@ -43,6 +45,7 @@ first, and never the ones the traveller asked for.
 
 from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import date
 from itertools import accumulate, pairwise, permutations
 from math import ceil, floor, inf
 from typing import Literal
@@ -107,6 +110,12 @@ class NothingFitsError(ValueError):
     """None of the stops can be visited in the days' hours."""
 
 
+# When a place is open: from, until, in minutes since the midnight of a trip day (past
+# 24 * 60 the next morning).
+Span = tuple[float, float]
+ANY_TIME: tuple[Span, ...] = ((-inf, inf),)
+
+
 @dataclass(frozen=True)
 class Stop:
     id: int
@@ -125,6 +134,9 @@ class Stop:
     hours: VisitHours = "any"
     # Minutes there, if the traveller chose; else the visit its category takes (VISIT_MIN).
     stay_min: int | None = None
+    # Its own opening hours (OSM), by date: when it is open from that date's midnight on,
+    # none when it is closed all day. None, or a date left out: unknown, so `hours` apply.
+    opening_hours: Mapping[date, tuple[Span, ...]] | None = field(default=None, hash=False)
 
 
 @dataclass(frozen=True)
@@ -159,12 +171,14 @@ class DayConditions:
 class DayWindow:
     """A trip day's hours in minutes since its midnight; `end_min` is past 24 * 60 when the
     day ends after midnight. Outdoor sights that need daylight are visited between sunrise
-    and sunset, when those are known."""
+    and sunset, when those are known, and places keep their own opening hours on the day's
+    date (`on`), when that is known."""
 
     start_min: int = DAY_START_MIN
     end_min: int = DAY_END_MIN
     sunrise_min: int | None = None
     sunset_min: int | None = None
+    on: date | None = None
 
     def __post_init__(self) -> None:
         if not 0 <= self.start_min < self.end_min <= self.start_min + MINUTES_PER_DAY:
@@ -187,6 +201,21 @@ class DayWindow:
         if hours == "daylight" and self.sunrise_min is not None and self.sunset_min is not None:
             return self.sunrise_min, self.sunset_min
         return -inf, inf
+
+    def spans(self, stop: Stop) -> tuple[Span, ...]:
+        """When `stop` may be visited this day: the hours of its kind (`opening`), or its own
+        opening hours on this date where those are known, within the day's hours (none:
+        closed). Outdoor sights still need daylight then, and evening places the evening."""
+        own = stop.opening_hours.get(self.on) if stop.opening_hours and self.on else None
+        if own is None:
+            return (self.opening(stop.hours),)
+        opens, closes = self.opening("any" if stop.hours == "day" else stop.hours)
+        spans = ((max(a, opens), min(b, closes)) for a, b in own)
+        return tuple((a, b) for a, b in spans if a < min(b, self.end_min) and b > self.start_min)
+
+    def can_visit(self, stop: Stop) -> bool:
+        """Whether `stop` can be visited at all within this day's hours."""
+        return _fits_in(self.spans(stop), self, stop.stay_min or visit_minutes(stop.category))
 
 
 @dataclass(frozen=True)
@@ -304,6 +333,29 @@ def visit_minutes(category: str) -> int:
     return VISIT_MIN.get(category, DEFAULT_VISIT_MIN)
 
 
+def _fits_in(spans: Sequence[Span], window: DayWindow, minutes: float) -> bool:
+    """Whether a visit of `minutes` fits one of `spans` within the day's hours."""
+    return any(
+        max(opens, window.start_min) + minutes <= min(closes, window.end_min)
+        for opens, closes in spans
+    )
+
+
+def _slot(spans: Sequence[Span], clock: float, minutes: float) -> tuple[float, float]:
+    """When a visit of `minutes` that can begin at `clock` begins, and when the place closes
+    then: in the first span that holds it, after waiting for it to open if need be. If none
+    does, it runs late: in the first span still open, else from `clock` on (closed all day:
+    as long as it lasts)."""
+    for opens, closes in spans:
+        begin = max(clock, opens)
+        if begin + minutes <= closes:
+            return begin, closes
+    for opens, closes in spans:
+        if closes > clock:
+            return max(clock, opens), closes
+    return clock, spans[-1][1] if spans else clock
+
+
 def duration_label(minutes: int) -> str:
     """Minutes as "6 h" or "3 h 40 min"."""
     hours, rest = divmod(minutes, 60)
@@ -375,11 +427,19 @@ class _Problem:
         self.visit_min = [s.stay_min or visit_minutes(s.category) for s in stops]
         self.windows = list(windows)
         self.budgets = list(budgets)
-        # opening[day][i]: when stop i may be visited that day, as DayWindow.opening.
-        self.opening = [[w.opening(s.hours) for s in stops] for w in self.windows]
-        self.timed = any(o != (-inf, inf) for day in self.opening for o in day)
-        # Days with the same hours can take each other's stops as they are.
-        self.uniform = len({(w.start_min, w.end_min) for w in self.windows}) == 1
+        # opening[day][i]: when stop i may be visited that day (DayWindow.spans).
+        self.opening = [[w.spans(s) for s in stops] for w in self.windows]
+        self.timed = any(o != ANY_TIME for day in self.opening for o in day)
+        # Days with the same hours can take each other's stops as they are, unless stops
+        # keep opening hours of their own that differ between the days' dates.
+        own = [
+            {s.opening_hours.get(w.on) if w.on else None for w in self.windows}
+            for s in stops
+            if s.opening_hours
+        ]
+        self.uniform = len({(w.start_min, w.end_min) for w in self.windows}) == 1 and all(
+            len(dates) == 1 for dates in own
+        )
 
     def _leg(self, a: int, b: int, walking: bool) -> Leg:
         d = self.distance[a][b]
@@ -456,8 +516,7 @@ class _Problem:
             if leg is not None:
                 clock += leg.minutes
                 travel += leg.minutes
-            opens, closes = opening[i]
-            begin = max(clock, opens)  # wait for it to open
+            begin, closes = _slot(opening[i], clock, self.visit_min[i])  # waits for it to open
             leave = begin + self.visit_min[i]
             visiting += self.visit_min[i]
             if leave > closes:
@@ -487,15 +546,26 @@ class _Problem:
 
     def hopeless(self, i: int, day: int) -> bool:
         """Whether stop i cannot be visited at all within trip day `day`'s hours."""
-        window = self.windows[day]
-        opens, closes = self.opening[day][i]
-        return max(opens, window.start_min) + self.visit_min[i] > min(closes, window.end_min)
+        return not _fits_in(self.opening[day][i], self.windows[day], self.visit_min[i])
+
+    def closes(self, i: int, day: int) -> tuple[float, float]:
+        """When stop i closes for good (or loses the light) on trip day `day`, then when it
+        first opens; (-inf, -inf) when it is closed all day."""
+        spans = self.opening[day][i]
+        return (spans[-1][1], spans[0][0]) if spans else (-inf, -inf)
+
+    def runs_late(self, i: int, day: int, visit: Visit) -> bool:
+        """Whether stop i's visit runs past closing time or sunset on trip day `day`."""
+        return not any(
+            opens <= visit.arrive_min and visit.leave_min <= closes
+            for opens, closes in self.opening[day][i]
+        )
 
     def timed_stops(self, order: Sequence[int], day: int) -> list[int]:
         """Stops of `order` that close (or lose the light) during trip day `day`; only those
         that cannot be visited that day at all, if there are any."""
         hopeless = [i for i in order if self.hopeless(i, day)]
-        return hopeless or [i for i in order if self.opening[day][i][1] < inf]
+        return hopeless or [i for i in order if self.closes(i, day)[0] < inf]
 
     def exposed(self, order: Sequence[int], day: int) -> list[int]:
         """Outdoor stops of a day that meet bad weather."""
@@ -559,27 +629,29 @@ def _fit_budget(
     """Drop stops until the day fits; returns (order, dropped for time, dropped for hours).
 
     While a visit runs past closing time or sunset, the least important stop with such hours
-    goes (one that cannot be visited that day at all first); while the day is too long, the
-    least important stop. Optional stops go first, must-visit ones only when nothing
-    optional is left; protected ones never do. With `shorten`, a stop is dropped for time
-    only if the day is shorter without it: an afternoon sight stays when the evening runs
-    long, as the evening would wait for the bars to open anyway.
+    goes (one that cannot be visited that day at all first), of those whose leaving makes
+    the day less late: a church open until 20:00 is no help to the museum before it that
+    closes at 18:00. While the day is too long, the least important stop goes. Optional
+    stops go first, must-visit ones only when nothing optional is left; protected ones never
+    do. With `shorten`, a stop is dropped for time only if the day is shorter without it: an
+    afternoon sight stays when the evening runs long, as the evening would wait for the bars
+    to open anyway.
     """
     over: list[int] = []
     closed: list[int] = []
+
+    def without(i: int) -> _DayCost:
+        return problem.day_cost([j for j in order if j != i], day, weather=False)
+
     while order:
         cost = problem.day_cost(order, day, weather=False)
         timed = [i for i in problem.timed_stops(order, day) if i not in problem.protected]
         droppable = [i for i in order if i not in problem.protected]
         if shorten and cost.length > problem.budgets[day]:
-            droppable = [
-                i
-                for i in droppable
-                if problem.day_cost([j for j in order if j != i], day, weather=False).length
-                < cost.length
-            ]
+            droppable = [i for i in droppable if without(i).length < cost.length]
         if cost.late and timed:
-            candidates, dropped = timed, closed
+            candidates = [i for i in timed if without(i).late < cost.late] or timed
+            dropped = closed
         elif cost.length > problem.budgets[day] and len(order) > 1 and droppable:
             candidates, dropped = droppable, over
         else:
@@ -591,9 +663,10 @@ def _fit_budget(
 
 
 def _make_room(
-    problem: _Problem, order: Sequence[int], stop: int, day: int
+    problem: _Problem, order: Sequence[int], stop: int, day: int, *, lesser: bool = False
 ) -> tuple[list[int], list[int]] | None:
-    """Add `stop` to a day, dropping its least important optional stops until it fits."""
+    """Add `stop` to a day, dropping its least important optional stops until it fits; with
+    `lesser`, only those less important than `stop`."""
     if problem.hopeless(stop, day):
         return None
     new_order = problem.solve_day([*order, stop], day)
@@ -601,6 +674,8 @@ def _make_room(
     while not problem.fits(cost := problem.day_cost(new_order, day, weather=False), day):
         candidates = problem.timed_stops(new_order, day) if cost.late else new_order
         optional = [i for i in candidates if not problem.stops[i].required]
+        if lesser:
+            optional = [i for i in optional if problem.rank[i] > problem.rank[stop]]
         if not optional:
             return None
         worst = max(optional, key=lambda i: problem.rank[i])
@@ -623,6 +698,33 @@ def _place_required(
         options = []
         for d, order in enumerate(day_orders):
             placed = _make_room(problem, order, stop, d)
+            if placed is not None:
+                new_order, removed = placed
+                added = problem.cost(new_order) - problem.cost(order)
+                options.append((len(removed), added, d, new_order, removed))
+        if options:
+            _, _, d, new_order, removed = min(options, key=lambda o: (o[0], o[1], o[2]))
+            day_orders[d] = new_order
+            dropped.remove(stop)
+            dropped.extend(removed)
+    return dropped
+
+
+def _place_closed(
+    problem: _Problem, day_orders: list[list[int]], dropped: list[int], closed: Collection[int]
+) -> list[int]:
+    """Give each optional stop dropped for its hours (`closed`) a day that is open for it,
+    in place of less important optional stops if need be: a museum closed on Mondays goes on
+    Tuesday, and a lesser sight makes way for it. The day that drops the fewest stops for
+    it wins, then the least extra travel.
+
+    Updates `day_orders` in place; returns the new dropped list.
+    """
+    dropped = list(dropped)
+    for stop in sorted((i for i in dropped if i in closed), key=lambda i: problem.rank[i]):
+        options = []
+        for d, order in enumerate(day_orders):
+            placed = _make_room(problem, order, stop, d, lesser=True)
             if placed is not None:
                 new_order, removed = placed
                 added = problem.cost(new_order) - problem.cost(order)
@@ -750,7 +852,7 @@ def _reorder(
         seeds.append(head + tail[::-1])
     if current.late:
         # Stable: stops that close at the same time keep their order.
-        seeds.append(head + sorted(tail, key=lambda i: problem.opening[day][i][::-1]))
+        seeds.append(head + sorted(tail, key=lambda i: problem.closes(i, day)))
     improved = [_improve_day(problem, seed, day, limit, weather=weather) for seed in seeds]
     return min(improved, key=lambda o: problem.day_cost(o, day, weather=weather).total)
 
@@ -895,6 +997,7 @@ def _solve(problem: _Problem, days: int, enforce_budget: bool) -> _Solution:
     if enforce_budget:
         day_orders = [fit(d, order) for d, order in enumerate(day_orders)]
         dropped[:] = _place_required(problem, day_orders, dropped)
+        dropped[:] = _place_closed(problem, day_orders, dropped, closed)
 
     if problem.uniform:
         # Day 1 holds the most important stop, and so on, unless the weather says otherwise.
@@ -907,6 +1010,7 @@ def _solve(problem: _Problem, days: int, enforce_budget: bool) -> _Solution:
         day_orders = [_reorder(problem, order, d) for d, order in enumerate(day_orders)]
         if enforce_budget:
             day_orders = [fit(d, order) for d, order in enumerate(day_orders)]
+            dropped[:] = _place_closed(problem, day_orders, dropped, closed)
     warnings = _drop_warnings(problem, days, dropped, closed) if enforce_budget else []
     return _Solution(strategy, day_orders, dropped, warnings)
 
@@ -1090,7 +1194,7 @@ async def replan_day(
         until = min(window.end_min + REPLAN_GRACE_MIN, begin_min + MINUTES_PER_DAY)
         if begin_min >= until:
             raise NothingFitsError("the day's hours are over before the rest of it begins")
-        hours = DayWindow(begin_min, until, window.sunrise_min, window.sunset_min)
+        hours = replace(window, start_min=begin_min, end_min=until)
         after = _Problem(
             distances.matrix,
             everything,
@@ -1141,7 +1245,6 @@ async def replan_day(
     if here is not None and later:
         path_points.append(points[here])
     path_points += [points[i] for i in order] + ([points[end]] if end is not None else [])
-    closes = [after.opening[0][i][1] for i in order]
     return DayReplan(
         day=DayPlan(
             day=1,
@@ -1159,5 +1262,5 @@ async def replan_day(
         closed=sorted((everything[i] for i in closed), key=lambda s: s.priority),
         full_end_min=full_end_min,
         end_min=end_min,
-        late=[v.stop for v, close in zip(later, closes, strict=True) if v.leave_min > close],
+        late=[v.stop for i, v in zip(order, later, strict=True) if after.runs_late(i, 0, v)],
     )

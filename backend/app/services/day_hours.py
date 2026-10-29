@@ -86,5 +86,5 @@ def trip_windows(
                 "than a day."
             )
         sunrise, sunset = daylight(day, point.lat, point.lon, city.tz)
-        windows.append(DayWindow(day_start, end, sunrise, sunset))
+        windows.append(DayWindow(day_start, end, sunrise, sunset, on=day))
     return windows

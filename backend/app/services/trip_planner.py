@@ -8,7 +8,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -58,6 +58,7 @@ from app.services.place_selection import (
     HoursLookup,
     PlanningError,
     WeatherLookup,
+    own_hours,
     select_places,
 )
 from app.services.weather_service import (
@@ -283,10 +284,12 @@ def window_params(window: DayWindow) -> list[int | None]:
 
 
 def window_of(params: dict[str, Any], day: int) -> DayWindow:
-    """The hours of day `day` (1 is the first) of a saved plan; plans saved before days had
-    their own hours get the default ones."""
+    """The hours of day `day` (1 is the first) of a saved plan, on its date; plans saved
+    before days had their own hours get the default ones."""
     saved = params.get("windows") or []
-    return DayWindow(*saved[day - 1]) if day <= len(saved) else DayWindow()
+    first = params.get("start_date")
+    on = date.fromisoformat(first) + timedelta(days=day - 1) if first else None
+    return replace(DayWindow(*saved[day - 1]) if day <= len(saved) else DayWindow(), on=on)
 
 
 def stays_of(params: dict[str, Any]) -> dict[int, int]:
@@ -321,8 +324,9 @@ async def optimize(
         )
     except NothingFitsError as exc:
         raise PlanningError(
-            "None of these places can be visited in the hours you chose: sights close and "
-            "bars open at 20:00, and viewpoints need daylight."
+            "None of these places can be visited in the hours you chose: sights keep their "
+            "opening hours (until 20:00 when unknown), bars open at 20:00, and viewpoints "
+            "need daylight."
         ) from exc
 
 
@@ -453,7 +457,8 @@ async def plan_trip(
     watch.lap("selection")
     windows = selection.windows
     forecast = selection.weather
-    first = forecast.days[0].date if forecast else first_day(CITIES[selection.city], start_date)
+    city = CITIES[selection.city]
+    first = forecast.days[0].date if forecast else first_day(city, start_date)
 
     places = {p.id: p for p in selection.places}
     required = {p.id for p in selection.must_visit}
@@ -467,6 +472,7 @@ async def plan_trip(
             required=p.id in required,
             outdoor=p.outdoor,
             hours=p.hours,
+            opening_hours=own_hours(p.opening_hours, city, p.lat, p.lon, windows),
         )
         for rank, p in enumerate(selection.places)
     ]

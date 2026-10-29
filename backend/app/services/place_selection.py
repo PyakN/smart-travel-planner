@@ -11,12 +11,14 @@ fills its hours from the start, and from NIGHT_START_MIN on only places open at 
 Days that reach into the evening get a few of those (lit squares, sights open late) in a
 pool of their own besides the usual candidates; the rest of the evening is free time. The
 LLM is told how many places go before and after 20:00 and how many outdoor ones daylight
-leaves room for, and guards swap picks that the hours cannot take.
+leaves room for, and guards swap picks that the hours cannot take. Places whose own opening
+hours (OSM) keep them closed on every day of the trip are no candidates.
 """
 
 import json
 from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from math import floor
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,8 +33,10 @@ from app.optimizer.planner import (
     FULL_DAY_MIN,
     NIGHT_START_MIN,
     DayWindow,
+    Stop,
     TravelMode,
 )
+from app.osm_hours import Spans, opening_by_date
 from app.repositories.candidates import Candidate, find_candidates, get_candidates
 from app.schemas.trip import (
     MAX_REQUEST_CHARS,
@@ -128,6 +132,25 @@ HoursLookup = Callable[[City, int], list[DayWindow]]
 
 class PlanningError(Exception):
     """The request cannot be planned; the message is safe to show to the user."""
+
+
+def own_hours(
+    raw: str | None, city: City | None, lat: float, lon: float, windows: Sequence[DayWindow]
+) -> dict[date, Spans] | None:
+    """A place's own opening hours (`raw`, OSM) on the dates of the days `windows`, for
+    Stop.opening_hours; None when there are none, or the city or the dates are unknown."""
+    dates = [w.on for w in windows if w.on is not None]
+    return opening_by_date(raw, city, lat, lon, dates) if city and dates else None
+
+
+def open_some_day(c: Candidate, city: City, windows: Sequence[DayWindow]) -> bool:
+    """Whether `c` can be visited on one of the days `windows` by its own opening hours;
+    places without them are left to the hours of their kind (fit_hours)."""
+    hours = own_hours(c.opening_hours, city, c.lat, c.lon, windows)
+    if not hours:
+        return True
+    stop = Stop(c.id, c.lat, c.lon, c.category, 0, hours=c.hours, opening_hours=hours)
+    return any(w.can_visit(stop) for w in windows)
 
 
 @dataclass(frozen=True)
@@ -578,6 +601,7 @@ async def select_places(
         evening_pool = {c.id for c in evening} - {c.id for c in candidates}
         candidates = merge_ranked(candidates, evening)
     candidates = without_names(candidates, [m.name for m in must])
+    candidates = [c for c in candidates if open_some_day(c, resolved, windows)]
     if not candidates:
         if not must:
             raise PlanningError("No places match this request.")

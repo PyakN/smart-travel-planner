@@ -139,11 +139,11 @@ The frontend has log-in and sign-up pages, My trips (rename, delete, delete the 
 
 - **Visited stops stay first**, in their planned order, as they were.
 - **Where the rest begins:** with `start` (the traveller's location), from there: from now on when the day is under way, else from where the visited stops end. Without it, from the last visited stop, or as the day begins. A day whose hours are over cannot be planned from now (422).
-- **`next`** (a stop of the day, or a place to add) is visited first; the other stops are reordered from it. The day keeps its end: back at the hotel on round trips, else open. A place to eat or drink chosen as the next stop is visited when you get there, not held to the hours its kind usually keeps (dinner and bars from 20:00).
+- **`next`** (a stop of the day, or a place to add) is visited first; the other stops are reordered from it. The day keeps its end: back at the hotel on round trips, else open. A place to eat or drink chosen as the next stop is visited when you get there, not held to the hours its kind usually keeps (dinner and bars from 20:00), nor to its own opening hours (the draft warns instead, see below).
 - **Stays:** `stay_min` sets how long to stay at the added places and the next stop (5 min to 8 h; by default the usual visit of their kind). Chosen stays stay with the plan in later edits.
 - **When stops drop:** the pace no longer limits the day, only its end time plus 30 minutes. Beyond that, or when a place would be reached closed or dark, the least important stop goes, but only one whose leaving makes the day shorter (an afternoon sight stays when the evening runs long). Visited, must-visit, added and next stops never drop; when they alone run long, the draft warns instead.
 - **Every dropped stop says why** in `edit.dropped`: "The day would end at 23:10 instead of 21:30." or "It would be closed, or dark, by the time you get there."
-- **Opening hours** of the places chosen in the edit (OSM `opening_hours`) are checked against their visits: the draft warns when one is closed when you get there, or closes before you leave ("By its opening hours, Corner Pub is closed at 15:35.").
+- **Opening hours:** stops keep their own (see [Day hours and evenings](#day-hours-and-evenings)), but for the next stop. Those of the places chosen in the edit are also checked against their visits: the draft warns when one is closed when you get there, or closes before you leave ("By its opening hours, Corner Pub is closed at 15:35.").
 - A stop whose way starts at the traveller's location has a `departure` (where and when); the map draws nothing between the last visited stop and there.
 
 The frontend's "Edit day" takes stops out and adds places; the traveller's location and the next stop come from the search for places to eat and drink.
@@ -211,17 +211,26 @@ and says so in the warnings).
   of a 12 h day at a moderate pace); a day from 16:00 to 21:30 gets 3 h 40 min and 3 places
   instead of 6.
 - **When places can be visited** (`app/catalog.py`, `hours` on every stop): indoor sights
-  and cafés close at 20:00 (`day`), outdoor sights need daylight (`daylight`), bars, pubs,
-  clubs, fado houses and restaurants open at 20:00 (`night`; planned only when you choose
-  them, and visited at once as the next stop of a day edit), and lit squares and places
-  whose OSM opening hours run past 22:00 suit both (`any`). Sunrise and
-  sunset come from the sunrise equation for every trip day (`app/sun.py`), or from the
-  forecast on weather-aware plans.
+  and cafés are open by day, until 20:00 (`day`), outdoor sights need daylight
+  (`daylight`), bars, pubs, clubs, fado houses and restaurants open at 20:00 (`night`;
+  planned only when you choose them, and visited at once as the next stop of a day edit),
+  and lit squares and places whose OSM opening hours run past 22:00 suit both (`any`).
+  Sunrise and sunset come from the sunrise equation for every trip day (`app/sun.py`), or
+  from the forecast on weather-aware plans.
+- **Opening hours of their own** (`app/osm_hours.py`): a place's OSM `opening_hours` are
+  read for the date of every trip day, and replace the hours of its kind: a museum closes
+  when it closes (Torre de Belém at 17:30 in winter, and not at all on Mondays), a visit
+  waits out a lunch break, and the castle stays open until 21:00. Outdoor sights still need
+  daylight with them, and evening places the evening. Hours that cannot be read, or say
+  `unknown`, leave a place to the hours of its kind. Places closed on every day of the trip
+  are no candidates, and replacements must be open on the day's date.
 - **Routing with time windows:** a visit that comes early waits for the place to open (the
   stop's `wait_min`, shown as free time), and none may run past closing time or sunset:
   a day that breaks that is reordered, else its least important stop with such hours is
-  dropped (places that cannot be visited that day at all first) and the plan says so.
-  Days must also end by the end of their hours; days with shorter hours get fewer stops.
+  dropped (places that cannot be visited that day at all first, and only those whose
+  leaving makes the day less late) and the plan says so, unless another day of the trip is
+  open for it: then it goes there, in place of less important stops if need be. Days must
+  also end by the end of their hours; days with shorter hours get fewer stops.
 - **Selection:** each day is split into what it holds before 20:00 (and how much of that
   is in daylight) and after. An evening holds at most 2 places, lit squares and sights open
   late (about 100 in Lisbon: squares, lit viewpoints, Mercado da Ribeira), which come in a
@@ -238,9 +247,11 @@ and says so in the warnings).
   [Places to eat and drink](#places-to-eat-and-drink)), which plans never suggest: they are
   there for the venue search and the must-visit search.
 
-Limits: indoor sights all close at 20:00 and open whenever the day starts, whatever their
-own opening hours say (Museu do Fado closes at 18:00); a day only waits for places to
-open, it never takes a break in the middle.
+Limits: places without opening hours in OSM keep the hours of their kind, so an indoor sight
+closes at 20:00 and opens whenever the day starts (169 of Lisbon's 2,230 sights have hours,
+68 of its 105 museums among them); the LLM does not see which day of a trip a place is
+closed on (the optimizer moves it); a day only waits for places to open, it never takes a
+break in the middle.
 
 ## Weather
 

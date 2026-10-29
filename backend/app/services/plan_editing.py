@@ -18,7 +18,8 @@ that day's weather and which candidates are outdoor, and the day is ordered arou
 
 The day keeps its hours. Replacements are sights, never food and drink venues (as in new
 plans), and must be open when the removed stops were visited: places closed at night only
-for stops before 20:00, and outdoor sights only in daylight. Later stops get places open
+for stops before 20:00, outdoor sights only in daylight, and places with opening hours of
+their own only if those keep them open then, on the day's date. Later stops get places open
 at night (lit squares, sights open late) from a pool of their own.
 """
 
@@ -31,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog import VENUE_CATEGORIES
 from app.db.models import Route
-from app.ingest.cities import CITIES
+from app.ingest.cities import CITIES, City
 from app.llm.service import LLMService
 from app.optimizer.distance import DistanceProvider, PrefetchedProvider
 from app.optimizer.geometry import LatLon
@@ -65,6 +66,7 @@ from app.services.place_selection import (
     day_slots,
     is_timed,
     merge_ranked,
+    own_hours,
     proximity_radius_m,
     validate_notes,
     validate_selection,
@@ -181,18 +183,29 @@ def slot_minute(clock: str, window: DayWindow) -> int:
     return minute + MINUTES_PER_DAY if minute < window.start_min else minute
 
 
-def takes_a_slot(c: Candidate, slots: Sequence[int], window: DayWindow) -> bool:
-    """Whether `c` can be visited at one of these times on a day with these hours."""
-    opens, closes = window.opening(c.hours)
-    return any(opens <= t and t + visit_minutes(c.category) <= closes for t in slots)
+def takes_a_slot(c: Candidate, slots: Sequence[int], window: DayWindow, city: City | None) -> bool:
+    """Whether `c` can be visited at one of these times on a day with these hours, by its
+    own opening hours too on the day's date."""
+    minutes = visit_minutes(c.category)
+    spans = window.spans(_stop(c, 0, city, window))
+    return any(opens <= t and t + minutes <= closes for t in slots for opens, closes in spans)
 
 
 def _point(stop: PlannedStop | Candidate) -> LatLon:
     return LatLon(stop.lat, stop.lon)
 
 
-def _stop(c: Candidate, priority: int) -> Stop:
-    return Stop(c.id, c.lat, c.lon, c.category, priority=priority, outdoor=c.outdoor, hours=c.hours)
+def _stop(c: Candidate, priority: int, city: City | None, window: DayWindow) -> Stop:
+    return Stop(
+        c.id,
+        c.lat,
+        c.lon,
+        c.category,
+        priority=priority,
+        outdoor=c.outdoor,
+        hours=c.hours,
+        opening_hours=own_hours(c.opening_hours, city, c.lat, c.lon, [window]),
+    )
 
 
 async def latest_day_weather(
@@ -242,6 +255,7 @@ async def replace_stops(
     rejected = set(params.get("rejected", [])) | selected
     planned = {s.place_id for d in plan.days for s in d.stops}
     window = window_of(params, day)
+    city = CITIES.get(plan.city)
     budget = window.budget(trip.pace)
     stays = stays_of(params)
     free_min = budget - target.duration_min
@@ -274,7 +288,7 @@ async def replace_stops(
     fitting = [
         c
         for c in without_names(pool, planned_names)
-        if visit_minutes(c.category) <= free_min and takes_a_slot(c, slots, window)
+        if visit_minutes(c.category) <= free_min and takes_a_slot(c, slots, window, city)
     ]
     chosen: list[Candidate] = []
     notes: dict[int, str] = {}
@@ -311,11 +325,12 @@ async def replace_stops(
             outdoor=s.outdoor,
             hours=s.hours,
             stay_min=stays.get(s.place_id),
+            opening_hours=own_hours(s.opening_hours, city, s.lat, s.lon, [window]),
         )
         for i, s in enumerate(kept)
     ]
     next_rank = len(ranking) + len(kept)
-    stops += [_stop(c, next_rank + i) for i, c in enumerate(chosen)]
+    stops += [_stop(c, next_rank + i, city, window) for i, c in enumerate(chosen)]
     next_rank += len(chosen)
     if not stops:
         raise PlanningError(f"No other places fit day {day}. Keep at least one of its stops.")
@@ -356,7 +371,7 @@ async def replace_stops(
                 continue
             tried += 1
             trial = await optimize_day(
-                [v.stop for v in current.visits] + [_stop(candidate, next_rank)]
+                [v.stop for v in current.visits] + [_stop(candidate, next_rank, city, window)]
             )
             if candidate.id in {v.stop.id for v in trial.days[0].visits}:
                 route, current = trial, trial.days[0]
@@ -382,7 +397,7 @@ async def replace_stops(
         alternative = alternatives[0]
         trial = await optimize_day(
             [v.stop for v in current.visits if v.stop.id != victim.id]
-            + [_stop(alternative, victim.priority)]
+            + [_stop(alternative, victim.priority, city, window)]
         )
         if alternative.id in {v.stop.id for v in trial.days[0].visits}:
             route, current = trial, trial.days[0]
