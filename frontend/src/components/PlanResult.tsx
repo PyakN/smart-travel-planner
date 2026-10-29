@@ -4,12 +4,15 @@ import Link from "next/link";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 import DayWeather from "@/components/DayWeather";
+import PlaceSearch from "@/components/PlaceSearch";
 import StopCard from "@/components/StopCard";
 import {
   DEFAULT_DAY_END,
   DEFAULT_DAY_START,
   dayColor,
+  departureLabel,
   describeAdjustment,
+  describeDayChange,
   describeDropped,
   describeEdit,
   describeHoursSwap,
@@ -30,6 +33,7 @@ import {
 } from "@/lib/format";
 import type {
   DroppedStop,
+  PlaceRef,
   PlanEdit,
   PlannedDay,
   PlanResponse,
@@ -47,6 +51,12 @@ export interface PlanResultProps {
   onDiscardDraft: () => void;
   /** Saving a draft, or undoing a change of the trip. */
   applying: boolean;
+  /** Change a day of the saved trip (take stops out, add places) into a draft; resolves to
+   * whether it did. Null for a plan not saved. */
+  onEditDay:
+    ((day: number, change: { remove: number[]; add: number[] }) => Promise<boolean>) | null;
+  /** The day edit is being planned. */
+  editingDay: boolean;
   /** Tick a stop of the trip visited (true) or untick it. */
   onToggleVisited: (placeId: number, visited: boolean) => void;
   /** Save the plan to My trips. */
@@ -282,6 +292,65 @@ function DraftBar({
   );
 }
 
+// The backend takes up to this many places to add in one edit.
+const MAX_ADDED = 20;
+
+/** Places to add to a day being edited: a search, and the ones picked so far. */
+function AddPlaces({
+  added,
+  exclude,
+  onAdd,
+  onRemove,
+  disabled,
+}: {
+  added: PlaceRef[];
+  exclude: ReadonlySet<number>;
+  onAdd: (place: PlaceRef) => void;
+  onRemove: (placeId: number) => void;
+  disabled: boolean;
+}) {
+  const inputId = useId();
+  return (
+    <div className="space-y-2 rounded-lg border border-dashed border-zinc-300 bg-white p-3">
+      <label htmlFor={inputId} className="block text-sm font-medium text-zinc-700">
+        Add a place
+      </label>
+      {added.length > 0 && (
+        <ul className="flex flex-wrap gap-1.5" aria-label="Places to add">
+          {added.map((place) => (
+            <li
+              key={place.place_id}
+              className="flex items-center gap-1 rounded-full bg-emerald-100 py-0.5 pr-1 pl-2.5 text-xs text-emerald-900"
+            >
+              {place.name}
+              <button
+                type="button"
+                onClick={() => onRemove(place.place_id)}
+                disabled={disabled}
+                aria-label={`Do not add ${place.name}`}
+                className="flex h-4 w-4 items-center justify-center rounded-full text-emerald-700 hover:bg-emerald-200"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <PlaceSearch
+        inputId={inputId}
+        exclude={exclude}
+        disabled={disabled || added.length >= MAX_ADDED}
+        placeholder="Search, e.g. Jerónimos or castelo"
+        onPick={(place) => onAdd({ place_id: place.id, name: place.name })}
+      />
+      <p className="text-xs text-zinc-500">
+        The day is planned again around your changes: visited stops stay first, and it may run until
+        its end time.
+      </p>
+    </div>
+  );
+}
+
 function WeatherNotes({ plan }: { plan: PlanResponse }) {
   const exposed = exposedStops(plan).length;
   if (plan.weather_swaps.length === 0 && exposed === 0) return null;
@@ -364,6 +433,9 @@ function DayStops({
   visited,
   visitLocked,
   onToggleVisited,
+  editing,
+  removed,
+  onToggleRemoved,
   onHoverStop,
 }: {
   day: PlannedDay;
@@ -375,6 +447,10 @@ function DayStops({
   visited: Set<number> | null;
   visitLocked: boolean;
   onToggleVisited: PlanResultProps["onToggleVisited"];
+  editing: boolean;
+  /** Stops marked to be taken out by the day edit. */
+  removed: number[];
+  onToggleRemoved: (placeId: number) => void;
   onHoverStop: PlanResultProps["onHoverStop"];
 }) {
   const color = dayColor(day.day);
@@ -383,8 +459,15 @@ function DayStops({
       {day.stops.map((stop, i) => {
         const travel = travelLabel(stop);
         const freeTime = freeTimeLabel(stop);
+        const departure = departureLabel(stop);
         return (
           <li key={stop.place_id}>
+            {departure && (
+              <p className="py-1 pl-[13px] text-xs font-medium text-zinc-600">
+                <span aria-hidden>📍 </span>
+                {departure}
+              </p>
+            )}
             {freeTime && (
               <p className="py-1 pl-[13px] text-xs text-zinc-500">
                 <span aria-hidden>☕ </span>
@@ -414,6 +497,9 @@ function DayStops({
               visited={visited && visited.has(stop.place_id)}
               visitLocked={visitLocked}
               onToggleVisited={() => onToggleVisited(stop.place_id, !visited?.has(stop.place_id))}
+              editing={editing}
+              removed={removed.includes(stop.place_id)}
+              onToggleRemoved={() => onToggleRemoved(stop.place_id)}
               onHover={onHoverStop}
             />
           </li>
@@ -430,6 +516,8 @@ export default function PlanResult({
   onSaveDraft,
   onDiscardDraft,
   applying,
+  onEditDay,
+  editingDay,
   onToggleVisited,
   onSave,
   saving,
@@ -465,6 +553,14 @@ export default function PlanResult({
         ? selected.filter((id) => id !== placeId)
         : [...selected, placeId],
     });
+
+  // Edit mode belongs to one day of one plan version too: a draft or another day ends it.
+  const [edit, setEdit] = useState<{ key: string; remove: number[]; add: PlaceRef[] } | null>(null);
+  const editing = edit !== null && edit.key === selectionKey ? edit : null;
+  const planned = new Set(plan.days.flatMap((d) => d.stops.map((s) => s.place_id)));
+  const canEdit = onEditDay !== null && !draft && !replacing && !applying;
+  const changeEdit = (change: Partial<{ remove: number[]; add: PlaceRef[] }>) =>
+    setEdit({ key: selectionKey, remove: [], add: [], ...editing, ...change });
 
   return (
     <section className="space-y-4" aria-label="Trip plan">
@@ -551,14 +647,30 @@ export default function PlanResult({
 
       <div className="space-y-2">
         <DayWeather day={day} weatherAware={plan.weather_aware} />
-        <p className="text-xs text-zinc-500">
-          {formatDistance(day.walking_m)} on foot
-          {day.transit_legs > 0 &&
-            ` + ${day.transit_legs} ${day.transit_legs === 1 ? "ride" : "rides"}`}{" "}
-          · {day.stops[0]?.arrive}–{day.stops.at(-1)?.leave}
-          {visited && ` · ${visitedToday} of ${day.stops.length} visited`}
-          {!draft && " · tick stops to replace them"}
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-xs text-zinc-500">
+            {formatDistance(day.walking_m)} on foot
+            {day.transit_legs > 0 &&
+              ` + ${day.transit_legs} ${day.transit_legs === 1 ? "ride" : "rides"}`}{" "}
+            · {day.stops[0]?.arrive}–{day.stops.at(-1)?.leave}
+            {visited && ` · ${visitedToday} of ${day.stops.length} visited`}
+            {editing
+              ? " · take stops out or add places, then apply"
+              : !draft && " · tick stops to replace them"}
+          </p>
+          {canEdit && !editing && (
+            <button
+              type="button"
+              onClick={() => {
+                setPicked({ key: selectionKey, ids: [] });
+                changeEdit({});
+              }}
+              className="shrink-0 rounded-md bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200"
+            >
+              Edit day
+            </button>
+          )}
+        </div>
         <DayStops
           day={day}
           selected={selected}
@@ -566,10 +678,31 @@ export default function PlanResult({
           locked={replacing || applying || draft}
           fresh={newStops(plan.edit, day.day)}
           visited={visited}
-          visitLocked={applying || draft}
+          visitLocked={applying || draft || editing !== null}
           onToggleVisited={onToggleVisited}
+          editing={editing !== null}
+          removed={editing?.remove ?? []}
+          onToggleRemoved={(placeId) => {
+            const remove = editing?.remove ?? [];
+            changeEdit({
+              remove: remove.includes(placeId)
+                ? remove.filter((id) => id !== placeId)
+                : [...remove, placeId],
+            });
+          }}
           onHoverStop={onHoverStop}
         />
+        {editing && (
+          <AddPlaces
+            added={editing.add}
+            exclude={new Set([...planned, ...editing.add.map((p) => p.place_id)])}
+            onAdd={(place) => changeEdit({ add: [...editing.add, place] })}
+            onRemove={(placeId) =>
+              changeEdit({ add: editing.add.filter((p) => p.place_id !== placeId) })
+            }
+            disabled={editingDay}
+          />
+        )}
       </div>
 
       {draft && (
@@ -582,7 +715,41 @@ export default function PlanResult({
         />
       )}
 
-      {!draft && (selected.length > 0 || editError) && (
+      {!draft && editing && onEditDay && (
+        <div className="sticky bottom-0 -mx-4 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] backdrop-blur lg:-mx-6 lg:px-6">
+          {editError && (
+            <p role="alert" className="mb-2 text-xs text-red-700">
+              {editError}
+            </p>
+          )}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={async () => {
+                const change = { remove: editing.remove, add: editing.add.map((p) => p.place_id) };
+                // The picks became a draft: Discard or Undo must not bring them back.
+                if (await onEditDay(day.day, change)) setEdit(null);
+              }}
+              disabled={editingDay || (editing.remove.length === 0 && editing.add.length === 0)}
+              className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+            >
+              {editingDay
+                ? "Planning the day…"
+                : describeDayChange(editing.remove.length, editing.add.length)}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEdit(null)}
+              disabled={editingDay}
+              className="text-sm text-zinc-600 hover:text-zinc-900"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!draft && !editing && (selected.length > 0 || editError) && (
         <div className="sticky bottom-0 -mx-4 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] backdrop-blur lg:-mx-6 lg:px-6">
           {editError && (
             <p role="alert" className="mb-2 text-xs text-red-700">

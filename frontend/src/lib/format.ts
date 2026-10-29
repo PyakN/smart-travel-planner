@@ -178,12 +178,34 @@ function names(places: { name: string }[]): string {
   return places.map((p) => p.name).join(", ");
 }
 
-/** "Day 2: replaced A, B with C, D." */
+/** "Day 2: replaced A, B with C, D.", or for a day edit "Day 2: took out A; added B (next)." */
 export function describeEdit(edit: PlanEdit): string {
+  if (edit.kind === "edit") {
+    const next = edit.next;
+    const added = edit.added.map((p) =>
+      p.place_id === next?.place_id ? `${p.name} (next)` : p.name,
+    );
+    const parts = [];
+    if (edit.removed.length > 0) parts.push(`took out ${names(edit.removed)}`);
+    if (added.length > 0) parts.push(`added ${added.join(", ")}`);
+    if (next && !edit.added.some((p) => p.place_id === next.place_id)) {
+      parts.push(`${next.name} next`);
+    }
+    return `Day ${edit.day}: ${parts.join("; ") || "planned the rest of the day again"}.`;
+  }
   const replaced = `Day ${edit.day}: replaced ${names(edit.replaced)}`;
   return edit.added.length > 0
     ? `${replaced} with ${names(edit.added)}.`
     : `${replaced}; nothing else fits the day.`;
+}
+
+/** The changes picked while editing a day, as its Apply button says them. */
+export function describeDayChange(removed: number, added: number): string {
+  const parts = [];
+  if (removed > 0) parts.push(`take out ${removed} ${removed === 1 ? "stop" : "stops"}`);
+  if (added > 0) parts.push(`add ${added} ${added === 1 ? "place" : "places"}`);
+  const change = parts.join(" and ");
+  return change ? change.charAt(0).toUpperCase() + change.slice(1) : "Nothing changed yet";
 }
 
 /** A planned stop a change leaves out: "Harbour Bar: The day would end at 23:10 instead of 21:30." */
@@ -286,6 +308,11 @@ export function hoursHint(start: string, end: string, laterStart: string | null 
 /** "16:00–03:00" for a day's hours; null on plans saved before days had hours. */
 export function dayHours(day: { start: string | null; end: string | null }): string | null {
   return day.start && day.end ? `${day.start}–${day.end}` : null;
+}
+
+/** "From your location at 14:05", for a stop the day was re-planned to from there. */
+export function departureLabel(stop: Pick<PlannedStop, "departure">): string | null {
+  return stop.departure ? `From your location at ${stop.departure.time}` : null;
 }
 
 /** "Free time 1 h 25 min: it opens at 20:00", before a stop that opens later. */

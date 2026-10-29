@@ -5,6 +5,7 @@ import {
   createPlan,
   deleteAccount,
   deleteTrip,
+  editTripDay,
   errorMessage,
   getMe,
   getPlan,
@@ -174,5 +175,17 @@ describe("errorMessage", () => {
   it("falls back to a message per status", () => {
     expect(errorMessage(503, null)).toMatch(/temporarily unavailable/);
     expect(errorMessage(500, "<html>")).toBe("Something went wrong (HTTP 500).");
+  });
+});
+
+describe("editTripDay", () => {
+  it("posts the change and resolves to the draft", async () => {
+    const fetchImpl = fakeFetch(201, { id: 12, parent_id: 11 });
+    const draft = await editTripDay(5, { day: 2, remove: [7], add: [9] }, fetchImpl);
+    expect(draft.id).toBe(12);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/trips/5/edit");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ day: 2, remove: [7], add: [9] });
   });
 });

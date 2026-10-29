@@ -26,6 +26,11 @@ export interface StopCardProps {
   /** Visits cannot change now: a draft of the trip is on screen. */
   visitLocked: boolean;
   onToggleVisited: () => void;
+  /** The day is being edited: a Remove toggle instead of the tick for replacing. */
+  editing: boolean;
+  /** Marked to be taken out by the edit. */
+  removed: boolean;
+  onToggleRemoved: () => void;
   onHover: (placeId: number | null) => void;
 }
 
@@ -83,6 +88,9 @@ export default function StopCard({
   visited,
   visitLocked,
   onToggleVisited,
+  editing,
+  removed,
+  onToggleRemoved,
   onHover,
 }: StopCardProps) {
   const [expanded, setExpanded] = useState(false);
@@ -91,27 +99,51 @@ export default function StopCard({
       onMouseEnter={() => onHover(stop.place_id)}
       onMouseLeave={() => onHover(null)}
       className={`rounded-lg border bg-white p-2.5 shadow-sm transition ${
-        selected
-          ? "border-blue-400 ring-2 ring-blue-500/20"
-          : visited
-            ? "border-emerald-300 bg-emerald-50/40"
-            : "border-zinc-200 hover:border-zinc-300"
+        removed
+          ? "border-dashed border-zinc-300 opacity-60"
+          : selected
+            ? "border-blue-400 ring-2 ring-blue-500/20"
+            : visited
+              ? "border-emerald-300 bg-emerald-50/40"
+              : "border-zinc-200 hover:border-zinc-300"
       }`}
     >
       <div className="flex gap-3">
         <Photo stop={stop} number={number} color={color} />
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="leading-snug font-medium text-zinc-900">{stop.name}</h3>
-            <input
-              type="checkbox"
-              checked={selected}
-              disabled={selectionDisabled || visited === true}
-              onChange={onToggleSelected}
-              aria-label={`Select ${stop.name} to replace`}
-              title={visited ? "Visited places stay on the trip" : "Select to replace"}
-              className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-blue-600"
-            />
+            <h3
+              className={`leading-snug font-medium text-zinc-900 ${removed ? "line-through" : ""}`}
+            >
+              {stop.name}
+            </h3>
+            {editing ? (
+              !visited && (
+                <button
+                  type="button"
+                  onClick={onToggleRemoved}
+                  aria-pressed={removed}
+                  aria-label={removed ? `Keep ${stop.name}` : `Take ${stop.name} out`}
+                  className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${
+                    removed
+                      ? "bg-zinc-200 text-zinc-800 hover:bg-zinc-300"
+                      : "border border-zinc-300 text-zinc-700 hover:border-red-400 hover:text-red-700"
+                  }`}
+                >
+                  {removed ? "Keep" : "Remove"}
+                </button>
+              )
+            ) : (
+              <input
+                type="checkbox"
+                checked={selected}
+                disabled={selectionDisabled || visited === true}
+                onChange={onToggleSelected}
+                aria-label={`Select ${stop.name} to replace`}
+                title={visited ? "Visited places stay on the trip" : "Select to replace"}
+                className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-blue-600"
+              />
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
             <span className="rounded bg-zinc-100 px-1.5 py-px font-medium text-zinc-700 tabular-nums">

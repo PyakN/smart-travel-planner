@@ -11,6 +11,7 @@ import PlanResult from "@/components/PlanResult";
 import {
   ApiError,
   createPlan,
+  editTripDay,
   getPlan,
   getTrip,
   markVisited,
@@ -83,6 +84,7 @@ export default function Planner() {
   const [laterStart, setLaterStart] = useState(DEFAULT_DAY_START);
   const [replacing, setReplacing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [editingDay, setEditingDay] = useState(false);
   // Saving or discarding a draft, or undoing a change of the trip.
   const [applying, setApplying] = useState(false);
   // Why the last change to the plan or trip (replace, a draft, undo, a visit) failed.
@@ -287,6 +289,23 @@ export default function Planner() {
     }
   }
 
+  /** Change a day of the trip (no AI); the result is a draft to save or discard. */
+  async function editDay(day: number, change: { remove: number[]; add: number[] }) {
+    if (!trip) return false;
+    setEditingDay(true);
+    setEditError(null);
+    try {
+      setDraft({ tripId: trip.id, plan: await editTripDay(trip.id, { day, ...change }) });
+      setSelectedDay(day);
+      return true;
+    } catch (error) {
+      setEditError(describe(error));
+      return false;
+    } finally {
+      setEditingDay(false);
+    }
+  }
+
   /** Save the draft on screen: the trip uses it from now on (Undo goes back). */
   async function saveDraft() {
     if (!trip || !tripDraft) return;
@@ -462,6 +481,8 @@ export default function Planner() {
               onSaveDraft={saveDraft}
               onDiscardDraft={discardDraft}
               applying={applying}
+              onEditDay={trip ? editDay : null}
+              editingDay={editingDay}
               onToggleVisited={toggleVisited}
               onSave={save}
               saving={saving}

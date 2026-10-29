@@ -10,7 +10,9 @@ import {
   dayColor,
   dayHours,
   dayLength,
+  departureLabel,
   describeAdjustment,
+  describeDayChange,
   describeDropped,
   describeEdit,
   describeHoursSwap,
@@ -230,6 +232,32 @@ describe("edit descriptions", () => {
     );
   });
 
+  it("names what a day edit took out and added", () => {
+    const edit: PlanEdit = {
+      ...EDIT,
+      kind: "edit",
+      removed: [ref(1, "A")],
+      added: [ref(2, "B"), ref(3, "C")],
+    };
+    expect(describeEdit(edit)).toBe("Day 1: took out A; added B, C.");
+    expect(describeEdit({ ...edit, next: ref(3, "C") })).toBe(
+      "Day 1: took out A; added B, C (next).",
+    );
+    expect(describeEdit({ ...edit, added: [], next: ref(4, "D") })).toBe(
+      "Day 1: took out A; D next.",
+    );
+    expect(describeEdit({ ...EDIT, kind: "edit" })).toBe(
+      "Day 1: planned the rest of the day again.",
+    );
+  });
+
+  it("says what a day edit will do", () => {
+    expect(describeDayChange(2, 1)).toBe("Take out 2 stops and add 1 place");
+    expect(describeDayChange(1, 0)).toBe("Take out 1 stop");
+    expect(describeDayChange(0, 3)).toBe("Add 3 places");
+    expect(describeDayChange(0, 0)).toBe("Nothing changed yet");
+  });
+
   it("says why a stop is dropped", () => {
     const dropped = { ...ref(1, "Harbour Bar"), reason: "The day would end at 23:10." };
     expect(describeDropped(dropped)).toBe("Harbour Bar: The day would end at 23:10.");
@@ -366,6 +394,10 @@ describe("day hours", () => {
       "Free time 1 h 25 min: it opens at 20:00",
     );
     expect(freeTimeLabel({ wait_min: 0, arrive: "11:00" })).toBeNull();
+    expect(departureLabel({ departure: { lat: 38.7, lon: -9.1, time: "14:05" } })).toBe(
+      "From your location at 14:05",
+    );
+    expect(departureLabel({ departure: null })).toBeNull();
   });
 
   it("explains picks the hours had no room for", () => {

@@ -312,6 +312,21 @@ export interface TripSummary {
   updated_at: string;
 }
 
+/** POST /trips/{id}/edit: a change to one day, answered with a draft (a new plan version). */
+export interface DayEditRequest {
+  day: number;
+  /** Stops of the day to take out. */
+  remove?: number[];
+  /** Places to add (ids from GET /places). */
+  add?: number[];
+  /** Visit this place next: a stop of the day, or a place to add. */
+  next?: number | null;
+  /** Where the traveller is: the rest of the day is planned from there (from now, today). */
+  start?: { lat: number; lon: number } | null;
+  /** Minutes to stay at the added places and the next stop; by default, by kind of place. */
+  stay_min?: number | null;
+}
+
 export interface TripUpdate {
   title?: string;
   /** Another version of the trip's plan: a draft made from it (save), or an earlier one (undo). */

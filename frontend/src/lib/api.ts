@@ -1,4 +1,5 @@
 import type {
+  DayEditRequest,
   LoginRequest,
   PlacePage,
   PlanRequest,
@@ -139,6 +140,14 @@ export function updateTrip(id: number, body: TripUpdate, fetchImpl: typeof fetch
 
 export async function deleteTrip(id: number, fetchImpl: typeof fetch = fetch): Promise<void> {
   await request<null>(`/trips/${id}`, { method: "DELETE" }, fetchImpl);
+}
+
+/**
+ * Changes one day of a trip (no AI): resolves to a draft, a new plan version the trip uses
+ * once it is saved with updateTrip.
+ */
+export function editTripDay(tripId: number, body: DayEditRequest, fetchImpl: typeof fetch = fetch) {
+  return request<PlanResponse>(`/trips/${tripId}/edit`, sendJson("POST", body), fetchImpl);
 }
 
 /** Ticks a stop of the trip visited (again: it keeps the first time). */
