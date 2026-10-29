@@ -188,6 +188,8 @@ export interface PlannedDay {
   end: string | null;
   sunrise: string | null;
   sunset: string | null;
+  /** "HH:MM": when the stops are done and a free evening begins; null without one. */
+  free_from: string | null;
 }
 
 export interface TripRequest {

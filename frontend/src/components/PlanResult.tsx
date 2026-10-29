@@ -23,6 +23,7 @@ import {
   formatDistance,
   formatDuration,
   formatTemp,
+  freeEveningLabel,
   freeTimeLabel,
   hasWeather,
   rideBadge,
@@ -463,6 +464,7 @@ function DayStops({
   onHoverStop: PlanResultProps["onHoverStop"];
 }) {
   const color = dayColor(day.day);
+  const freeEvening = freeEveningLabel(day);
   return (
     <ol className="space-y-1">
       {day.stops.map((stop, i) => {
@@ -514,6 +516,12 @@ function DayStops({
           </li>
         );
       })}
+      {freeEvening && (
+        <li className="py-1 pl-[13px] text-xs text-zinc-500">
+          <span aria-hidden>🌙 </span>
+          {freeEvening}
+        </li>
+      )}
     </ol>
   );
 }

@@ -4,6 +4,7 @@ import type {
   DroppedStop,
   ForecastSlot,
   PlanEdit,
+  PlannedDay,
   PlannedStop,
   PlanResponse,
   TransitRide,
@@ -302,7 +303,7 @@ export function hoursHint(start: string, end: string, laterStart: string | null 
     : `${formatDuration(length)} ${days}.`;
   // Past 22:00 an evening is long enough to plan with places open at night.
   if (!overnight && clockMinutes(end) <= 22 * 60) return hint;
-  return `${hint} From 20:00 the plan only has places open at night: bars, fado houses, restaurants and lit squares.`;
+  return `${hint} After 20:00 the plan has a few lit squares and sights open late, and the rest of the evening is free: add restaurants and bars as must-visit places.`;
 }
 
 /** "16:00–03:00" for a day's hours; null on plans saved before days had hours. */
@@ -319,6 +320,14 @@ export function departureLabel(stop: Pick<PlannedStop, "departure">): string | n
 export function freeTimeLabel(stop: Pick<PlannedStop, "wait_min" | "arrive">): string | null {
   if (stop.wait_min <= 0) return null;
   return `Free time ${formatDuration(stop.wait_min)}: it opens at ${stop.arrive}`;
+}
+
+/** "Free time from 21:40 until 03:00", after a day's last stop when its evening is free. */
+export function freeEveningLabel(day: Pick<PlannedDay, "free_from" | "end">): string | null {
+  if (!day.free_from) return null;
+  return day.end
+    ? `Free time from ${day.free_from} until ${day.end}`
+    : `Free time from ${day.free_from}`;
 }
 
 const WEATHER_ICONS: Record<WeatherCondition, string> = {

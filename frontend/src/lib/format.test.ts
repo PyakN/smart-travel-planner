@@ -23,6 +23,7 @@ import {
   formatDuration,
   formatOpeningHours,
   formatTemp,
+  freeEveningLabel,
   freeTimeLabel,
   hasWeather,
   hoursHint,
@@ -375,9 +376,9 @@ describe("day hours", () => {
   it("explains the hours", () => {
     expect(hoursHint("09:30", "21:30")).toBe("12 h a day.");
     expect(hoursHint("16:00", "03:00")).toBe(
-      "11 h a day, until 03:00 the next morning. From 20:00 the plan only has places open at night: bars, fado houses, restaurants and lit squares.",
+      "11 h a day, until 03:00 the next morning. After 20:00 the plan has a few lit squares and sights open late, and the rest of the evening is free: add restaurants and bars as must-visit places.",
     );
-    expect(hoursHint("10:00", "23:30")).toMatch(/^13 h 30 min a day\. From 20:00/);
+    expect(hoursHint("10:00", "23:30")).toMatch(/^13 h 30 min a day\. After 20:00/);
     expect(hoursHint("10:00", "10:00")).toBe("Pick an end time after the start.");
     // Today from now, later days from 09:30: today is over at 23:15 if days end at 21:30.
     expect(hoursHint("23:15", "21:30", "09:30")).toBe(
@@ -394,6 +395,10 @@ describe("day hours", () => {
       "Free time 1 h 25 min: it opens at 20:00",
     );
     expect(freeTimeLabel({ wait_min: 0, arrive: "11:00" })).toBeNull();
+    expect(freeEveningLabel({ free_from: "21:40", end: "03:00" })).toBe(
+      "Free time from 21:40 until 03:00",
+    );
+    expect(freeEveningLabel({ free_from: null, end: "21:30" })).toBeNull();
     expect(departureLabel({ departure: { lat: 38.7, lon: -9.1, time: "14:05" } })).toBe(
       "From your location at 14:05",
     );
