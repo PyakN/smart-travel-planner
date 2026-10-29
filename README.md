@@ -65,7 +65,7 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 | `GET /places` | Search: `q` (name contains, accents ignored), `city`, `category` (repeatable), `bbox=west,south,east,north`, or `lat`+`lon`+`radius_m` (sorted by distance); `limit` / `offset` |
 | `GET /places/{id}` | One place |
 | `GET /categories` | Categories with place counts (optional `city`) |
-| `POST /plan` | **Plan a trip from text**: `{"text", "start"?: {"lat", "lon", "round_trip"}, "must_visit"?: [place ids], "modes"?: ["walk", "transit"], "start_date"?: "YYYY-MM-DD", "weather_aware"?: bool, "day_start"?: "HH:MM", "day_end"?: "HH:MM", "first_day_start"?: "HH:MM"}` → dated days with their hours and ordered, timed stops (photo, description, personal note, opening hours, free time before them, forecast) and map geometry. Saved; returns `id` |
+| `POST /plan` | **Plan a trip from text**: `{"text", "start"?: {"lat", "lon", "round_trip"}, "must_visit"?: [place ids], "modes"?: ["walk", "transit"], "start_date"?: "YYYY-MM-DD", "weather_aware"?: bool, "day_start"?: "HH:MM", "day_end"?: "HH:MM", "first_day_start"?: "HH:MM"}` → dated days with their hours, ordered, timed stops (photo, description, personal note, opening hours, free time before them, forecast), when a free evening begins (`free_from`) and map geometry. Saved; returns `id` |
 | `GET /plans/{id}` | A saved plan |
 | `POST /plans/{id}/replace` | **Replace stops of a day**: `{"day", "place_ids"}` → a new saved version (`parent_id` = this plan), with an `edit` listing what was replaced, added, adjusted and dropped |
 | `POST /auth/signup` | Create an account and log in: `{"email", "password", "display_name"}` (password 8+ characters); 409 if the email has an account |
@@ -93,11 +93,13 @@ curl -X POST localhost:8000/plan -H "Content-Type: application/json" \
   -d '{"text": "2 days in Lisbon: viewpoints, the castle and Belém", "start": {"lat": 38.7139, "lon": -9.1394}}'
 ```
 
+Plans suggest sights only: never restaurants, bars, pubs, clubs or fado houses, even when the request names them (a request that asks for food or nightlife gets a note saying so). Add the ones you want as must-visit places: they are planned when they open, dinner and bars from 20:00.
+
 Must-visit places are ids from `GET /places?q=...`. They always get a slot on some day if they fit its time budget: trimmed only after every optional stop, and moved to another day when their own day overflows. `modes`: walking only rides nothing, transit only rides every leg over 1 km, both (the default) ride legs over 2.5 km.
 
 Replacing stops (`POST /plans/{id}/replace`):
 - The ticked stops leave the day. Nothing planned on any day, or rejected in an earlier swap of the plan, comes back.
-- Candidates are ranked around the stops that stay and must fit the freed time; the LLM picks the replacements by id.
+- Candidates are ranked around the stops that stay and must fit the freed time; they are sights only, as in new plans. The LLM picks the replacements by id.
 - Only that day is re-optimized; the other days are copied unchanged.
 - **Last resort:** a day left sparse (fewer stops, or an hour shorter) gets nearby fillers, and a one-note day (one kind of place is over half of 4+ stops) swaps one unticked stop of that kind. Must-visit stops and the new replacements are never touched, and every adjustment is reported.
 
@@ -142,7 +144,7 @@ The frontend offers taking stops out and adding places; the traveller's location
 The LLM never invents places. A request goes through four steps:
 
 1. **Parse:** the request text becomes a `TripRequest` (city, days, interests, avoid, pace, keywords).
-2. **Candidates:** SQL ranks the city's places by notability, interests and keywords, plus closeness to the hotel and the must-visit places (PostGIS distance; full weight at the anchor, none beyond 2.5 km on foot or 5 km with transit).
+2. **Candidates:** SQL ranks the city's sights by notability, interests and keywords, plus closeness to the hotel and the must-visit places (PostGIS distance; full weight at the anchor, none beyond 2.5 km on foot or 5 km with transit). Food and drink venues are never candidates.
 3. **Select:** the LLM fills the slots the must-visit places leave, picking ids from that candidate list (it sees the distances), and writes a one-sentence note per place on why it suits the traveller.
 4. **Guard:** a deterministic check drops any id that isn't a candidate, and places with the same name as one already chosen (OSM maps some sights twice).
 
@@ -189,24 +191,30 @@ and says so in the warnings).
   instead of 6.
 - **When places can be visited** (`app/catalog.py`, `hours` on every stop): indoor sights
   close at 20:00 (`day`), outdoor sights need daylight (`daylight`), bars, pubs, clubs, fado
-  houses and restaurants open at 20:00 (`night`), and lit squares and venues whose OSM
-  opening hours run past 22:00 suit both (`any`). Sunrise and sunset come from the sunrise
-  equation for every trip day (`app/sun.py`), or from the forecast on weather-aware plans.
+  houses and restaurants open at 20:00 (`night`; planned only as must-visit places), and lit
+  squares and places whose OSM opening hours run past 22:00 suit both (`any`). Sunrise and
+  sunset come from the sunrise equation for every trip day (`app/sun.py`), or from the
+  forecast on weather-aware plans.
 - **Routing with time windows:** a visit that comes early waits for the place to open (the
   stop's `wait_min`, shown as free time), and none may run past closing time or sunset:
   a day that breaks that is reordered, else its least important stop with such hours is
   dropped (places that cannot be visited that day at all first) and the plan says so.
   Days must also end by the end of their hours; days with shorter hours get fewer stops.
 - **Selection:** each day is split into what it holds before 20:00 (and how much of that
-  is in daylight) and after. The LLM is told, sees when each candidate can be visited, and
-  gets bars and up to a few restaurants in pools of their own for days with evenings (days
-  without evenings get none unless named). A guard swaps picks the hours cannot take:
-  evening places beyond the evening, restaurants beyond one dinner an evening, outdoor
-  sights beyond the daylight, places closed at night beyond the time before 20:00. Swaps
-  are listed in `hours_swaps`.
+  is in daylight) and after. An evening holds at most 2 places, lit squares and sights open
+  late (about 100 in Lisbon: squares, lit viewpoints, Mercado da Ribeira), which come in a
+  pool of their own; the rest of it is free time. The LLM is told and sees when each
+  candidate can be visited. A guard swaps picks the hours cannot take: outdoor sights
+  beyond the daylight, places from the evening pool beyond the evening, and places closed
+  at night beyond the time before 20:00. Swaps are listed in `hours_swaps`.
+- **Free evening:** a day whose hours run past 20:00 and go on at least an hour after its
+  last stop gets `free_from`, and the plan shows "Free time from 21:40 until 03:00" after
+  that stop. A day from 16:00 to 03:00 has afternoon sights, a lit square or two, and a free
+  evening.
 - **Data:** `python -m app.ingest lisbon --refresh` imports bars, pubs, clubs and music
   venues (`nightlife`), fado and Wikidata-notable restaurants (`restaurant`) and named
-  squares (`landmark`), skipping venues named as closed: 406, 48 and ~90 in Lisbon.
+  squares (`landmark`), skipping venues named as closed: 406, 48 and ~90 in Lisbon. Bars
+  and restaurants are there for the must-visit search.
 
 Limits: indoor sights all close at 20:00 and open whenever the day starts, whatever their
 own opening hours say (Museu do Fado closes at 18:00); a day only waits for places to
