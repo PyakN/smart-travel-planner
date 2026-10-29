@@ -77,6 +77,7 @@ from app.services.trip_planner import (
     planned_day,
     planned_stop,
     save_plan,
+    stays_of,
     transit_source,
     window_of,
 )
@@ -192,7 +193,7 @@ def _stop(c: Candidate, priority: int) -> Stop:
     return Stop(c.id, c.lat, c.lon, c.category, priority=priority, outdoor=c.outdoor, hours=c.hours)
 
 
-async def _day_weather(
+async def latest_day_weather(
     provider: WeatherProvider | None, plan: PlanResponse, day: int
 ) -> TripWeather | None:
     """The latest forecast for one day of a saved plan."""
@@ -240,8 +241,10 @@ async def replace_stops(
     planned = {s.place_id for d in plan.days for s in d.stops}
     window = window_of(params, day)
     budget = window.budget(trip.pace)
-    free_min = budget - target.duration_min + sum(visit_minutes(s.category) for s in removed)
-    aware = await _day_weather(weather, plan, day) if plan.weather_aware else None
+    stays = stays_of(params)
+    free_min = budget - target.duration_min
+    free_min += sum(stays.get(s.place_id) or visit_minutes(s.category) for s in removed)
+    aware = await latest_day_weather(weather, plan, day) if plan.weather_aware else None
     today = aware.days[0] if aware else None
 
     async def ranked(**filters: Sequence[str]) -> list[Candidate]:
@@ -305,6 +308,7 @@ async def replace_stops(
             required=s.must_visit,
             outdoor=s.outdoor,
             hours=s.hours,
+            stay_min=stays.get(s.place_id),
         )
         for i, s in enumerate(kept)
     ]

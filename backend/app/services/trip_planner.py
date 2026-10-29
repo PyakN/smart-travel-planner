@@ -40,6 +40,7 @@ from app.schemas.plan import (
     Adjustment,
     Attribution,
     DayForecast,
+    Departure,
     PlaceRef,
     PlannedDay,
     PlannedStop,
@@ -87,22 +88,20 @@ class Stopwatch:
 
 
 def _day_legs(day: DayPlan, start: StartIn | None) -> list[tuple[LatLon, LatLon, Leg]]:
-    """Every leg of the day as (from, to, leg), including from/to the start point."""
-    points = [LatLon(v.stop.lat, v.stop.lon) for v in day.visits]
-    legs = [v.leg for v in day.visits]
-    if start is not None:
-        home = LatLon(start.lat, start.lon)
-        points.insert(0, home)
-        if day.return_leg is not None:
-            points.append(home)
-            legs.append(day.return_leg)
-    else:
-        legs = legs[1:]  # a free start has no leg into the first stop
-    return [
-        (a, b, leg)
-        for a, b, leg in zip(points[:-1], points[1:], legs, strict=True)
-        if leg is not None
-    ]
+    """Every leg of the day as (from, to, leg), including from/to the start point. A leg
+    starts at the stop before, or at its visit's origin on a re-planned day."""
+    home = LatLon(start.lat, start.lon) if start is not None else None
+    legs = []
+    previous = home
+    for visit in day.visits:
+        here = LatLon(visit.stop.lat, visit.stop.lon)
+        origin = LatLon(visit.origin.lat, visit.origin.lon) if visit.origin else previous
+        if visit.leg is not None and origin is not None:  # a free start has no leg
+            legs.append((origin, here, visit.leg))
+        previous = here
+    if day.return_leg is not None and home is not None and previous is not None:
+        legs.append((previous, home, day.return_leg))
+    return legs
 
 
 def transit_ride(ride: Ride) -> TransitRide:
@@ -134,7 +133,8 @@ async def day_segments(
 ) -> list[RouteSegment]:
     """Walking legs in a row become one street-following path. A ridden leg is drawn as its
     transit route (walks to and from the stops, then each ride along its line), or as a
-    straight line when its time is an estimate."""
+    straight line when its time is an estimate. Nothing is drawn where the traveller went
+    their own way (to the origin of a re-planned day)."""
     runs: list[_Run] = []
     for a, b, leg in _day_legs(day, start):
         if leg.route is not None:
@@ -146,7 +146,7 @@ async def day_segments(
             )
         elif leg.mode == "transit":
             runs.append(_Run("transit", [a, b], fixed=True))
-        elif runs and runs[-1].mode == "walk" and not runs[-1].fixed:
+        elif runs and runs[-1].mode == "walk" and not runs[-1].fixed and runs[-1].points[-1] == a:
             runs[-1].points.append(b)
         else:
             runs.append(_Run("walk", [a, b]))
@@ -225,6 +225,11 @@ def planned_stop(
         weather=forecast,
         hours=stop.hours,
         wait_min=visit.wait_min,
+        departure=Departure(
+            lat=visit.origin.lat, lon=visit.origin.lon, time=hhmm(visit.origin.minute)
+        )
+        if visit.origin and visit.origin.minute is not None
+        else None,
     )
 
 
@@ -266,6 +271,11 @@ def window_of(params: dict[str, Any], day: int) -> DayWindow:
     their own hours get the default ones."""
     saved = params.get("windows") or []
     return DayWindow(*saved[day - 1]) if day <= len(saved) else DayWindow()
+
+
+def stays_of(params: dict[str, Any]) -> dict[int, int]:
+    """Minutes the traveller chose to stay at places of a saved plan, by place id."""
+    return {int(place_id): minutes for place_id, minutes in params.get("stays", {}).items()}
 
 
 async def optimize(

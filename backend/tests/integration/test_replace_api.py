@@ -87,9 +87,14 @@ def test_replace_one_stop(client: TestClient, llm: FakeProvider, place_ids: dict
     }
     assert new["edit"] == {
         "day": 1,
+        "kind": "replace",
         "replaced": [{"place_id": place_ids["Clock Tower"], "name": "Clock Tower"}],
+        "removed": [],
         "added": [{"place_id": park, "name": "River Park"}],
+        "next": None,
         "adjustments": [],
+        "dropped": [],
+        "warnings": [],
     }
     river = next(s for s in new["days"][0]["stops"] if s["place_id"] == park)
     assert river["note"] == "A green break between the sights."

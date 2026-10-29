@@ -127,6 +127,14 @@ class DayForecast(BaseModel):
     slots: list[ForecastSlot]
 
 
+class Departure(BaseModel):
+    """Where and when the way to a stop starts, when not at the stop before it."""
+
+    lat: float
+    lon: float
+    time: str = Field(description="HH:MM")
+
+
 class PlannedStop(BaseModel):
     place_id: int
     name: str
@@ -156,6 +164,11 @@ class PlannedStop(BaseModel):
         description="When it can be visited: day (until 20:00), daylight, night (from 20:00), any",
     )
     wait_min: int = Field(default=0, description="Free time before setting off: it opens later")
+    departure: Departure | None = Field(
+        default=None,
+        description="Where the way here starts when not at the stop before: the traveller's "
+        "location, on a day re-planned from it",
+    )
 
 
 class RouteSegment(BaseModel):
@@ -206,11 +219,31 @@ class Adjustment(BaseModel):
     reason: str
 
 
+class DroppedStop(PlaceRef):
+    reason: str = Field(description="e.g. 'The day would end at 23:10 instead of 21:30.'")
+
+
 class PlanEdit(BaseModel):
+    """How a version was made from the one before: AI replacements ("replace") or a day edit
+    of a saved trip ("edit": stops removed, places added, a next stop, a new start)."""
+
     day: int
-    replaced: list[PlaceRef] = Field(description="Stops the traveller asked to replace")
-    added: list[PlaceRef] = Field(description="Their replacements")
-    adjustments: list[Adjustment] = Field(description="Last-resort changes to other stops")
+    kind: Literal["replace", "edit"] = "replace"
+    replaced: list[PlaceRef] = Field(
+        default_factory=list, description="Stops the traveller asked to replace"
+    )
+    removed: list[PlaceRef] = Field(
+        default_factory=list, description="Stops the traveller took out"
+    )
+    added: list[PlaceRef] = Field(description="Replacements, or places the traveller added")
+    next: PlaceRef | None = Field(default=None, description="The stop the traveller visits next")
+    adjustments: list[Adjustment] = Field(
+        default_factory=list, description="Last-resort changes to other stops"
+    )
+    dropped: list[DroppedStop] = Field(
+        default_factory=list, description="Planned stops the change leaves out, and why"
+    )
+    warnings: list[str] = Field(default_factory=list)
 
 
 class PlanResponse(BaseModel):
@@ -232,7 +265,8 @@ class PlanResponse(BaseModel):
     modes: list[TravelMode] = Field(default_factory=lambda: list(ALL_MODES))
     must_visit: list[PlaceRef] = Field(default_factory=list)
     start: StartIn | None = None
-    # Set on versions made by replacing stops: the plan this one was made from, and how.
+    # Set on versions made by replacing stops or editing a day: the plan this one was made
+    # from, and how.
     parent_id: int | None = None
     edit: PlanEdit | None = None
     start_date: dt.date | None = None

@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Cookie, Depends, HTTPException, Request, status
@@ -48,6 +49,11 @@ def get_weather(request: Request) -> WeatherProvider | None:
     return weather
 
 
+def get_now() -> datetime:
+    """The current time (tests set their own)."""
+    return datetime.now(UTC)
+
+
 def get_login_limiter(request: Request) -> LoginLimiter:
     limiter: LoginLimiter = request.app.state.login_limiter
     return limiter
@@ -72,3 +78,4 @@ DistancesDep = Annotated[DistanceProvider, Depends(get_distances)]
 TransitDep = Annotated[TransitProvider | None, Depends(get_transit)]
 WeatherDep = Annotated[WeatherProvider | None, Depends(get_weather)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+NowDep = Annotated[datetime, Depends(get_now)]
