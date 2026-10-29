@@ -134,6 +134,49 @@ async def place_details(
     }
 
 
+@dataclass(frozen=True)
+class NearbyPlace:
+    """A place around a point, with its OSM tags."""
+
+    id: int
+    name: str
+    city: str
+    category: str
+    lat: float
+    lon: float
+    tags: dict[str, str]
+    website: str | None
+    opening_hours: str | None
+    distance_m: float
+
+
+async def places_near(
+    session: AsyncSession, near: Near, categories: Collection[str]
+) -> list[NearbyPlace]:
+    """Every place of `categories` within the radius, closest first."""
+    point = _point(near.lat, near.lon)
+    distance = func.ST_Distance(Place.geom, point)
+    geom = func.geometry(Place.geom)
+    stmt = (
+        select(
+            Place.id,
+            Place.name,
+            Place.city,
+            Category.slug.label("category"),
+            func.ST_Y(geom).label("lat"),
+            func.ST_X(geom).label("lon"),
+            Place.tags,
+            Place.website,
+            Place.opening_hours,
+            distance.label("distance_m"),
+        )
+        .join(Category)
+        .where(Category.slug.in_(categories), func.ST_DWithin(Place.geom, point, near.radius_m))
+        .order_by(distance, Place.id)
+    )
+    return [NearbyPlace(**row) for row in (await session.execute(stmt)).mappings()]
+
+
 async def list_categories(session: AsyncSession, city: str | None = None) -> list[CategoryOut]:
     join_on = Place.category_id == Category.id
     if city:

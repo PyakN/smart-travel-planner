@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import auth, health, places, plans, trips
+from app.api import auth, health, places, plans, trips, venues
 from app.config import get_settings
 from app.db.session import create_engine, create_sessionmaker
 from app.llm.base import LLMError
@@ -46,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(plans.router)
     app.include_router(auth.router)
     app.include_router(trips.router)
+    app.include_router(venues.router)
     return app
 
 

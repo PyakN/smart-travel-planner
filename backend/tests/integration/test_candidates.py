@@ -170,12 +170,17 @@ def test_places_open_at_night(db_session: SessionFactory) -> None:
         return asyncio.run(run())
 
     found = testville()
-    # Not the Museum of Toys: it has opening hours, but they end at 18:00.
+    # Not the Museum of Toys: it has opening hours, but they end at 18:00. Nor cafés open
+    # by day; restaurants and bars count as open at night.
     assert sorted(names(found)) == [
+        "Corner Pub",
         "Harbour Bar",
         "Lantern Square",
         "Night Market",
         "Old Town Fado",
+        "Pizzeria Roma",
+        "Quick Burger",
+        "Veggie Garden",
     ]
     assert {c.hours for c in found} == {"night", "any"}
     sights = testville(exclude_categories=["nightlife", "restaurant"], limit=1)

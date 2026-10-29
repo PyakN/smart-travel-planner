@@ -84,6 +84,75 @@ SEED_PLACES: list[tuple[int, str, str, str, float, float, str | None, dict[str, 
         None,
         {"building": "yes", "opening_hours": "Mo-Su 10:00-23:00"},
     ),
+    # Places to eat and drink around (45.0040, 7.0060), for the venue search; plans never
+    # suggest them.
+    (
+        118,
+        "testville",
+        "Green Leaf Café",
+        "cafe",
+        45.0036,
+        7.0056,
+        None,
+        {
+            "amenity": "cafe",
+            "cuisine": "coffee_shop;cake",
+            "diet:vegan": "yes",
+            "opening_hours": "Mo-Su 08:00-19:00",
+            "outdoor_seating": "yes",
+            "website": "https://greenleaf.example",
+        },
+    ),
+    (
+        119,
+        "testville",
+        "Veggie Garden",
+        "restaurant",
+        45.0047,
+        7.0068,
+        None,
+        {
+            "amenity": "restaurant",
+            "cuisine": "vegetarian;indian",
+            "opening_hours": "Mo-Sa 12:00-15:00,19:00-23:00",
+        },
+    ),
+    (
+        120,
+        "testville",
+        "Pizzeria Roma",
+        "restaurant",
+        45.0043,
+        7.0049,
+        None,
+        {
+            "amenity": "restaurant",
+            "cuisine": "pizza;italian",
+            "opening_hours": "Mo-Su 12:00-23:00",
+            "outdoor_seating": "no",
+        },
+    ),
+    (
+        121,
+        "testville",
+        "Quick Burger",
+        "restaurant",
+        45.0037,
+        7.0063,
+        None,
+        {"amenity": "fast_food", "cuisine": "burger"},
+    ),
+    (
+        122,
+        "testville",
+        "Corner Pub",
+        "nightlife",
+        45.0044,
+        7.0062,
+        None,
+        {"amenity": "pub", "opening_hours": "Mo-Su 17:00-02:00", "outdoor_seating": "yes"},
+    ),
+    (123, "testville", "Far Café", "cafe", 45.0300, 7.0060, None, {"amenity": "cafe"}),
 ]
 # Stop-card details (normally from OSM tags and app.ingest.enrich), by place name.
 SEED_DETAILS: dict[str, dict[str, str]] = {
@@ -116,7 +185,9 @@ async def _seed() -> None:
                     geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
                     tags={"name": name, **extra_tags},
                     wikidata=wikidata,
-                    **SEED_DETAILS.get(name, {}),
+                    # As app.ingest has them: from the tags.
+                    **{k: extra_tags.get(k) for k in ("opening_hours", "website")}
+                    | SEED_DETAILS.get(name, {}),
                 )
                 for osm_id, city, name, category, lat, lon, wikidata, extra_tags in SEED_PLACES
             )
