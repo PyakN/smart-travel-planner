@@ -68,6 +68,7 @@ async def create_plan(
             start_date=body.start_date,
             weather_aware=body.weather_aware,
             hours=DailyHours(body.day_start, body.day_end, body.first_day_start),
+            chosen_city=body.city,
         )
 
 

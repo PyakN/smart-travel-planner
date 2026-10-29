@@ -149,6 +149,20 @@ def test_city_aliases_resolve() -> None:
     assert resolve_city("tokyo") is None
 
 
+def test_rejects_a_text_about_another_city_than_the_chosen_one() -> None:
+    llm = LLMService(FakeProvider().queue(trip(city="berlin")), model="m")
+    with pytest.raises(PlanningError, match="^Your request is for Berlin, but Barcelona is chosen"):
+        asyncio.run(
+            select_places(
+                llm,
+                session=None,  # type: ignore[arg-type]
+                text="Berlin!",
+                default_city="lisbon",
+                chosen_city="barcelona",
+            )
+        )
+
+
 def test_rejects_unsupported_city() -> None:
     llm = LLMService(FakeProvider().queue(trip(city="tokyo")), model="m")
     with pytest.raises(PlanningError, match="'tokyo' is not supported"):

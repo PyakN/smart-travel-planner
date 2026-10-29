@@ -493,8 +493,11 @@ async def select_places(
     weather: WeatherLookup | None = None,
     weather_aware: bool = False,
     hours: HoursLookup | None = None,
+    chosen_city: str | None = None,
 ) -> SelectionResult:
-    """`hours` gives the hours of the trip's days (by default 09:30 to 21:30), and with them
+    """`chosen_city` (a slug) is the trip's city, in place of `default_city` when the text
+    names none; a text that names another city is refused.
+    `hours` gives the hours of the trip's days (by default 09:30 to 21:30), and with them
     how many places to choose and when they are visited. `weather` gives the trip's weather,
     returned with the result. When the selection is `weather_aware`, the LLM also sees the
     weather of the days' hours with each candidate's exposure, outdoor picks are capped at
@@ -507,10 +510,14 @@ async def select_places(
         raise PlanningError(f"Keep the request under {MAX_REQUEST_CHARS} characters.")
 
     trip = await parse_trip_request(llm, text)
-    resolved = resolve_city(trip.city or default_city)
+    resolved = resolve_city(trip.city or chosen_city or default_city)
     if resolved is None:
         supported = ", ".join(c.name for c in CITIES.values())
         raise PlanningError(f"'{trip.city}' is not supported yet. Supported: {supported}.")
+    if chosen_city is not None and resolved.slug != chosen_city:
+        raise PlanningError(
+            f"Your request is for {resolved.name}, but {CITIES[chosen_city].name} is chosen."
+        )
     city = resolved.slug
 
     must = await get_candidates(session, must_visit, city=city)

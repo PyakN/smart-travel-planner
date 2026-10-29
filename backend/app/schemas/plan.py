@@ -4,6 +4,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.catalog import VisitHours
+from app.ingest.cities import CITIES
 from app.schemas.trip import MAX_REQUEST_CHARS, TripRequest
 
 TravelMode = Literal["walk", "transit"]
@@ -26,6 +27,11 @@ class PlanRequest(BaseModel):
         min_length=1,
         max_length=MAX_REQUEST_CHARS,
         examples=["2 days in Lisbon with kids, we love viewpoints and old churches"],
+    )
+    city: str | None = Field(
+        default=None,
+        description="The trip's city, a slug from GET /cities: a text that names another city "
+        "is refused. Unset: the city the text names, else the default city (Lisbon)",
     )
     start: StartIn | None = Field(default=None, description="Hotel or other daily start point")
     must_visit: list[int] = Field(
@@ -61,6 +67,13 @@ class PlanRequest(BaseModel):
         description="When the first day starts, if not at day_start (e.g. now, for a trip that "
         "starts today). A trip that starts today never starts before the current time",
     )
+
+    @field_validator("city")
+    @classmethod
+    def _supported_city(cls, city: str | None) -> str | None:
+        if city is not None and city not in CITIES:
+            raise ValueError(f"unknown city; supported: {', '.join(CITIES)}")
+        return city
 
     @field_validator("must_visit", "modes")
     @classmethod

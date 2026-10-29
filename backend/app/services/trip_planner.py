@@ -430,10 +430,12 @@ async def plan_trip(
     weather_aware: bool = False,
     hours: DailyHours = DEFAULT_HOURS,
     now: datetime | None = None,
+    chosen_city: str | None = None,
 ) -> PlanResponse:
     """`weather_aware` plans with the `weather` forecast and gives every day and stop its
     forecast; other plans never ask for it. `hours` are the days' hours; a first day that
-    is today starts at `now` (the current time) or later."""
+    is today starts at `now` (the current time) or later. `chosen_city` is the trip's city (see
+    select_places)."""
     watch = Stopwatch()
     selection = await select_places(
         llm,
@@ -446,6 +448,7 @@ async def plan_trip(
         weather=weather_lookup(weather, start_date) if weather and weather_aware else None,
         weather_aware=weather_aware,
         hours=hours_lookup(hours, start_date, now),
+        chosen_city=chosen_city,
     )
     watch.lap("selection")
     windows = selection.windows
