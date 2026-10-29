@@ -198,6 +198,11 @@ class PlannedDay(BaseModel):
     end: str | None = None
     sunrise: str | None = None
     sunset: str | None = None
+    free_from: str | None = Field(
+        default=None,
+        description="HH:MM: when the day's stops are done and a free evening begins, on days "
+        "whose hours run past 20:00 and go on at least an hour after the last stop",
+    )
 
 
 class PlaceRef(BaseModel):

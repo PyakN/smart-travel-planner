@@ -3,10 +3,16 @@
 import asyncio
 
 from app.optimizer.distance import HaversineProvider
-from app.optimizer.planner import ALL_MODES, DayPlan, Stop, plan_route
+from app.optimizer.planner import ALL_MODES, DayPlan, DayWindow, Stop, Visit, plan_route
 from app.optimizer.transit import TransitRoute, parse_routes
 from app.schemas.plan import PlannedDay, RouteSegment
-from app.services.trip_planner import day_segments, planned_stop, transit_ride, transit_source
+from app.services.trip_planner import (
+    day_segments,
+    free_evening,
+    planned_stop,
+    transit_ride,
+    transit_source,
+)
 from tests.fakes import FakeTransit
 from tests.optimizer.test_transit import fixture
 
@@ -104,3 +110,18 @@ def test_transit_source() -> None:
     assert transit_source([day_of(walk, estimate)]) == "estimate"
     assert transit_source([day_of(real), day_of(walk)]) == "here"
     assert transit_source([day_of(real), day_of(estimate)]) == "mixed"
+
+
+def day_until(leave_min: int, window: DayWindow) -> DayPlan:
+    """A day whose last stop is left at `leave_min`."""
+    visit = Visit(STOPS[0], None, leave_min - 45, leave_min)
+    return DayPlan(1, [visit], None, 0, 0, 0, 45, 0, window)
+
+
+def test_a_free_evening() -> None:
+    overnight = DayWindow(16 * 60, 27 * 60)
+    assert free_evening(day_until(21 * 60 + 40, overnight)) == "21:40"
+    assert free_evening(day_until(17 * 60 + 30, DayWindow())) == "17:30"  # 09:30 to 21:30
+    # Half an hour before the end is not an evening out; nor is a day that ends at 18:00.
+    assert free_evening(day_until(26 * 60 + 30, overnight)) is None
+    assert free_evening(day_until(15 * 60, DayWindow(9 * 60 + 30, 18 * 60))) is None

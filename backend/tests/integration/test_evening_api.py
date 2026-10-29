@@ -66,6 +66,8 @@ def test_an_evening_gets_a_sight_open_at_night(
     assert not [s for s in planned if s["hours"] == "daylight" or s["category"] in VENUES]
     assert square in [s["place_id"] for s in planned]
     assert all("16:00" <= s["leave"] <= "20:00" for s in planned if s["hours"] == "day")
+    # The rest of the evening is free.
+    assert plan["days"][0]["free_from"] == planned[-1]["leave"]
     assert client.get(f"/plans/{plan['id']}").json() == plan
 
 

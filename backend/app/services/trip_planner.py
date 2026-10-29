@@ -21,6 +21,7 @@ from app.llm.service import LLMService
 from app.optimizer.distance import DistanceProvider
 from app.optimizer.geometry import LatLon
 from app.optimizer.planner import (
+    NIGHT_START_MIN,
     DayConditions,
     DayPlan,
     DayWindow,
@@ -71,6 +72,10 @@ from app.services.weather_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+# A day whose hours run into the evening and go on this long after its last stop ends with a
+# free evening: time to eat and drink.
+FREE_EVENING_MIN = 60
 
 
 class Stopwatch:
@@ -233,6 +238,16 @@ def planned_stop(
     )
 
 
+def free_evening(day: DayPlan) -> str | None:
+    """When the day's free evening begins (the last stop's leaving time), if it has one."""
+    if not day.visits:
+        return None
+    leave, end = day.visits[-1].leave_min, day.window.end_min
+    if end <= NIGHT_START_MIN or end - leave < FREE_EVENING_MIN:
+        return None
+    return hhmm(leave)
+
+
 def planned_day(
     day: DayPlan,
     number: int,
@@ -258,6 +273,7 @@ def planned_day(
         end=hhmm(window.end_min),
         sunrise=hhmm(window.sunrise_min) if window.sunrise_min is not None else None,
         sunset=hhmm(window.sunset_min) if window.sunset_min is not None else None,
+        free_from=free_evening(day),
     )
 
 
