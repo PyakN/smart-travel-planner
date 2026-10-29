@@ -11,6 +11,7 @@ import {
   dayHours,
   dayLength,
   describeAdjustment,
+  describeDropped,
   describeEdit,
   describeHoursSwap,
   describeWeatherSwap,
@@ -32,7 +33,14 @@ import {
   travelLabel,
   weatherIcon,
 } from "./format";
-import type { DayForecast, PlannedStop, PlanResponse, StopForecast, TransitRide } from "./types";
+import type {
+  DayForecast,
+  PlanEdit,
+  PlannedStop,
+  PlanResponse,
+  StopForecast,
+  TransitRide,
+} from "./types";
 
 const GREEN_LINE: TransitRide = {
   vehicle: "metro",
@@ -79,6 +87,7 @@ function stop(overrides: Partial<PlannedStop>): PlannedStop {
     weather: null,
     hours: "daylight",
     wait_min: 0,
+    departure: null,
     ...overrides,
   };
 }
@@ -196,18 +205,34 @@ describe("categoryIcon", () => {
 
 describe("edit descriptions", () => {
   const ref = (place_id: number, name: string) => ({ place_id, name });
+  const EDIT: PlanEdit = {
+    day: 1,
+    kind: "replace",
+    replaced: [],
+    removed: [],
+    added: [],
+    next: null,
+    adjustments: [],
+    dropped: [],
+    warnings: [],
+  };
 
   it("names what was replaced and by what", () => {
-    const edit = {
+    const edit: PlanEdit = {
+      ...EDIT,
       day: 2,
       replaced: [ref(1, "A"), ref(2, "B")],
       added: [ref(3, "C")],
-      adjustments: [],
     };
     expect(describeEdit(edit)).toBe("Day 2: replaced A, B with C.");
     expect(describeEdit({ ...edit, added: [] })).toBe(
       "Day 2: replaced A, B; nothing else fits the day.",
     );
+  });
+
+  it("says why a stop is dropped", () => {
+    const dropped = { ...ref(1, "Harbour Bar"), reason: "The day would end at 23:10." };
+    expect(describeDropped(dropped)).toBe("Harbour Bar: The day would end at 23:10.");
   });
 
   it("explains adjustments", () => {

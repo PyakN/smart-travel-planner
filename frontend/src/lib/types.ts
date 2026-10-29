@@ -1,6 +1,6 @@
 // Mirrors backend/app/schemas/plan.py (POST /plan, GET /plans/{id}, POST /plans/{id}/replace),
 // backend/app/schemas/place.py (GET /places), backend/app/schemas/account.py (/auth) and
-// backend/app/schemas/saved_trip.py (/trips).
+// backend/app/schemas/saved_trip.py (/trips, POST /trips/{id}/edit).
 
 export type TravelMode = "walk" | "transit";
 export type TransitVehicle =
@@ -123,6 +123,14 @@ export interface DayForecast {
   slots: ForecastSlot[];
 }
 
+/** Where and when the way to a stop starts, when not at the stop before it. */
+export interface Departure {
+  lat: number;
+  lon: number;
+  /** "HH:MM". */
+  time: string;
+}
+
 export interface PlannedStop {
   place_id: number;
   name: string;
@@ -151,6 +159,8 @@ export interface PlannedStop {
   hours: VisitHours;
   /** Free time before setting off for it, in minutes: it opens later. */
   wait_min: number;
+  /** The traveller's location, on a day re-planned from it; null: from the stop before. */
+  departure: Departure | null;
 }
 
 export interface RouteSegment {
@@ -196,12 +206,28 @@ export interface Adjustment {
   reason: string;
 }
 
+/** A planned stop a change leaves out, and why. */
+export interface DroppedStop extends PlaceRef {
+  reason: string;
+}
+
+/** How a version was made: AI replacements, or a day edit of a saved trip. */
 export interface PlanEdit {
   day: number;
+  kind: "replace" | "edit";
+  /** Stops the traveller asked the AI to replace. */
   replaced: PlaceRef[];
+  /** Stops the traveller took out (day edits). */
+  removed: PlaceRef[];
+  /** Replacements, or places the traveller added. */
   added: PlaceRef[];
+  /** The stop the traveller visits next (day edits). */
+  next: PlaceRef | null;
   /** Last-resort changes to stops the traveller did not tick. */
   adjustments: Adjustment[];
+  /** Planned stops the change leaves out: shown before a draft is saved. */
+  dropped: DroppedStop[];
+  warnings: string[];
 }
 
 export interface PlanResponse {
@@ -222,7 +248,7 @@ export interface PlanResponse {
   modes: TravelMode[];
   must_visit: PlaceRef[];
   start: StartPoint | null;
-  /** Set on versions made by replacing stops. */
+  /** Set on versions made by replacing stops or editing a day: the version before. */
   parent_id: number | null;
   edit: PlanEdit | null;
   start_date: string | null;
@@ -288,6 +314,6 @@ export interface TripSummary {
 
 export interface TripUpdate {
   title?: string;
-  /** Another version of the trip's plan: a new version made from it, or an earlier one (undo). */
+  /** Another version of the trip's plan: a draft made from it (save), or an earlier one (undo). */
   plan_id?: number;
 }

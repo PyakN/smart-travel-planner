@@ -37,6 +37,12 @@ interface OpenedTrip {
   userId: number;
 }
 
+/** A change to a saved trip that it does not use until it is saved: a new plan version. */
+interface Draft {
+  tripId: number;
+  plan: PlanResponse;
+}
+
 function describe(error: unknown): string {
   return error instanceof ApiError ? error.message : "Something went wrong. Try again.";
 }
@@ -76,7 +82,10 @@ export default function Planner() {
   const [endTime, setEndTime] = useState(DEFAULT_DAY_END);
   const [laterStart, setLaterStart] = useState(DEFAULT_DAY_START);
   const [replacing, setReplacing] = useState(false);
-  // Why the last change to the plan or trip (replace, undo, a visit) failed.
+  const [draft, setDraft] = useState<Draft | null>(null);
+  // Saving or discarding a draft, or undoing a change of the trip.
+  const [applying, setApplying] = useState(false);
+  // Why the last change to the plan or trip (replace, a draft, undo, a visit) failed.
   const [editError, setEditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -93,6 +102,12 @@ export default function Planner() {
   const tripOnScreen =
     opened && opened.trip.id === tripId && opened.trip.plan.id === loadedId ? opened : null;
   const trip = tripOnScreen && tripOnScreen.userId === userId ? tripOnScreen.trip : null;
+  // A draft of the trip on screen, made from its current version; it is shown instead of it.
+  const tripDraft =
+    trip && draft && draft.tripId === trip.id && draft.plan.parent_id === trip.plan.id
+      ? draft.plan
+      : null;
+  const shown = tripDraft ?? plan;
 
   /** Show a saved plan, with its request in the form for planning it again. */
   const showSaved = useEffectEvent((saved: PlanResponse) => {
@@ -256,8 +271,8 @@ export default function Planner() {
     try {
       const next = await replaceStops(plan.id, { day, place_ids: placeIds });
       if (trip) {
-        // The saved trip moves on to the new version; Undo moves it back.
-        adopt(await updateTrip(trip.id, { plan_id: next.id }));
+        // A draft: the trip moves on to it only once it is saved.
+        setDraft({ tripId: trip.id, plan: next });
       } else {
         // Each replacement is a new plan version with its own link; Back (or Undo) returns
         // to the previous one.
@@ -272,8 +287,36 @@ export default function Planner() {
     }
   }
 
+  /** Save the draft on screen: the trip uses it from now on (Undo goes back). */
+  async function saveDraft() {
+    if (!trip || !tripDraft) return;
+    setApplying(true);
+    setEditError(null);
+    try {
+      adopt(await updateTrip(trip.id, { plan_id: tripDraft.id }));
+      setDraft(null);
+    } catch (error) {
+      setEditError(describe(error));
+      // The trip changed meanwhile (another tab): show it as it is now, without the draft.
+      if (error instanceof ApiError && error.status === 409) {
+        await getTrip(trip.id)
+          .then(adopt)
+          .catch(() => undefined);
+      }
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  /** Leave the trip as it is. The draft stays on the server, unused. */
+  function discardDraft() {
+    setDraft(null);
+    setEditError(null);
+  }
+
   async function undo() {
     if (!plan?.parent_id) return;
+    setApplying(true);
     try {
       if (trip) {
         adopt(await updateTrip(trip.id, { plan_id: plan.parent_id }));
@@ -287,6 +330,8 @@ export default function Planner() {
       setEditError(null);
     } catch (error) {
       setEditError(describe(error));
+    } finally {
+      setApplying(false);
     }
   }
 
@@ -329,7 +374,7 @@ export default function Planner() {
     <div className="flex h-full flex-col lg:flex-row">
       <main className="relative order-1 h-[42dvh] shrink-0 lg:order-2 lg:h-auto lg:flex-1">
         <RouteMap
-          plan={plan}
+          plan={shown}
           selectedDay={selectedDay}
           onSelectDay={setSelectedDay}
           start={start}
@@ -409,10 +454,14 @@ export default function Planner() {
             </div>
           )}
 
-          {plan && (
+          {shown && (
             <PlanResult
-              plan={plan}
+              plan={shown}
               trip={trip}
+              draft={tripDraft !== null}
+              onSaveDraft={saveDraft}
+              onDiscardDraft={discardDraft}
+              applying={applying}
               onToggleVisited={toggleVisited}
               onSave={save}
               saving={saving}
@@ -423,7 +472,7 @@ export default function Planner() {
               onReplace={replace}
               replacing={replacing}
               editError={editError}
-              onUndo={plan.parent_id ? undo : null}
+              onUndo={shown.parent_id && !tripDraft ? undo : null}
             />
           )}
         </div>

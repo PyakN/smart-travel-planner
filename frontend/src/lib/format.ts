@@ -1,6 +1,7 @@
 import type {
   Adjustment,
   Attribution,
+  DroppedStop,
   ForecastSlot,
   PlanEdit,
   PlannedStop,
@@ -183,6 +184,11 @@ export function describeEdit(edit: PlanEdit): string {
   return edit.added.length > 0
     ? `${replaced} with ${names(edit.added)}.`
     : `${replaced}; nothing else fits the day.`;
+}
+
+/** A planned stop a change leaves out: "Harbour Bar: The day would end at 23:10 instead of 21:30." */
+export function describeDropped({ name, reason }: DroppedStop): string {
+  return `${name}: ${reason}`;
 }
 
 /** A change the planner made to a stop the traveller did not tick. */

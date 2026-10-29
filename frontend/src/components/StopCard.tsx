@@ -23,6 +23,8 @@ export interface StopCardProps {
   isNew: boolean;
   /** Whether the traveller has been there; null for a plan not saved as a trip. */
   visited: boolean | null;
+  /** Visits cannot change now: a draft of the trip is on screen. */
+  visitLocked: boolean;
   onToggleVisited: () => void;
   onHover: (placeId: number | null) => void;
 }
@@ -79,6 +81,7 @@ export default function StopCard({
   selectionDisabled,
   isNew,
   visited,
+  visitLocked,
   onToggleVisited,
   onHover,
 }: StopCardProps) {
@@ -168,8 +171,9 @@ export default function StopCard({
           <button
             type="button"
             onClick={onToggleVisited}
+            disabled={visitLocked}
             aria-pressed={visited}
-            className={`rounded-full px-2 py-0.5 font-medium ${
+            className={`rounded-full px-2 py-0.5 font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
               visited
                 ? "bg-emerald-600 text-white hover:bg-emerald-700"
                 : "border border-zinc-300 text-zinc-700 hover:border-emerald-500 hover:text-emerald-700"

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 import DayWeather from "@/components/DayWeather";
 import StopCard from "@/components/StopCard";
@@ -10,6 +10,7 @@ import {
   DEFAULT_DAY_START,
   dayColor,
   describeAdjustment,
+  describeDropped,
   describeEdit,
   describeHoursSwap,
   describeWeatherSwap,
@@ -27,12 +28,25 @@ import {
   travelLabel,
   weatherIcon,
 } from "@/lib/format";
-import type { PlanEdit, PlannedDay, PlanResponse, TransitRide, Trip } from "@/lib/types";
+import type {
+  DroppedStop,
+  PlanEdit,
+  PlannedDay,
+  PlanResponse,
+  TransitRide,
+  Trip,
+} from "@/lib/types";
 
 export interface PlanResultProps {
   plan: PlanResponse;
-  /** The saved trip this plan is the current version of; null for a plan not saved. */
+  /** The saved trip this plan is the current version (or a draft) of; null for a plan not saved. */
   trip: Trip | null;
+  /** The plan is a draft of the trip: shown, but not used by the trip until it is saved. */
+  draft: boolean;
+  onSaveDraft: () => void;
+  onDiscardDraft: () => void;
+  /** Saving a draft, or undoing a change of the trip. */
+  applying: boolean;
   /** Tick a stop of the trip visited (true) or untick it. */
   onToggleVisited: (placeId: number, visited: boolean) => void;
   /** Save the plan to My trips. */
@@ -111,6 +125,159 @@ function EditSummary({ edit, onUndo }: { edit: PlanEdit; onUndo: PlanResultProps
       {edit.adjustments.map((a) => (
         <p key={`${a.removed?.place_id}-${a.added?.place_id}`}>{describeAdjustment(a)}</p>
       ))}
+    </div>
+  );
+}
+
+/** Asks before saving a draft that drops planned stops, and says why each goes. */
+function ConfirmDrop({
+  dropped,
+  onConfirm,
+  onCancel,
+}: {
+  dropped: DroppedStop[];
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const titleId = useId();
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const cancel = useEffectEvent(onCancel);
+  useEffect(() => {
+    cancelRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") cancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const stops = dropped.length === 1 ? "stop" : "stops";
+  return (
+    <div
+      className="fixed inset-0 z-[2000] flex items-end justify-center bg-zinc-900/40 p-4 sm:items-center"
+      onClick={onCancel}
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id={titleId} className="text-base font-semibold text-zinc-900">
+          Drop {dropped.length} planned {stops}?
+        </h2>
+        <p className="mt-1 text-sm text-zinc-600">Saving this change takes them off the day:</p>
+        <ul className="mt-3 space-y-2 text-sm">
+          {dropped.map((stop) => (
+            <li key={stop.place_id}>
+              <span className="font-medium text-zinc-900">{stop.name}</span>
+              <span className="block text-xs text-zinc-600">{stop.reason}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-5 flex justify-end gap-3">
+          <button
+            ref={cancelRef}
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700"
+          >
+            Drop and save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A draft of the trip on screen: what it changes and drops, to save or discard. */
+function DraftBar({
+  edit,
+  onSave,
+  onDiscard,
+  applying,
+  error,
+}: {
+  edit: PlanEdit | null;
+  onSave: () => void;
+  onDiscard: () => void;
+  applying: boolean;
+  error: string | null;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const dropped = edit?.dropped ?? [];
+  return (
+    <div
+      role="region"
+      aria-label="Draft"
+      className="sticky bottom-0 -mx-4 space-y-1 border-t border-amber-200 bg-amber-50/95 px-4 py-3 text-sm shadow-[0_-4px_12px_rgba(0,0,0,0.05)] backdrop-blur lg:-mx-6 lg:px-6"
+    >
+      <p className="text-xs font-semibold tracking-wide text-amber-800 uppercase">
+        Draft · not saved yet
+      </p>
+      {edit && <p className="text-zinc-800">{describeEdit(edit)}</p>}
+      {edit?.adjustments.map((a) => (
+        <p key={`${a.removed?.place_id}-${a.added?.place_id}`} className="text-xs text-zinc-700">
+          {describeAdjustment(a)}
+        </p>
+      ))}
+      {dropped.length > 0 && (
+        <div className="text-xs text-amber-900">
+          <p className="font-medium">
+            Drops {dropped.length} planned {dropped.length === 1 ? "stop" : "stops"}:
+          </p>
+          <ul className="list-disc pl-4">
+            {dropped.map((stop) => (
+              <li key={stop.place_id}>{describeDropped(stop)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {edit?.warnings.map((w) => (
+        <p key={w} className="text-xs text-amber-800">
+          {w}
+        </p>
+      ))}
+      {error && (
+        <p role="alert" className="text-xs text-red-700">
+          {error}
+        </p>
+      )}
+      <div className="flex items-center gap-3 pt-2">
+        <button
+          type="button"
+          onClick={() => (dropped.length > 0 ? setConfirming(true) : onSave())}
+          disabled={applying}
+          className="flex-1 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-wait disabled:bg-emerald-400"
+        >
+          {applying ? "Saving…" : "Save changes"}
+        </button>
+        <button
+          type="button"
+          onClick={onDiscard}
+          disabled={applying}
+          className="text-sm text-zinc-600 hover:text-zinc-900"
+        >
+          Discard
+        </button>
+      </div>
+      {confirming && (
+        <ConfirmDrop
+          dropped={dropped}
+          onConfirm={() => {
+            setConfirming(false);
+            onSave();
+          }}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
     </div>
   );
 }
@@ -195,6 +362,7 @@ function DayStops({
   locked,
   fresh,
   visited,
+  visitLocked,
   onToggleVisited,
   onHoverStop,
 }: {
@@ -205,6 +373,7 @@ function DayStops({
   fresh: Set<number>;
   /** Visited stops of a saved trip; null for a plan not saved. */
   visited: Set<number> | null;
+  visitLocked: boolean;
   onToggleVisited: PlanResultProps["onToggleVisited"];
   onHoverStop: PlanResultProps["onHoverStop"];
 }) {
@@ -243,6 +412,7 @@ function DayStops({
               selectionDisabled={locked}
               isNew={fresh.has(stop.place_id)}
               visited={visited && visited.has(stop.place_id)}
+              visitLocked={visitLocked}
               onToggleVisited={() => onToggleVisited(stop.place_id, !visited?.has(stop.place_id))}
               onHover={onHoverStop}
             />
@@ -256,6 +426,10 @@ function DayStops({
 export default function PlanResult({
   plan,
   trip,
+  draft,
+  onSaveDraft,
+  onDiscardDraft,
+  applying,
   onToggleVisited,
   onSave,
   saving,
@@ -300,6 +474,7 @@ export default function PlanResult({
             {trip && (
               <p className="text-xs font-medium tracking-wide text-emerald-700 uppercase">
                 Saved trip
+                {draft && <span className="text-amber-700"> · draft</span>}
               </p>
             )}
             <h2 className="text-base font-semibold text-zinc-900">{title}</h2>
@@ -327,7 +502,7 @@ export default function PlanResult({
         {plan.rationale && <p className="mt-3 text-sm text-zinc-700">{plan.rationale}</p>}
         <WeatherNotes plan={plan} />
         <HoursNotes plan={plan} />
-        {plan.edit && <EditSummary edit={plan.edit} onUndo={onUndo} />}
+        {plan.edit && !draft && <EditSummary edit={plan.edit} onUndo={onUndo} />}
         {(plan.warnings.length > 0 || plan.dropped.length > 0) && (
           <div className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-800">
             {plan.dropped.length > 0 && (
@@ -381,22 +556,33 @@ export default function PlanResult({
           {day.transit_legs > 0 &&
             ` + ${day.transit_legs} ${day.transit_legs === 1 ? "ride" : "rides"}`}{" "}
           · {day.stops[0]?.arrive}–{day.stops.at(-1)?.leave}
-          {visited && ` · ${visitedToday} of ${day.stops.length} visited`} · tick stops to replace
-          them
+          {visited && ` · ${visitedToday} of ${day.stops.length} visited`}
+          {!draft && " · tick stops to replace them"}
         </p>
         <DayStops
           day={day}
           selected={selected}
           onToggle={toggle}
-          locked={replacing}
+          locked={replacing || applying || draft}
           fresh={newStops(plan.edit, day.day)}
           visited={visited}
+          visitLocked={applying || draft}
           onToggleVisited={onToggleVisited}
           onHoverStop={onHoverStop}
         />
       </div>
 
-      {(selected.length > 0 || editError) && (
+      {draft && (
+        <DraftBar
+          edit={plan.edit}
+          onSave={onSaveDraft}
+          onDiscard={onDiscardDraft}
+          applying={applying}
+          error={editError}
+        />
+      )}
+
+      {!draft && (selected.length > 0 || editError) && (
         <div className="sticky bottom-0 -mx-4 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] backdrop-blur lg:-mx-6 lg:px-6">
           {editError && (
             <p role="alert" className="mb-2 text-xs text-red-700">
