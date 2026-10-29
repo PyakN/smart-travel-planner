@@ -68,6 +68,16 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 | `POST /plan` | **Plan a trip from text**: `{"text", "start"?: {"lat", "lon", "round_trip"}, "must_visit"?: [place ids], "modes"?: ["walk", "transit"], "start_date"?: "YYYY-MM-DD", "weather_aware"?: bool, "day_start"?: "HH:MM", "day_end"?: "HH:MM", "first_day_start"?: "HH:MM"}` → dated days with their hours and ordered, timed stops (photo, description, personal note, opening hours, free time before them, forecast) and map geometry. Saved; returns `id` |
 | `GET /plans/{id}` | A saved plan |
 | `POST /plans/{id}/replace` | **Replace stops of a day**: `{"day", "place_ids"}` → a new saved version (`parent_id` = this plan), with an `edit` listing what was replaced, added and adjusted |
+| `POST /auth/signup` | Create an account and log in: `{"email", "password", "display_name"}` (password 8+ characters); 409 if the email has an account |
+| `POST /auth/login` | Log in: `{"email", "password"}`; 401 on a wrong email or password, 429 after 5 failed log-ins in 15 minutes |
+| `POST /auth/logout` | End this session |
+| `GET /auth/me` · `DELETE /auth/me` | The logged-in user (401 if none) · delete the account and its trips |
+| `POST /trips` | **Save a plan** to my trips: `{"plan_id", "title"?}`; a plan saved already gives that trip (200) |
+| `GET /trips` | My trips, the most recently changed first |
+| `GET /trips/{id}` | A trip with its current plan and visited places |
+| `PATCH /trips/{id}` | Rename (`{"title"}`) or switch to another version of its plan (`{"plan_id"}`: a new version made from it, or an earlier one for undo) |
+| `DELETE /trips/{id}` | Delete a trip (its plans stay readable by their links) |
+| `PUT` · `DELETE /trips/{id}/visits/{place_id}` | Tick a stop of the trip's current plan visited · untick it |
 
 Example: museums and viewpoints within 400 m of Praça do Comércio:
 
@@ -91,11 +101,25 @@ Replacing stops (`POST /plans/{id}/replace`):
 - **Last resort:** a day left sparse (fewer stops, or an hour shorter) gets nearby fillers, and a one-note day (one kind of place is over half of 4+ stops) swaps one unticked stop of that kind. Must-visit stops and the new replacements are never touched, and every adjustment is reported.
 
 Error statuses:
+- **401:** not logged in (`/auth/me` and `/trips`).
+- **404:** no such plan, or a trip that does not exist or belongs to someone else.
+- **409:** an email that has an account; a trip version that leaves out a visited place.
 - **422:** the request can't be planned, for example an unsupported city.
 - **429:** the daily LLM token budget is used up.
 - **502:** the LLM rejected the request.
 - **503:** the LLM is unavailable or not configured.
 - **504:** planning timed out.
+
+## Accounts and saved trips
+
+Plans are public: anyone with a plan's link can read it (`GET /plans/{id}`, the frontend's `?plan=<id>`). Accounts add private trips on top.
+
+- **Accounts:** `users` keep an email (lowercase: log-ins ignore case), an argon2id password hash and a display name. Logging in starts a session: a random token in an HttpOnly, SameSite=Lax cookie with `Path=/`, which the browser sends through the frontend's same-origin `/api` proxy. The `sessions` table keeps only the token's SHA-256 and an expiry (30 days, `SESSION_DAYS`). Set `SESSION_COOKIE_SECURE=true` wherever the site is served over HTTPS. Password reset waits for an email sender.
+- **Failed log-ins:** at most 5 per email in 15 minutes, then 429 with `Retry-After`, even with the right password. Every attempt counts until its password checks out, so guesses sent at once cannot slip past. The count is kept in memory, per process.
+- **Saved trips:** a trip (`trips`) is a user's plan, by its current version. Replacing stops makes a new plan version that names the one it came from (`parent_id`); versions that go back to the same first plan are versions of the same trip, and `PATCH /trips/{id}` switches between them (save a new version, undo). Other users' trips answer 404.
+- **Visited places** (`trip_visits`) live on the trip, not on a version: there is one record of them, and switching to a version that leaves a visited place out is refused (409).
+
+The frontend has log-in and sign-up pages, My trips (rename, delete, delete the account), "Save to my trips" on a plan (logged out: log in or sign up first, then it saves), `?trip=<id>` for a saved trip, and a "Visited" tick on its stop cards. On a saved trip, replacing stops moves the trip to the new version and Undo moves it back.
 
 ## LLM layer
 

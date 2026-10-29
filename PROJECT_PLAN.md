@@ -155,10 +155,10 @@ A traveller saves a trip, ticks off places during the day and changes the rest o
 - Food data is OSM only for now: no ratings or prices exist there, so those filters wait for an optional provider (see the last items)
 
 **Accounts and saved trips** (moved from Phase 9)
-- [ ] Accounts: `users` (email, argon2 password hash, display name) and `sessions` (hashed random token, expiry); `POST /auth/signup`, `/auth/login`, `/auth/logout`, `GET` / `DELETE /auth/me`; an HttpOnly, SameSite=Lax, `Path=/` cookie through the same-origin `/api` proxy; a limit on failed log-ins. Password reset waits for an email sender
-- [ ] Saved trips: `trips` (owner, title, current plan version) and `trip_visits` (place, visited at); `POST /trips` saves a plan, `GET /trips` lists mine, `GET /trips/{id}` returns the trip with its current plan and visited places, `PATCH /trips/{id}` renames it or switches it to another version of the same trip (save a draft, undo), `DELETE /trips/{id}`. Other users' trips answer 404; `?plan=<id>` share links stay public and read-only
-- [ ] Visited places: `PUT` / `DELETE /trips/{id}/visits/{place_id}`; later edits never move or drop a visited stop
-- [ ] Frontend: a header with My trips and log in / out, sign-up and log-in pages, a My trips page, "Save to my trips" on a plan (log in first, then it saves), `?trip=<id>` opens a saved trip, a "Visited" tick on its stop cards
+- [x] Accounts: `users` (email, argon2 password hash, display name) and `sessions` (hashed random token, expiry); `POST /auth/signup`, `/auth/login`, `/auth/logout`, `GET` / `DELETE /auth/me`; an HttpOnly, SameSite=Lax, `Path=/` cookie through the same-origin `/api` proxy; a limit on failed log-ins. Password reset waits for an email sender
+- [x] Saved trips: `trips` (owner, title, current plan version) and `trip_visits` (place, visited at); `POST /trips` saves a plan, `GET /trips` lists mine, `GET /trips/{id}` returns the trip with its current plan and visited places, `PATCH /trips/{id}` renames it or switches it to another version of the same trip (save a draft, undo), `DELETE /trips/{id}`. Other users' trips answer 404; `?plan=<id>` share links stay public and read-only
+- [x] Visited places: `PUT` / `DELETE /trips/{id}/visits/{place_id}`; later edits never move or drop a visited stop
+- [x] Frontend: a header with My trips and log in / out, sign-up and log-in pages, a My trips page, "Save to my trips" on a plan (log in first, then it saves), `?trip=<id>` opens a saved trip, a "Visited" tick on its stop cards
 
 **Editing a saved day**
 - [ ] Optimizer: a day can start from any point at any time and end at a different point (the hotel), using the TSP's existing `end` support; a live re-plan is bounded by the day's end time (+30 min grace) instead of the pace share, so planned stops drop only when the day would really run long. Least important stops go first; visited, must-visit and newly added places are protected
