@@ -253,12 +253,21 @@ export interface SignupRequest extends LoginRequest {
   display_name: string;
 }
 
+/** A stop of a saved trip the traveller has visited. */
+export interface TripVisit {
+  place_id: number;
+  name: string;
+  visited_at: string;
+}
+
 /** A saved trip with its current plan (GET /trips/{id}). */
 export interface Trip {
   id: number;
   title: string;
   /** The current version of the plan. */
   plan: PlanResponse;
+  /** Stops visited so far, in visiting order. */
+  visits: TripVisit[];
   created_at: string;
   updated_at: string;
 }

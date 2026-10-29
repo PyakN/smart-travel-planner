@@ -21,6 +21,9 @@ export interface StopCardProps {
   selectionDisabled: boolean;
   /** Added by the last replacement. */
   isNew: boolean;
+  /** Whether the traveller has been there; null for a plan not saved as a trip. */
+  visited: boolean | null;
+  onToggleVisited: () => void;
   onHover: (placeId: number | null) => void;
 }
 
@@ -75,6 +78,8 @@ export default function StopCard({
   onToggleSelected,
   selectionDisabled,
   isNew,
+  visited,
+  onToggleVisited,
   onHover,
 }: StopCardProps) {
   const [expanded, setExpanded] = useState(false);
@@ -85,7 +90,9 @@ export default function StopCard({
       className={`rounded-lg border bg-white p-2.5 shadow-sm transition ${
         selected
           ? "border-blue-400 ring-2 ring-blue-500/20"
-          : "border-zinc-200 hover:border-zinc-300"
+          : visited
+            ? "border-emerald-300 bg-emerald-50/40"
+            : "border-zinc-200 hover:border-zinc-300"
       }`}
     >
       <div className="flex gap-3">
@@ -96,10 +103,10 @@ export default function StopCard({
             <input
               type="checkbox"
               checked={selected}
-              disabled={selectionDisabled}
+              disabled={selectionDisabled || visited === true}
               onChange={onToggleSelected}
               aria-label={`Select ${stop.name} to replace`}
-              title="Select to replace"
+              title={visited ? "Visited places stay on the trip" : "Select to replace"}
               className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-blue-600"
             />
           </div>
@@ -157,6 +164,20 @@ export default function StopCard({
         </div>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+        {visited !== null && (
+          <button
+            type="button"
+            onClick={onToggleVisited}
+            aria-pressed={visited}
+            className={`rounded-full px-2 py-0.5 font-medium ${
+              visited
+                ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                : "border border-zinc-300 text-zinc-700 hover:border-emerald-500 hover:text-emerald-700"
+            }`}
+          >
+            {visited ? "✓ Visited" : "Mark visited"}
+          </button>
+        )}
         {stop.opening_hours && <span>🕒 {formatOpeningHours(stop.opening_hours)}</span>}
         {stop.website && (
           <a

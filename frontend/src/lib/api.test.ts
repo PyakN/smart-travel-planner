@@ -12,10 +12,12 @@ import {
   listTrips,
   logIn,
   logOut,
+  markVisited,
   replaceStops,
   saveTrip,
   searchPlaces,
   signUp,
+  unmarkVisited,
   updateTrip,
 } from "./api";
 
@@ -140,6 +142,17 @@ describe("trips", () => {
       "GET /api/trips/4",
       "DELETE /api/trips/4",
       "DELETE /api/auth/me",
+    ]);
+  });
+
+  it("ticks and unticks visited stops", async () => {
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 }));
+    await markVisited(4, 77, fetchImpl);
+    await unmarkVisited(4, 77, fetchImpl);
+    const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([url, init]) => `${init.method} ${url}`)).toEqual([
+      "PUT /api/trips/4/visits/77",
+      "DELETE /api/trips/4/visits/77",
     ]);
   });
 

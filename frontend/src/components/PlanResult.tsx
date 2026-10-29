@@ -33,6 +33,8 @@ export interface PlanResultProps {
   plan: PlanResponse;
   /** The saved trip this plan is the current version of; null for a plan not saved. */
   trip: Trip | null;
+  /** Tick a stop of the trip visited (true) or untick it. */
+  onToggleVisited: (placeId: number, visited: boolean) => void;
   /** Save the plan to My trips. */
   onSave: () => void;
   saving: boolean;
@@ -192,6 +194,8 @@ function DayStops({
   onToggle,
   locked,
   fresh,
+  visited,
+  onToggleVisited,
   onHoverStop,
 }: {
   day: PlannedDay;
@@ -199,6 +203,9 @@ function DayStops({
   onToggle: (placeId: number) => void;
   locked: boolean;
   fresh: Set<number>;
+  /** Visited stops of a saved trip; null for a plan not saved. */
+  visited: Set<number> | null;
+  onToggleVisited: PlanResultProps["onToggleVisited"];
   onHoverStop: PlanResultProps["onHoverStop"];
 }) {
   const color = dayColor(day.day);
@@ -235,6 +242,8 @@ function DayStops({
               onToggleSelected={() => onToggle(stop.place_id)}
               selectionDisabled={locked}
               isNew={fresh.has(stop.place_id)}
+              visited={visited && visited.has(stop.place_id)}
+              onToggleVisited={() => onToggleVisited(stop.place_id, !visited?.has(stop.place_id))}
               onHover={onHoverStop}
             />
           </li>
@@ -247,6 +256,7 @@ function DayStops({
 export default function PlanResult({
   plan,
   trip,
+  onToggleVisited,
   onSave,
   saving,
   saveError,
@@ -263,12 +273,17 @@ export default function PlanResult({
   const title =
     trip?.title ?? `${plan.days.length} ${plan.days.length === 1 ? "day" : "days"} in ${city}`;
   const walking = plan.days.reduce((sum, d) => sum + d.walking_m, 0);
+  const visited = trip ? new Set(trip.visits.map((v) => v.place_id)) : null;
   const transitLegs = plan.days.reduce((sum, d) => sum + d.transit_legs, 0);
 
   // Ticked stops belong to one day of one plan version; switching either clears them.
   const selectionKey = `${plan.id}:${day.day}`;
   const [picked, setPicked] = useState({ key: "", ids: [] as number[] });
-  const selected = picked.key === selectionKey ? picked.ids : [];
+  const visitedToday = day.stops.filter((s) => visited?.has(s.place_id)).length;
+  // Visited stops stay on the trip: they cannot be replaced.
+  const selected = (picked.key === selectionKey ? picked.ids : []).filter(
+    (id) => !visited?.has(id),
+  );
   const toggle = (placeId: number) =>
     setPicked({
       key: selectionKey,
@@ -365,7 +380,9 @@ export default function PlanResult({
           {formatDistance(day.walking_m)} on foot
           {day.transit_legs > 0 &&
             ` + ${day.transit_legs} ${day.transit_legs === 1 ? "ride" : "rides"}`}{" "}
-          · {day.stops[0]?.arrive}–{day.stops.at(-1)?.leave} · tick stops to replace them
+          · {day.stops[0]?.arrive}–{day.stops.at(-1)?.leave}
+          {visited && ` · ${visitedToday} of ${day.stops.length} visited`} · tick stops to replace
+          them
         </p>
         <DayStops
           day={day}
@@ -373,6 +390,8 @@ export default function PlanResult({
           onToggle={toggle}
           locked={replacing}
           fresh={newStops(plan.edit, day.day)}
+          visited={visited}
+          onToggleVisited={onToggleVisited}
           onHoverStop={onHoverStop}
         />
       </div>

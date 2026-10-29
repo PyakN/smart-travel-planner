@@ -8,6 +8,7 @@ import type {
   Trip,
   TripSummary,
   TripUpdate,
+  TripVisit,
   User,
 } from "./types";
 
@@ -138,4 +139,17 @@ export function updateTrip(id: number, body: TripUpdate, fetchImpl: typeof fetch
 
 export async function deleteTrip(id: number, fetchImpl: typeof fetch = fetch): Promise<void> {
   await request<null>(`/trips/${id}`, { method: "DELETE" }, fetchImpl);
+}
+
+/** Ticks a stop of the trip visited (again: it keeps the first time). */
+export function markVisited(tripId: number, placeId: number, fetchImpl: typeof fetch = fetch) {
+  return request<TripVisit>(`/trips/${tripId}/visits/${placeId}`, { method: "PUT" }, fetchImpl);
+}
+
+export async function unmarkVisited(
+  tripId: number,
+  placeId: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  await request<null>(`/trips/${tripId}/visits/${placeId}`, { method: "DELETE" }, fetchImpl);
 }

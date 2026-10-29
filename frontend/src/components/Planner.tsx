@@ -13,13 +13,15 @@ import {
   createPlan,
   getPlan,
   getTrip,
+  markVisited,
   replaceStops,
   saveTrip,
+  unmarkVisited,
   updateTrip,
 } from "@/lib/api";
 import { DEFAULT_DAY_END, DEFAULT_DAY_START, cityDate, cityNow, startingNow } from "@/lib/format";
 import { authHref } from "@/lib/navigation";
-import type { PlaceRef, PlanResponse, StartPoint, TravelMode, Trip } from "@/lib/types";
+import type { PlaceRef, PlanResponse, StartPoint, TravelMode, Trip, TripVisit } from "@/lib/types";
 
 // Leaflet touches `window`, so the map only renders in the browser.
 const RouteMap = dynamic(() => import("@/components/RouteMap"), {
@@ -74,7 +76,7 @@ export default function Planner() {
   const [endTime, setEndTime] = useState(DEFAULT_DAY_END);
   const [laterStart, setLaterStart] = useState(DEFAULT_DAY_START);
   const [replacing, setReplacing] = useState(false);
-  // Why the last change to the plan (replace, undo) failed.
+  // Why the last change to the plan or trip (replace, undo, a visit) failed.
   const [editError, setEditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -288,6 +290,41 @@ export default function Planner() {
     }
   }
 
+  /** Tick a stop of the trip visited, or untick it; shown at once, undone if it fails. */
+  async function toggleVisited(placeId: number, visited: boolean) {
+    if (!trip) return;
+    const tripId = trip.id;
+    const changeVisits = (change: (visits: TripVisit[]) => TripVisit[]) =>
+      setOpened((o) =>
+        o && o.trip.id === tripId
+          ? { ...o, trip: { ...o.trip, visits: change(o.trip.visits) } }
+          : o,
+      );
+    const others = (visits: TripVisit[]) => visits.filter((v) => v.place_id !== placeId);
+    setEditError(null);
+    if (visited) {
+      const name =
+        plan?.days.flatMap((d) => d.stops).find((s) => s.place_id === placeId)?.name ?? "";
+      changeVisits((v) => [...others(v), { place_id: placeId, name, visited_at: "" }]);
+      try {
+        const visit = await markVisited(tripId, placeId);
+        changeVisits((v) => v.map((x) => (x.place_id === placeId ? visit : x)));
+      } catch (error) {
+        changeVisits(others);
+        setEditError(describe(error));
+      }
+    } else {
+      const visit = trip.visits.find((v) => v.place_id === placeId);
+      changeVisits(others);
+      try {
+        await unmarkVisited(tripId, placeId);
+      } catch (error) {
+        if (visit) changeVisits((v) => [...others(v), visit]);
+        setEditError(describe(error));
+      }
+    }
+  }
+
   return (
     <div className="flex h-full flex-col lg:flex-row">
       <main className="relative order-1 h-[42dvh] shrink-0 lg:order-2 lg:h-auto lg:flex-1">
@@ -376,6 +413,7 @@ export default function Planner() {
             <PlanResult
               plan={plan}
               trip={trip}
+              onToggleVisited={toggleVisited}
               onSave={save}
               saving={saving}
               saveError={saveError}
