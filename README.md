@@ -118,7 +118,7 @@ Error statuses:
 - **404:** no such plan, or a trip that does not exist or belongs to someone else.
 - **409:** an email that has an account; a trip version that leaves out a visited place, or a draft made from an outdated version.
 - **422:** the request can't be planned, for example an unsupported city, or a text that names another city than `city`.
-- **429:** the daily LLM token budget is used up.
+- **429:** too many requests to the AI planner from this client (see [Rate limits](#rate-limits-and-llm-abuse)), or the daily LLM token budget is used up.
 - **502:** the LLM rejected the request.
 - **503:** the LLM is unavailable or not configured.
 - **504:** planning timed out.
@@ -291,6 +291,17 @@ Every log line goes through one handler (`app/logs.py`), uvicorn's included: rea
 ```json
 {"time": "2026-10-31T22:05:57.759+00:00", "level": "INFO", "logger": "app.requests", "message": "GET /cities 200", "request_id": "demo-1", "method": "GET", "path": "/cities", "status": 200, "duration_ms": 2, "client": "127.0.0.1"}
 ```
+
+### Rate limits and LLM abuse
+
+The endpoints that call the LLM (`POST /plan`, `POST /plans/{id}/replace`, `POST /trips/{id}/replace`) cost tokens and seconds, so each client gets a share:
+
+- **Per client:** at most 5 requests a minute and 100 a day (`AI_REQUESTS_PER_MINUTE`, `AI_REQUESTS_PER_DAY`; 0 turns one off), then 429 with `Retry-After` and "Try again in 40 s". Clients are told apart by address, in memory per process (`app/rate_limit.py`). Other endpoints are not limited; failed log-ins have [their own limit](#accounts-and-saved-trips).
+- **For everyone:** a daily token budget (`LLM_DAILY_TOKEN_BUDGET`), and identical requests answered from a cache without calling the LLM.
+- **Small requests:** the text is at most 1,000 characters, a trip at most 7 days and 10 must-visit places.
+- **Nothing to steer:** the LLM only fills in a schema, a parsed request or a list of ids from the candidates with a short note each (validated by Pydantic, unknown ids dropped), so it cannot be used as a general chatbot, and a request that tries to instruct it can at most change which candidates it picks and how the notes read.
+
+Behind a proxy, the client's address comes from `X-Forwarded-For`, which uvicorn trusts only from `--forwarded-allow-ips` (127.0.0.1 by default: the Next.js proxy on the same host). Next.js passes on a header the browser sent, so in production the edge in front of it must set the header itself; the token budget holds either way.
 
 ## Everyday commands
 

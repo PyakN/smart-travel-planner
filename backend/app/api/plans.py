@@ -5,7 +5,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.deps import DistancesDep, LLMDep, SessionDep, SettingsDep, TransitDep, WeatherDep
+from app.api.deps import (
+    AI_RATE_LIMIT,
+    DistancesDep,
+    LLMDep,
+    SessionDep,
+    SettingsDep,
+    TransitDep,
+    WeatherDep,
+)
 from app.llm.base import LLMBudgetExceededError, LLMError, LLMUnavailableError
 from app.schemas.plan import PlanRequest, PlanResponse, ReplaceRequest
 from app.services.day_hours import DailyHours
@@ -43,7 +51,7 @@ async def planning_errors(timeout_s: float) -> AsyncIterator[None]:
         ) from exc
 
 
-@router.post("/plan", status_code=status.HTTP_201_CREATED)
+@router.post("/plan", status_code=status.HTTP_201_CREATED, dependencies=[AI_RATE_LIMIT])
 async def create_plan(
     body: PlanRequest,
     session: SessionDep,
@@ -78,7 +86,11 @@ async def create_plan(
         )
 
 
-@router.post("/plans/{plan_id}/replace", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/plans/{plan_id}/replace",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[AI_RATE_LIMIT],
+)
 async def replace_plan_stops(
     plan_id: int,
     body: ReplaceRequest,

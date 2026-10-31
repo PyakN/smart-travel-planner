@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = 4096
     llm_daily_token_budget: int = 1_000_000
     llm_cache_size: int = 256
+    # Requests per client (address) to the endpoints that call the LLM: POST /plan and the
+    # replaces (app.rate_limit). 0 turns a limit off.
+    ai_requests_per_minute: int = 5
+    ai_requests_per_day: int = 100
 
     # Walking distances: OSRM foot routing (public FOSSGIS server by default), with a
     # haversine fallback when it is unavailable.

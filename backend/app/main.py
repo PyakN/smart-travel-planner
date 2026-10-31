@@ -11,6 +11,7 @@ from app.llm.base import LLMError
 from app.llm.factory import create_llm_service
 from app.logs import add_request_context, configure_logging
 from app.optimizer.factory import create_distance_provider, create_transit_provider
+from app.rate_limit import Limit, RateLimiter
 from app.services.accounts import LoginLimiter
 from app.services.weather_service import create_weather_provider
 
@@ -24,6 +25,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engine = create_engine()
     app.state.sessionmaker = create_sessionmaker(engine)
     app.state.login_limiter = LoginLimiter()
+    app.state.ai_limiter = RateLimiter(
+        [
+            Limit(settings.ai_requests_per_minute, 60),
+            Limit(settings.ai_requests_per_day, 24 * 60 * 60),
+        ]
+    )
     app.state.distances = create_distance_provider(settings)
     app.state.transit = create_transit_provider(settings)
     if app.state.transit is None:
