@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { useAuth } from "@/components/AuthProvider";
 import { cn } from "@/components/ui/cn";
@@ -35,8 +35,23 @@ export function HeaderShell({ children }: { children?: ReactNode }) {
   );
 }
 
+const noSubscription = () => () => {};
+
+/** False while the page hydrates, true after. */
+function useHydrated(): boolean {
+  return useSyncExternalStore(
+    noSubscription,
+    () => true,
+    () => false,
+  );
+}
+
 export default function SiteHeader() {
-  const { user, setUser } = useAuth();
+  const { user: knownUser, setUser } = useAuth();
+  // The header hydrates after the rest of the page (its own Suspense boundary), by when the
+  // backend may have said who is logged in. Until it has hydrated it shows what the server
+  // rendered, nobody known yet, so the two match.
+  const user = useHydrated() ? knownUser : undefined;
   const pathname = usePathname();
   const query = useSearchParams().toString();
   const here = query ? `${pathname}?${query}` : pathname;
