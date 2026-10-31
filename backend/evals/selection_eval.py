@@ -31,6 +31,23 @@ def expect(condition: bool, message: str) -> str | None:
     return None if condition else message
 
 
+# Gaudí's works as OSM names them in Barcelona.
+GAUDI = {
+    "Basílica de la Sagrada Família",
+    "Escoles de la Sagrada Família",
+    "Parc Güell",
+    "Park Güell",
+    "Casa Batlló",
+    "Casa Milà",
+    "Casa Vicens",
+    "Palau Güell",
+    "Casa Calvet",
+    "Torre Bellesguard",
+    "Pavellons Güell",
+    "Finca Güell",
+}
+
+
 @dataclass
 class Case:
     name: str
@@ -82,6 +99,41 @@ CASES = [
             ),
             lambda r: expect(
                 any("Jerónimos" in p.name for p in r.places), "no Jerónimos in selection"
+            ),
+        ],
+    ),
+    # Big cities: hundreds of sights match the request's categories, and the famous ones
+    # are often of another category (the basilica is a church, the TV Tower an attraction).
+    Case(
+        "gaudi-day",
+        "A Gaudí day in Barcelona",
+        [
+            lambda r: expect(r.city == "barcelona", f"city={r.city}"),
+            lambda r: expect(
+                any("Sagrada Família" in p.name for p in r.places), "no Sagrada Família"
+            ),
+            lambda r: expect(
+                sum(p.name in GAUDI for p in r.places) >= 3, "fewer than 3 of Gaudí's works"
+            ),
+        ],
+    ),
+    Case(
+        "berlin-view",
+        "One day in Berlin. I want a view over the city.",
+        [
+            lambda r: expect(r.city == "berlin", f"city={r.city}"),
+            lambda r: expect(
+                any(p.name == "Berliner Fernsehturm" for p in r.places), "no TV Tower"
+            ),
+        ],
+    ),
+    Case(
+        "berlin-museums",
+        "A day of museums in Berlin.",
+        [
+            # The city's famous sights head the list; they must not crowd out the museums.
+            lambda r: expect(
+                share_in(r, {"museum", "gallery"}) >= 0.8, f"mix={dict(categories(r))}"
             ),
         ],
     ),

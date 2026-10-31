@@ -167,7 +167,7 @@ In the frontend, "Find places to eat" on a saved day turns the sidebar into the 
 The LLM never invents places. A request goes through four steps:
 
 1. **Parse:** the request text becomes a `TripRequest` (city, days, interests, avoid, pace, keywords).
-2. **Candidates:** SQL ranks the city's sights by notability, interests and keywords, plus closeness to the hotel and the must-visit places (PostGIS distance; full weight at the anchor, none beyond 2.5 km on foot or 5 km with transit). Food and drink venues are never candidates.
+2. **Candidates:** SQL ranks the city's sights by fame, interests and keywords, plus closeness to the hotel and the must-visit places (PostGIS distance; full weight at the anchor, none beyond 2.5 km on foot or 5 km with transit). Fame grows with the log of the Wikipedia languages that cover a place (1 gives 0.6, 30 give 3, 100 give the full 4), so a world-famous place outranks an obscure match for the interests, and a known match outranks it. One place stands for each Wikidata item (OSM maps some sights in pieces: 24 of Lisbon's aqueduct). The interests are a guess at categories (the Sagrada Família is a church on a Gaudí day), so the city's most famous places, a third of the pool's size, always join it, and they lead the list the LLM sees. Food and drink venues are never candidates.
 3. **Select:** the LLM fills the slots the must-visit places leave, picking ids from that candidate list (it sees the distances), and writes a one-sentence note per place on why it suits the traveller.
 4. **Guard:** a deterministic check drops any id that isn't a candidate, and places with the same name as one already chosen (OSM maps some sights twice).
 

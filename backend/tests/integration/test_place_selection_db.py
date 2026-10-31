@@ -9,6 +9,7 @@ from app.ingest.cities import City
 from app.llm.service import LLMService
 from app.optimizer.geometry import LatLon
 from app.schemas.trip import PlaceNote, PlaceSelection
+from app.services import place_selection
 from app.services.place_selection import PlanningError, SelectionResult, select_places
 from app.services.weather_service import TripWeather, parse_forecast, trip_weather
 from tests.fakes import FakeProvider
@@ -58,6 +59,23 @@ def test_pipeline_returns_only_real_places(
     selection_prompt = str(provider.calls[1]["prompt"])
     assert f"{luzia} | Miradouro de Santa Luzia | viewpoint" in selection_prompt
     assert "Serralves" not in selection_prompt
+
+
+def test_the_most_famous_places_are_candidates_whatever_the_request(
+    db_session: SessionFactory, place_ids: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(place_selection, "MAX_POOL", 2)  # and 1 famous place
+    monkeypatch.setattr(place_selection, "MIN_POOL", 1)
+    provider = FakeProvider().queue(
+        trip(city=None, days=1, pace="relaxed", keywords=["luzia", "gulbenkian"]),
+        PlaceSelection(place_ids=[place_ids["Miradouro de Santa Luzia"]], rationale="."),
+    )
+    result = run(db_session, provider, "Santa Luzia and the Gulbenkian")
+
+    assert result.candidates_considered == 3
+    # Listed first: a small model picks from the top of the list.
+    listed = str(provider.calls[1]["prompt"]).split("hint):\n", 1)[1].splitlines()
+    assert listed[0].startswith(f"{place_ids['Torre de Belém']} | Torre de Belém |")
 
 
 def test_must_visit_places_come_first_and_anchor_the_rest(

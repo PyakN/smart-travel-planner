@@ -49,6 +49,9 @@ from app.schemas.trip import (
 from app.services.weather_service import TripWeather, describe_day, hhmm, with_daylight
 
 MIN_POOL, MAX_POOL, POOL_PER_STOP = 30, 100, 3
+# The city's most famous places join the pool, a third of its size, whatever the request's
+# categories: the Gaudí day that ranks landmarks first still sees the Sagrada Família.
+FAMOUS_PER_POOL = 1 / 3
 # Candidates open at night (lit squares, sights open late), for days that reach into the
 # evening; an evening holds a few of them, and the rest of it is free time.
 MIN_EVENING_POOL = 15
@@ -99,6 +102,8 @@ SELECT_SYSTEM = """You choose places for a walking trip.
 - Match the traveller's interests, keywords and notes. Never choose an avoided category unless
   the traveller named that place.
 - Prefer famous, high-value places and a varied mix; skip near-duplicates (e.g. five statues).
+- The list starts with the city's best-known sights, most famous first and whatever their
+  category: choose those that fit the request.
 - Must-visit places are already in the plan: never choose them, complement them.
 - When candidates show a distance (to the hotel or the nearest must-visit place), prefer the
   closer one of two similar places; choose a far place only if it is a real highlight for
@@ -485,8 +490,16 @@ def _selection_prompt(
                 "theatres, markets."
             )
     lines += [f"Number of places to choose: {target}", "", f"Candidates ({columns} | hint):"]
-    lines.extend(candidate_line(c, exposure, timed) for c in candidates)
+    lines.extend(candidate_line(c, exposure, timed) for c in _best_known_first(candidates))
     return "\n".join(lines)
+
+
+def _best_known_first(candidates: Sequence[Candidate]) -> list[Candidate]:
+    """The city's most famous places, most famous first, then the rest as ranked. A small
+    model picks from the top of the list: below 30 obscure squares that match "landmark",
+    it passed over the Sagrada Família on a Gaudí day."""
+    famous = sorted((c for c in candidates if c.famous), key=lambda c: -c.wikipedia_languages)
+    return famous + [c for c in candidates if not c.famous]
 
 
 def proximity_radius_m(modes: Collection[TravelMode]) -> float:
@@ -494,8 +507,11 @@ def proximity_radius_m(modes: Collection[TravelMode]) -> float:
 
 
 def merge_ranked(*pools: Sequence[Candidate]) -> list[Candidate]:
-    """Candidate pools as one ranking, best score first; a place in several pools once."""
-    unique = {c.id: c for pool in pools for c in pool}
+    """Candidate pools as one ranking, best score first; a place in several pools once, as
+    the first pool has it (the main pool knows which places are famous)."""
+    unique: dict[int, Candidate] = {}
+    for c in (c for pool in pools for c in pool):
+        unique.setdefault(c.id, c)
     return sorted(unique.values(), key=lambda c: -c.score)
 
 
@@ -579,7 +595,7 @@ async def select_places(
     anchors = ([start] if start else []) + [LatLon(m.lat, m.lon) for m in must]
     pool = max(MIN_POOL, min(MAX_POOL, target * POOL_PER_STOP))
 
-    async def ranked(limit: int, open_at_night: bool = False) -> list[Candidate]:
+    async def ranked(limit: int, open_at_night: bool = False, famous: int = 0) -> list[Candidate]:
         return await find_candidates(
             session,
             city=city,
@@ -592,12 +608,13 @@ async def select_places(
             limit=limit,
             exclude_categories=sorted(VENUE_CATEGORIES),
             open_at_night=open_at_night,
+            famous=famous,
         )
 
     # Days with evenings get places open at night in a pool of their own, so the day's
     # ranking does not crowd them out: few squares are notable. The places only that pool
     # brings are for the evenings (fit_hours).
-    candidates = await ranked(pool)
+    candidates = await ranked(pool, famous=round(pool * FAMOUS_PER_POOL))
     evening_pool: set[int] = set()
     if night := sum(s.night for s in slots):
         size = max(MIN_EVENING_POOL, min(MAX_POOL, night * POOL_PER_STOP))
