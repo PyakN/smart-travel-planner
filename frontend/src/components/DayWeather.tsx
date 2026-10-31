@@ -1,3 +1,4 @@
+import { Icon } from "@/components/ui/Icon";
 import { dayHours, formatDate, formatTemp, weatherIcon } from "@/lib/format";
 import type { PlannedDay } from "@/lib/types";
 
@@ -16,50 +17,77 @@ function sentenceCase(text: string): string {
 export default function DayWeather({ day, weatherAware }: DayWeatherProps) {
   const { date, weather: forecast } = day;
   if (!date) return null;
-  const when = [formatDate(date), dayHours(day)].filter(Boolean).join(" · ");
+  const hours = dayHours(day);
   if (!weatherAware || !forecast) {
     return (
-      <div className="rounded-lg border border-dashed border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-500">
-        <span className="font-medium text-zinc-700">{when}</span>
-        {day.sunset && ` · dark from ${day.sunset}`}
-        {weatherAware && " · No forecast yet: forecasts reach 5 days ahead."}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-panel bg-canvas px-3.5 py-2.5 text-small text-ink-2">
+        <span className="flex items-center gap-1.5 font-bold text-ink">
+          <Icon name="calendar" size={16} className="text-ink-3" />
+          {formatDate(date)}
+          {hours && (
+            <span className="font-display text-[15px] font-semibold tabular-nums">{hours}</span>
+          )}
+        </span>
+        {day.sunset && (
+          <span className="flex items-center gap-1.5">
+            <Icon name="sunset" size={16} className="text-ink-3" />
+            Dark from{" "}
+            <span className="font-display text-[15px] font-semibold tabular-nums">
+              {day.sunset}
+            </span>
+          </span>
+        )}
+        {weatherAware && <span>No forecast yet: forecasts reach 5 days ahead.</span>}
       </div>
     );
   }
   return (
     <section
       aria-label={`Weather on ${formatDate(date)}`}
-      className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm"
+      className="rounded-panel border border-line bg-surface p-3.5"
     >
-      <div className="flex items-center gap-3">
-        <span className="text-3xl leading-none" aria-hidden>
-          {weatherIcon(forecast)}
+      <div className="flex items-start gap-3">
+        <span className="flex size-11 shrink-0 items-center justify-center rounded-control bg-info-soft text-info">
+          <Icon name={weatherIcon(forecast)} size={26} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-zinc-900">
-            {when} · {sentenceCase(forecast.description)}
+          <p className="text-sm font-bold text-ink">
+            {formatDate(date)}
+            {hours && (
+              <span className="ml-1.5 font-display text-[15px] font-semibold tabular-nums">
+                {hours}
+              </span>
+            )}
           </p>
-          <p className="text-xs text-zinc-500">
-            {forecast.temp_min_c}–{formatTemp(forecast.temp_max_c)}
-            {forecast.pop > 0 && ` · ${forecast.pop}% chance of rain`} · daylight {forecast.sunrise}
-            –{forecast.sunset}
+          <p className="text-small text-ink-2">
+            {sentenceCase(forecast.description)}, {forecast.temp_min_c}–
+            {formatTemp(forecast.temp_max_c)}
+            {forecast.pop > 0 && `, ${forecast.pop}% chance of rain`}. Daylight {forecast.sunrise}–
+            {forecast.sunset}.
           </p>
         </div>
       </div>
-      <ol className="mt-2 flex gap-1 overflow-x-auto" aria-label="Forecast by time">
+      <ol className="mt-3 flex gap-1 overflow-x-auto" aria-label="Forecast by time">
         {forecast.slots.map((slot, i) => (
           // Slots are in time order; a day past midnight can have two of the same clock time.
           <li
             key={i}
             title={slot.description}
-            className="flex min-w-14 flex-1 flex-col items-center rounded-md bg-zinc-50 px-1.5 py-1 text-[11px] text-zinc-600"
+            className="flex min-w-14 flex-1 flex-col items-center gap-0.5 rounded-control bg-canvas px-1.5 py-1.5 text-meta text-ink-2"
           >
-            <span className="tabular-nums">{slot.time}</span>
-            <span className="text-base leading-tight" aria-label={slot.description}>
-              {weatherIcon(slot)}
-            </span>
-            <span className="font-medium text-zinc-800">{formatTemp(slot.temp_c)}</span>
-            <span className={slot.pop >= 50 ? "font-medium text-sky-700" : "text-zinc-400"}>
+            <span className="font-display text-[13px] font-semibold tabular-nums">{slot.time}</span>
+            <Icon
+              name={weatherIcon(slot)}
+              size={20}
+              label={slot.description}
+              className="text-ink"
+            />
+            <span className="font-bold text-ink tabular-nums">{formatTemp(slot.temp_c)}</span>
+            <span
+              className={
+                slot.pop >= 50 ? "font-bold text-info tabular-nums" : "text-ink-3 tabular-nums"
+              }
+            >
               {slot.pop}%
             </span>
           </li>

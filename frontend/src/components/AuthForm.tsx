@@ -2,20 +2,22 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { useAuth } from "@/components/AuthProvider";
+import { Button } from "@/components/ui/Button";
+import { INPUT } from "@/components/ui/Field";
+import { LogoMark } from "@/components/ui/Logo";
+import { Notice } from "@/components/ui/Notice";
 import { ApiError, logIn, signUp } from "@/lib/api";
 import { authHref, safeNext } from "@/lib/navigation";
 
-const INPUT =
-  "w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
 const MIN_PASSWORD = 8;
 
 const COPY = {
   login: {
     title: "Log in",
-    intro: "Open your saved trips and tick off places as you go.",
+    intro: "Open your saved trips and tick off places as you\u00a0go.",
     submit: "Log in",
     busy: "Logging in…",
   },
@@ -26,6 +28,15 @@ const COPY = {
     busy: "Creating your account…",
   },
 };
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="block space-y-1.5">
+      <span className="block text-sm font-bold text-ink">{label}</span>
+      {children}
+    </label>
+  );
+}
 
 /** Log-in or sign-up form; afterwards the visitor goes back to `?next=` (the planner by default). */
 export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
@@ -61,15 +72,17 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
   }
 
   return (
-    <main className="h-full overflow-y-auto px-4 py-10">
-      <div className="mx-auto max-w-sm rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-900">{copy.title}</h1>
-        <p className="mt-1 text-sm text-zinc-500">{copy.intro}</p>
+    <main className="h-full overflow-y-auto px-4 py-10 sm:py-16">
+      <div className="mx-auto max-w-[400px] rounded-panel border border-line bg-surface p-6 sm:p-8">
+        <span className="text-ink">
+          <LogoMark size={32} />
+        </span>
+        <h1 className="mt-4 font-display text-title font-semibold text-ink">{copy.title}</h1>
+        <p className="mt-1 text-body text-ink-2">{copy.intro}</p>
 
-        <form onSubmit={submit} className="mt-5 space-y-4">
+        <form onSubmit={submit} className="mt-6 space-y-4">
           {mode === "signup" && (
-            <label className="block space-y-1 text-sm font-medium text-zinc-800">
-              <span>Name</span>
+            <Field label="Name">
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -78,10 +91,9 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
                 autoComplete="name"
                 className={INPUT}
               />
-            </label>
+            </Field>
           )}
-          <label className="block space-y-1 text-sm font-medium text-zinc-800">
-            <span>Email</span>
+          <Field label="Email">
             <input
               type="email"
               value={email}
@@ -91,9 +103,8 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
               autoComplete="email"
               className={INPUT}
             />
-          </label>
-          <label className="block space-y-1 text-sm font-medium text-zinc-800">
-            <span>Password</span>
+          </Field>
+          <Field label="Password">
             <input
               type="password"
               value={password}
@@ -105,33 +116,37 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
               className={INPUT}
             />
             {mode === "signup" && (
-              <span className="block text-xs font-normal text-zinc-500">
+              <span className="block text-small text-ink-2">
                 At least {MIN_PASSWORD} characters. Passwords cannot be reset yet, so keep it
                 somewhere safe.
               </span>
             )}
-          </label>
+          </Field>
 
           {error && (
-            <p role="alert" className="rounded-md bg-red-50 p-2 text-sm text-red-700">
+            <Notice tone="stop" role="alert">
               {error}
-            </p>
+            </Notice>
           )}
 
-          <button
+          <Button
             type="submit"
+            variant="primary"
+            size="lg"
+            block
             disabled={busy}
-            className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-wait disabled:bg-blue-400"
+            aria-busy={busy}
+            className="aria-busy:disabled:cursor-wait aria-busy:disabled:opacity-100"
           >
             {busy ? copy.busy : copy.submit}
-          </button>
+          </Button>
         </form>
 
-        <p className="mt-5 text-sm text-zinc-600">
+        <p className="mt-6 border-t border-line pt-5 text-sm text-ink-2">
           {mode === "login" ? "No account yet? " : "Already have an account? "}
           <Link
             href={authHref(mode === "login" ? "/signup" : "/login", next)}
-            className="font-medium text-blue-600 hover:underline"
+            className="font-bold text-ink underline underline-offset-3"
           >
             {mode === "login" ? "Sign up" : "Log in"}
           </Link>

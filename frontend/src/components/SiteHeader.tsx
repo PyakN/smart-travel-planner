@@ -5,16 +5,30 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
 import { useAuth } from "@/components/AuthProvider";
+import { cn } from "@/components/ui/cn";
+import { LogoMark } from "@/components/ui/Logo";
 import { logOut } from "@/lib/api";
 import { authHref } from "@/lib/navigation";
 
-const NAV_LINK = "rounded-md px-2 py-1 text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900";
+// On the ink band the focus ring turns white so it stays visible.
+const ON_INK_FOCUS = "focus-visible:outline-white";
+const NAV_LINK = cn(
+  "inline-flex h-9 items-center rounded-control px-3 text-sm font-semibold text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-60",
+  ON_INK_FOCUS,
+);
 
 export function HeaderShell({ children }: { children?: ReactNode }) {
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 lg:px-6">
-      <Link href="/" className="text-sm font-semibold tracking-tight text-zinc-900">
-        Smart Travel Planner
+    <header className="flex h-14 shrink-0 items-center justify-between gap-3 bg-ink px-4 text-white lg:px-6">
+      <Link
+        href="/"
+        className={cn("-mx-1 flex items-center gap-2.5 rounded-control px-1 py-1", ON_INK_FOCUS)}
+      >
+        <LogoMark />
+        {/* Narrow phones keep the mark; the name stays the link's spoken label. */}
+        <span className="font-display text-[19px] leading-none font-semibold tracking-[0.005em] max-[480px]:sr-only">
+          Smart Travel Planner
+        </span>
       </Link>
       {children}
     </header>
@@ -43,14 +57,18 @@ export default function SiteHeader() {
 
   return (
     <HeaderShell>
-      <nav aria-label="Account" className="flex items-center gap-1 text-sm">
-        <Link href="/trips" className={NAV_LINK}>
+      <nav aria-label="Account" className="flex items-center gap-1">
+        <Link
+          href="/trips"
+          aria-current={pathname === "/trips" ? "page" : undefined}
+          className={cn(NAV_LINK, pathname === "/trips" && "bg-white/10 text-white")}
+        >
           My trips
         </Link>
         {user && (
           <>
             <span
-              className="hidden max-w-40 truncate px-2 text-zinc-500 sm:inline"
+              className="hidden max-w-40 truncate px-2 text-sm text-white/60 sm:inline"
               title={user.email}
             >
               {user.display_name}
@@ -67,7 +85,10 @@ export default function SiteHeader() {
             </Link>
             <Link
               href={authHref("/signup", here)}
-              className="rounded-md bg-blue-600 px-3 py-1 font-medium text-white hover:bg-blue-700"
+              className={cn(
+                "ml-1 inline-flex h-9 items-center rounded-control bg-white px-3.5 text-sm font-bold text-ink transition-colors hover:bg-white/90",
+                ON_INK_FOCUS,
+              )}
             >
               Sign up
             </Link>

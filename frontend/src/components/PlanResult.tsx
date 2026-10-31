@@ -1,12 +1,29 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 
 import DayWeather from "@/components/DayWeather";
+import { PlaceChip } from "@/components/MustVisitPicker";
 import PlaceSearch from "@/components/PlaceSearch";
 import StopCard from "@/components/StopCard";
+import { Button, buttonClass } from "@/components/ui/Button";
+import { cn } from "@/components/ui/cn";
+import { Hint, Label } from "@/components/ui/Field";
+import { Icon } from "@/components/ui/Icon";
+import { Notice } from "@/components/ui/Notice";
+import { Roundel } from "@/components/ui/Roundel";
+import { Tag } from "@/components/ui/Tag";
 import {
   DEFAULT_DAY_END,
   DEFAULT_DAY_START,
@@ -33,6 +50,7 @@ import {
   travelLabel,
   weatherIcon,
 } from "@/lib/format";
+import type { IconName } from "@/lib/icons";
 import type {
   DroppedStop,
   PlaceRef,
@@ -44,6 +62,9 @@ import type {
   Trip,
   VenueKind,
 } from "@/lib/types";
+
+// The visited roundel's green.
+const VISITED = "var(--color-go)";
 
 export interface PlanResultProps {
   plan: PlanResponse;
@@ -83,11 +104,22 @@ export interface PlanResultProps {
   onUndo: (() => void) | null;
 }
 
+/** A fact about the trip with its icon: "12.4 km on foot". */
+function Stat({ icon, children }: { icon: IconName; children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Icon name={icon} size={16} className="text-ink-3" />
+      {children}
+    </span>
+  );
+}
+
 function ShareButton({ planId }: { planId: number }) {
   const [copied, setCopied] = useState(false);
   return (
-    <button
-      type="button"
+    <Button
+      size="md"
+      icon={copied ? "check" : "link"}
       onClick={async () => {
         // Share links open the plan, public and read-only, even for a saved trip.
         const url = `${window.location.origin}/?plan=${planId}`;
@@ -95,61 +127,57 @@ function ShareButton({ planId }: { planId: number }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       }}
-      className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200"
     >
-      {copied ? "Link copied" : "Copy share link"}
-    </button>
+      <span aria-live="polite">{copied ? "Link copied" : "Copy share link"}</span>
+    </Button>
   );
 }
 
 function SaveButton({ trip, onSave, saving }: Pick<PlanResultProps, "trip" | "onSave" | "saving">) {
   if (trip) {
     return (
-      <Link
-        href="/trips"
-        className="rounded-md px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
-      >
-        ✓ In My trips
+      <Link href="/trips" className={cn(buttonClass({ size: "md" }), "text-go")}>
+        <Icon name="check" size={17} strokeWidth={2.2} />
+        In My trips
       </Link>
     );
   }
   return (
-    <button
-      type="button"
-      onClick={onSave}
-      disabled={saving}
-      className="rounded-md bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-wait disabled:bg-blue-400"
-    >
+    <Button variant="primary" size="md" onClick={onSave} disabled={saving} icon="star">
       {saving ? "Saving…" : "Save to my trips"}
-    </button>
+    </Button>
   );
 }
 
 function EditSummary({ edit, onUndo }: { edit: PlanEdit; onUndo: PlanResultProps["onUndo"] }) {
   return (
-    <div className="mt-3 space-y-1 rounded-md bg-emerald-50 p-2 text-xs text-emerald-900">
-      <div className="flex items-start justify-between gap-2">
-        <p>{describeEdit(edit)}</p>
-        {onUndo && (
+    <Notice
+      tone="go"
+      icon="swap"
+      title={describeEdit(edit)}
+      action={
+        onUndo && (
           <button
             type="button"
             onClick={onUndo}
-            className="shrink-0 font-medium text-emerald-800 underline hover:text-emerald-950"
+            className="inline-flex shrink-0 items-center gap-1 font-bold text-ink underline-offset-3 hover:underline"
           >
+            <Icon name="undo" size={15} />
             Undo
           </button>
-        )}
-      </div>
+        )
+      }
+    >
       {edit.adjustments.map((a) => (
         <p key={`${a.removed?.place_id}-${a.added?.place_id}`}>{describeAdjustment(a)}</p>
       ))}
-    </div>
+    </Notice>
   );
 }
 
 /**
  * Asks before saving a draft that drops planned stops, and says why each goes. Rendered on
- * the page's body: the draft bar's backdrop blur would make it the box `fixed` is relative to.
+ * the page's body, above everything else.
  */
 function ConfirmDrop({
   dropped,
@@ -161,12 +189,24 @@ function ConfirmDrop({
   onCancel: () => void;
 }) {
   const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const cancel = useEffectEvent(onCancel);
   useEffect(() => {
     cancelRef.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") cancel();
+      // Tab stays within the dialog: from the last button back to the first, and back.
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const buttons = [...dialogRef.current.querySelectorAll<HTMLButtonElement>("button")];
+      const [first, last] = [buttons[0], buttons.at(-1)];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -174,48 +214,59 @@ function ConfirmDrop({
   const stops = dropped.length === 1 ? "stop" : "stops";
   return createPortal(
     <div
-      className="fixed inset-0 z-[2000] flex items-end justify-center bg-zinc-900/40 p-4 sm:items-center"
+      className="fixed inset-0 z-[2000] flex animate-rise items-end justify-center bg-ink/45 p-4 sm:items-center"
       onClick={onCancel}
     >
       <div
+        ref={dialogRef}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"
+        className="w-full max-w-md rounded-panel bg-surface p-5 shadow-float"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 id={titleId} className="text-base font-semibold text-zinc-900">
+        <h2 id={titleId} className="font-display text-[22px] leading-tight font-semibold text-ink">
           Drop {dropped.length} planned {stops}?
         </h2>
-        <p className="mt-1 text-sm text-zinc-600">Saving this change takes them off the day:</p>
-        <ul className="mt-3 space-y-2 text-sm">
+        <p className="mt-1 text-sm text-ink-2">Saving this change takes them off the day:</p>
+        <ul className="mt-4 divide-y divide-line rounded-control border border-line">
           {dropped.map((stop) => (
-            <li key={stop.place_id}>
-              <span className="font-medium text-zinc-900">{stop.name}</span>
-              <span className="block text-xs text-zinc-600">{stop.reason}</span>
+            <li key={stop.place_id} className="px-3 py-2.5">
+              <span className="block text-sm font-bold text-ink">{stop.name}</span>
+              <span className="block text-small text-ink-2">{stop.reason}</span>
             </li>
           ))}
         </ul>
-        <div className="mt-5 flex justify-end gap-3">
+        <div className="mt-5 flex justify-end gap-2">
           <button
             ref={cancelRef}
             type="button"
             onClick={onCancel}
-            className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+            className={buttonClass({ variant: "quiet" })}
           >
             Cancel
           </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700"
-          >
+          <Button variant="danger" onClick={onConfirm}>
             Drop and save
-          </button>
+          </Button>
         </div>
       </div>
     </div>,
     document.body,
+  );
+}
+
+/** The bar at the bottom of the sidebar that holds the action for what is under way. */
+function ActionBar({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      className={cn(
+        "sticky bottom-0 z-10 -mx-5 animate-rise border-t border-line bg-surface px-5 pt-3 pb-4 shadow-bar lg:-mx-8 lg:px-8",
+        className,
+      )}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -236,62 +287,58 @@ function DraftBar({
   const [confirming, setConfirming] = useState(false);
   const dropped = edit?.dropped ?? [];
   return (
-    <div
-      role="region"
-      aria-label="Draft"
-      className="sticky bottom-0 -mx-4 space-y-1 border-t border-amber-200 bg-amber-50/95 px-4 py-3 text-sm shadow-[0_-4px_12px_rgba(0,0,0,0.05)] backdrop-blur lg:-mx-6 lg:px-6"
-    >
-      <p className="text-xs font-semibold tracking-wide text-amber-800 uppercase">
-        Draft · not saved yet
-      </p>
-      {/* Long lists scroll: Save and Discard stay in view. */}
-      <div className="max-h-[40dvh] space-y-1 overflow-y-auto">
-        {edit && <p className="text-zinc-800">{describeEdit(edit)}</p>}
-        {edit?.adjustments.map((a) => (
-          <p key={`${a.removed?.place_id}-${a.added?.place_id}`} className="text-xs text-zinc-700">
-            {describeAdjustment(a)}
-          </p>
-        ))}
-        {dropped.length > 0 && (
-          <div className="text-xs text-amber-900">
-            <p className="font-medium">
-              Drops {dropped.length} planned {dropped.length === 1 ? "stop" : "stops"}:
+    <ActionBar className="space-y-2 border-t-caution/40">
+      <div role="region" aria-label="Draft" className="space-y-2">
+        <Tag tone="caution" icon="pencil">
+          Draft, not saved yet
+        </Tag>
+        {/* Long lists scroll: Save and Discard stay in view. */}
+        <div className="max-h-[36dvh] space-y-1.5 overflow-y-auto text-small">
+          {edit && <p className="text-sm font-bold text-ink">{describeEdit(edit)}</p>}
+          {edit?.adjustments.map((a) => (
+            <p key={`${a.removed?.place_id}-${a.added?.place_id}`} className="text-ink-2">
+              {describeAdjustment(a)}
             </p>
-            <ul className="list-disc pl-4">
-              {dropped.map((stop) => (
-                <li key={stop.place_id}>{describeDropped(stop)}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {edit?.warnings.map((w) => (
-          <p key={w} className="text-xs text-amber-800">
-            {w}
+          ))}
+          {dropped.length > 0 && (
+            <div className="rounded-control bg-caution-soft px-3 py-2 text-ink">
+              <p className="font-bold text-caution">
+                Drops {dropped.length} planned {dropped.length === 1 ? "stop" : "stops"}:
+              </p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                {dropped.map((stop) => (
+                  <li key={stop.place_id}>{describeDropped(stop)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {edit?.warnings.map((w) => (
+            <p key={w} className="flex gap-1.5 text-caution">
+              <Icon name="warning" size={15} className="mt-px" />
+              {w}
+            </p>
+          ))}
+        </div>
+        {error && (
+          <p role="alert" className="text-small font-bold text-stop">
+            {error}
           </p>
-        ))}
+        )}
       </div>
-      {error && (
-        <p role="alert" className="text-xs text-red-700">
-          {error}
-        </p>
-      )}
-      <div className="flex items-center gap-3 pt-2">
-        <button
-          type="button"
+      <div className="flex items-center gap-2 pt-1">
+        <Button
+          variant="primary"
+          size="lg"
+          block
           onClick={() => (dropped.length > 0 ? setConfirming(true) : onSave())}
           disabled={applying}
-          className="flex-1 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-wait disabled:bg-emerald-400"
+          className="flex-1"
         >
           {applying ? "Saving…" : "Save changes"}
-        </button>
-        <button
-          type="button"
-          onClick={onDiscard}
-          disabled={applying}
-          className="text-sm text-zinc-600 hover:text-zinc-900"
-        >
+        </Button>
+        <Button variant="quiet" size="lg" onClick={onDiscard} disabled={applying}>
           Discard
-        </button>
+        </Button>
       </div>
       {confirming && (
         <ConfirmDrop
@@ -303,7 +350,7 @@ function DraftBar({
           onCancel={() => setConfirming(false)}
         />
       )}
-    </div>
+    </ActionBar>
   );
 }
 
@@ -326,28 +373,18 @@ function AddPlaces({
 }) {
   const inputId = useId();
   return (
-    <div className="space-y-2 rounded-lg border border-dashed border-zinc-300 bg-white p-3">
-      <label htmlFor={inputId} className="block text-sm font-medium text-zinc-700">
-        Add a place
-      </label>
+    <div className="space-y-2.5 rounded-panel border border-dashed border-line-strong bg-surface p-3.5">
+      <Label htmlFor={inputId}>Add a place</Label>
       {added.length > 0 && (
         <ul className="flex flex-wrap gap-1.5" aria-label="Places to add">
           {added.map((place) => (
-            <li
+            <PlaceChip
               key={place.place_id}
-              className="flex items-center gap-1 rounded-full bg-emerald-100 py-0.5 pr-1 pl-2.5 text-xs text-emerald-900"
-            >
-              {place.name}
-              <button
-                type="button"
-                onClick={() => onRemove(place.place_id)}
-                disabled={disabled}
-                aria-label={`Do not add ${place.name}`}
-                className="flex h-4 w-4 items-center justify-center rounded-full text-emerald-700 hover:bg-emerald-200"
-              >
-                ×
-              </button>
-            </li>
+              name={place.name}
+              removeLabel={`Do not add ${place.name}`}
+              onRemove={() => onRemove(place.place_id)}
+              disabled={disabled}
+            />
           ))}
         </ul>
       )}
@@ -358,10 +395,10 @@ function AddPlaces({
         placeholder="Search, e.g. Jerónimos or castelo"
         onPick={(place) => onAdd({ place_id: place.id, name: place.name })}
       />
-      <p className="text-xs text-zinc-500">
+      <Hint>
         The day is planned again around your changes: visited stops stay first, and it may run until
         its end time.
-      </p>
+      </Hint>
     </div>
   );
 }
@@ -370,11 +407,11 @@ function WeatherNotes({ plan }: { plan: PlanResponse }) {
   const exposed = exposedStops(plan).length;
   if (plan.weather_swaps.length === 0 && exposed === 0) return null;
   return (
-    <div className="mt-3 space-y-1 rounded-md bg-sky-50 p-2 text-xs text-sky-900">
+    <Notice tone="info" icon="rain">
       {plan.weather_swaps.length > 0 && (
         <>
-          <p className="font-medium">Swapped for indoor places, as the forecast is wet or dark:</p>
-          <ul className="list-disc pl-4">
+          <p className="font-bold">Swapped for indoor places, as the forecast is wet or dark:</p>
+          <ul className="list-disc space-y-0.5 pl-4">
             {plan.weather_swaps.map((swap) => (
               <li key={`${swap.removed?.place_id}-${swap.added?.place_id}`}>
                 {describeWeatherSwap(swap)}
@@ -386,41 +423,40 @@ function WeatherNotes({ plan }: { plan: PlanResponse }) {
       {exposed > 0 && (
         <p>
           {exposed} outdoor {exposed === 1 ? "stop meets" : "stops meet"} rain, fog or darkness
-          (marked ⚠️)
+          (marked with a warning)
           {plan.weather_aware
             ? ": the forecast left no better slot."
             : ". Plan again with “Optimize route based on weather conditions” to rearrange."}
         </p>
       )}
-    </div>
+    </Notice>
   );
 }
 
 function HoursNotes({ plan }: { plan: PlanResponse }) {
   if (plan.hours_swaps.length === 0) return null;
   return (
-    <div className="mt-3 space-y-1 rounded-md bg-violet-50 p-2 text-xs text-violet-900">
-      <p className="font-medium">Swapped for places that suit your hours:</p>
-      <ul className="list-disc pl-4">
+    <Notice tone="evening" icon="clock" title="Swapped for places that suit your hours:">
+      <ul className="list-disc space-y-0.5 pl-4">
         {plan.hours_swaps.map((swap) => (
           <li key={`${swap.removed?.place_id}-${swap.added?.place_id}`}>
             {describeHoursSwap(swap)}
           </li>
         ))}
       </ul>
-    </div>
+    </Notice>
   );
 }
 
 function Rides({ rides, color }: { rides: TransitRide[]; color: string }) {
   return (
-    <ul className="space-y-0.5">
+    <ul className="space-y-1">
       {rides.map((ride, i) => {
         const background = ride.color ?? color;
         return (
-          <li key={i} className="flex flex-wrap items-baseline gap-x-1.5">
+          <li key={i} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span
-              className="rounded px-1 py-px text-[11px] font-semibold"
+              className="inline-flex h-5 items-center rounded-tag px-1.5 font-display text-[13px] font-semibold"
               style={{ background, color: textColorOn(background) }}
             >
               {rideBadge(ride)}
@@ -439,6 +475,71 @@ function newStops(edit: PlanEdit | null, day: number): Set<number> {
   return new Set(added.map((p) => p.place_id));
 }
 
+// The itinerary's columns: times, the line, the stop (phones: the line and the stop).
+const ROW =
+  "grid grid-cols-[1.75rem_minmax(0,1fr)] gap-x-2.5 sm:grid-cols-[2.75rem_1.75rem_minmax(0,1fr)]";
+// Where the roundel's centre sits from the top of a stop row.
+const ROUNDEL_CENTRE = "22px";
+// Lines run a pixel past their row so the rows join without a seam.
+const JOINED: CSSProperties = { top: -1, bottom: -1 };
+
+/** A length of the day's line: solid on foot, dotted on a ride. */
+function Line({
+  color,
+  dotted = false,
+  className,
+  style,
+}: {
+  color: string;
+  dotted?: boolean;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return (
+    <span
+      aria-hidden
+      className={cn("absolute left-1/2 w-1 -translate-x-1/2", className)}
+      style={
+        dotted
+          ? {
+              backgroundImage: `radial-gradient(circle, ${color} 1.9px, transparent 2.1px)`,
+              backgroundSize: "4px 9px",
+              backgroundRepeat: "repeat-y",
+              backgroundPosition: "center top",
+              ...style,
+            }
+          : { background: color, width: 3, ...style }
+      }
+    />
+  );
+}
+
+/** A note on the line between stops: the walk, a ride, free time. */
+function LineNote({
+  icon,
+  line,
+  children,
+  className,
+}: {
+  icon: IconName;
+  /** The line beside the note; none where the day does not run (a free evening). */
+  line: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn(ROW, "text-small text-ink-2")}>
+      <span className="hidden sm:block" />
+      <span className="relative">{line}</span>
+      <div className={cn("flex gap-2 py-2.5", className)}>
+        <Icon name={icon} size={16} className="mt-px text-ink-3" />
+        <div className="min-w-0 flex-1 space-y-1">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/** A planned day drawn as a transit line: times, the line in the day's colour, the stops. */
 function DayStops({
   day,
   selected,
@@ -475,75 +576,198 @@ function DayStops({
   const lastStop = day.stops.at(-1);
   const freeEvening = freeEveningLabel(day);
   return (
-    <ol className="space-y-1">
+    <ol className="motion-safe:animate-reveal-down">
       {day.stops.map((stop, i) => {
         const travel = travelLabel(stop);
         const freeTime = freeTimeLabel(stop);
         const departure = departureLabel(stop);
+        const isVisited = visited?.has(stop.place_id) ?? false;
+        const lineBefore = i > 0 || travel !== null || freeTime !== null || departure !== null;
+        const lineAfter = i < day.stops.length - 1;
         return (
           <li key={stop.place_id}>
             {departure && (
-              <p className="py-1 pl-[13px] text-xs font-medium text-zinc-600">
-                <span aria-hidden>📍 </span>
+              <LineNote
+                icon="pin"
+                className="font-bold text-ink"
+                line={<Line color={color} style={{ top: "50%", bottom: -1 }} />}
+              >
                 {departure}
-              </p>
+              </LineNote>
             )}
             {freeTime && (
-              <p className="py-1 pl-[13px] text-xs text-zinc-500">
-                <span aria-hidden>☕ </span>
+              <LineNote icon="coffee" line={<Line color={color} style={JOINED} />}>
                 {freeTime}
-              </p>
+              </LineNote>
             )}
             {travel && (
-              <div className="flex items-stretch gap-2 py-1 pl-[13px] text-xs text-zinc-500">
-                <span
-                  className={`min-h-5 border-l-2 ${stop.travel_mode === "transit" ? "border-dotted" : ""}`}
-                  style={{ borderColor: color }}
-                />
-                <div className="space-y-0.5 py-0.5">
-                  <div>{travel}</div>
-                  {stop.rides.length > 0 && <Rides rides={stop.rides} color={color} />}
-                </div>
-              </div>
+              <LineNote
+                icon={stop.travel_mode === "transit" ? "transit" : "walk"}
+                line={<Line color={color} dotted={stop.travel_mode === "transit"} style={JOINED} />}
+              >
+                <p>{travel}</p>
+                {stop.rides.length > 0 && <Rides rides={stop.rides} color={color} />}
+              </LineNote>
             )}
-            <StopCard
-              stop={stop}
-              number={i + 1}
-              color={color}
-              selected={selected.includes(stop.place_id)}
-              onToggleSelected={() => onToggle(stop.place_id)}
-              selectionDisabled={locked}
-              isNew={fresh.has(stop.place_id)}
-              visited={visited && visited.has(stop.place_id)}
-              visitLocked={visitLocked}
-              onToggleVisited={() => onToggleVisited(stop.place_id, !visited?.has(stop.place_id))}
-              editing={editing}
-              removed={removed.includes(stop.place_id)}
-              onToggleRemoved={() => onToggleRemoved(stop.place_id)}
-              onHover={onHoverStop}
-            />
+            <div className={ROW}>
+              <div className="hidden pt-[11px] text-right leading-none sm:block">
+                <span className="block font-display text-[15px] font-semibold text-ink tabular-nums">
+                  {stop.arrive}
+                </span>
+                <span className="mt-1 block font-display text-[13px] text-ink-3 tabular-nums">
+                  {stop.leave}
+                </span>
+              </div>
+              <div className="relative flex justify-center">
+                {lineBefore && (
+                  <Line
+                    color={color}
+                    style={{ top: -1, height: `calc(${ROUNDEL_CENTRE} + 1px)` }}
+                  />
+                )}
+                {lineAfter && <Line color={color} style={{ top: ROUNDEL_CENTRE, bottom: -1 }} />}
+                <Roundel
+                  color={isVisited ? VISITED : color}
+                  className="relative mt-2 transition-colors"
+                >
+                  {isVisited ? (
+                    <Icon name="check" size={16} strokeWidth={2.6} label="Visited" />
+                  ) : (
+                    i + 1
+                  )}
+                </Roundel>
+              </div>
+              <div className="min-w-0 pb-1">
+                <StopCard
+                  stop={stop}
+                  color={color}
+                  selected={selected.includes(stop.place_id)}
+                  onToggleSelected={() => onToggle(stop.place_id)}
+                  selectionDisabled={locked}
+                  isNew={fresh.has(stop.place_id)}
+                  visited={visited && isVisited}
+                  visitLocked={visitLocked}
+                  onToggleVisited={() => onToggleVisited(stop.place_id, !isVisited)}
+                  editing={editing}
+                  removed={removed.includes(stop.place_id)}
+                  onToggleRemoved={() => onToggleRemoved(stop.place_id)}
+                  onHover={onHoverStop}
+                />
+              </div>
+            </div>
           </li>
         );
       })}
       {freeEvening && (
-        <li className="py-1 pl-[13px] text-xs text-zinc-500">
-          <span aria-hidden>🌙 </span>
-          {freeEvening}
-          {onFindVenues && lastStop && (
-            <>
-              {" · "}
+        <li>
+          <LineNote
+            icon="moon"
+            className="text-evening"
+            line={
+              <span className="absolute inset-x-0 top-2.5 flex justify-center" aria-hidden>
+                <span className="size-2.5 rounded-full border-2 border-evening bg-surface" />
+              </span>
+            }
+          >
+            <p className="font-bold">{freeEvening}</p>
+            {onFindVenues && lastStop && (
               <button
                 type="button"
                 onClick={() => onFindVenues(lastStop)}
-                className="font-medium text-blue-700 hover:text-blue-900 hover:underline"
+                className="inline-flex items-center gap-1.5 font-bold text-ink underline-offset-3 hover:underline"
               >
+                <Icon name="utensils" size={15} />
                 Find places to eat &amp; drink
               </button>
-            </>
-          )}
+            )}
+          </LineNote>
         </li>
       )}
     </ol>
+  );
+}
+
+/** Day tabs: a roundel, the date, and how full the day is. Arrow keys move between days. */
+function DayTabs({
+  days,
+  active,
+  onSelect,
+  panelId,
+  tabId,
+}: {
+  days: PlannedDay[];
+  active: number;
+  onSelect: (day: number) => void;
+  panelId: string;
+  tabId: (day: number) => string;
+}) {
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const index = days.findIndex((d) => d.day === active);
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+    let next: number | undefined;
+    if (step !== undefined) next = days[(index + step + days.length) % days.length]?.day;
+    if (event.key === "Home") next = days[0]?.day;
+    if (event.key === "End") next = days.at(-1)?.day;
+    if (next === undefined) return;
+    event.preventDefault();
+    onSelect(next);
+    document.getElementById(tabId(next))?.focus();
+  }
+
+  return (
+    <div
+      role="tablist"
+      aria-label="Days"
+      onKeyDown={onKeyDown}
+      className="-mx-5 flex gap-2 overflow-x-auto px-5 py-1 [scrollbar-width:none] lg:-mx-8 lg:px-8"
+    >
+      {days.map((d) => {
+        const selected = d.day === active;
+        return (
+          <button
+            key={d.day}
+            id={tabId(d.day)}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            aria-controls={panelId}
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onSelect(d.day)}
+            className={cn(
+              "flex shrink-0 items-center gap-2.5 rounded-panel border py-2 pr-4 pl-2 text-left transition-colors",
+              selected
+                ? "border-ink bg-surface"
+                : "border-transparent bg-canvas hover:border-line-strong",
+            )}
+          >
+            <Roundel color={dayColor(d.day)} size={30} ring={false}>
+              {d.day}
+            </Roundel>
+            <span className="leading-tight">
+              <span className="flex items-center gap-2 font-display text-[17px] font-semibold text-ink">
+                Day {d.day}
+                {d.weather && (
+                  <span
+                    className="inline-flex items-center gap-0.5 font-sans text-meta font-bold text-ink-2"
+                    title={d.weather.description}
+                  >
+                    <Icon name={weatherIcon(d.weather)} size={15} />
+                    {formatTemp(d.weather.temp_max_c)}
+                  </span>
+                )}
+              </span>
+              <span className="mt-0.5 block text-meta text-ink-2 tabular-nums">
+                {d.date ? `${formatDate(d.date)}, ` : ""}
+                {d.stops.length} stops
+              </span>
+              <span className="block text-meta text-ink-3 tabular-nums">
+                {formatDuration(d.duration_min)}
+              </span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -569,6 +793,7 @@ export default function PlanResult({
   editError,
   onUndo,
 }: PlanResultProps) {
+  const ids = useId();
   const day = plan.days.find((d) => d.day === selectedDay) ?? plan.days[0];
   const city = plan.city.charAt(0).toUpperCase() + plan.city.slice(1);
   const title =
@@ -601,161 +826,175 @@ export default function PlanResult({
   const changeEdit = (change: Partial<{ remove: number[]; add: PlaceRef[] }>) =>
     setEdit({ key: selectionKey, remove: [], add: [], ...editing, ...change });
 
+  const panelId = `${ids}-panel`;
+  const tabId = (n: number) => `${ids}-day-${n}`;
+
   return (
-    <section className="space-y-4" aria-label="Trip plan">
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            {trip && (
-              <p className="text-xs font-medium tracking-wide text-emerald-700 uppercase">
-                Saved trip
-                {draft && <span className="text-amber-700"> · draft</span>}
-              </p>
+    <section className="space-y-6" aria-label="Trip plan">
+      <header className="space-y-4">
+        <div className="space-y-2">
+          {(trip || draft) && (
+            <div className="flex flex-wrap gap-1.5">
+              {trip && (
+                <Tag tone="go" icon="check">
+                  Saved trip
+                </Tag>
+              )}
+              {draft && (
+                <Tag tone="caution" icon="pencil">
+                  Draft
+                </Tag>
+              )}
+            </div>
+          )}
+          <h2 className="font-display text-[26px] leading-[1.1] font-semibold text-balance text-ink lg:text-title">
+            {title}
+          </h2>
+          <p className="flex flex-wrap gap-x-4 gap-y-1.5 text-small text-ink-2">
+            <Stat icon="walk">{formatDistance(walking)} on foot</Stat>
+            {transitLegs > 0 && (
+              <Stat icon="transit">
+                {transitLegs} transit {transitLegs === 1 ? "ride" : "rides"}
+              </Stat>
             )}
-            <h2 className="text-base font-semibold text-zinc-900">{title}</h2>
-            <p className="text-sm text-zinc-600">
-              {formatDistance(walking)} on foot
-              {transitLegs > 0 &&
-                ` · ${transitLegs} transit ${transitLegs === 1 ? "ride" : "rides"}`}
-              {" · "}
-              {plan.trip.pace} pace
-              {(plan.day_start !== DEFAULT_DAY_START || plan.day_end !== DEFAULT_DAY_END) &&
-                ` · ${plan.day_start}–${plan.day_end}`}
-              {plan.weather_aware && " · planned with the weather"}
-            </p>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-1.5">
-            <SaveButton trip={trip} onSave={onSave} saving={saving} />
-            <ShareButton planId={plan.id} />
-          </div>
+            <Stat icon="gauge">
+              {plan.trip.pace.charAt(0).toUpperCase() + plan.trip.pace.slice(1)} pace
+            </Stat>
+            {(plan.day_start !== DEFAULT_DAY_START || plan.day_end !== DEFAULT_DAY_END) && (
+              <Stat icon="clock">
+                <span className="tabular-nums">
+                  {plan.day_start}–{plan.day_end}
+                </span>
+              </Stat>
+            )}
+            {plan.weather_aware && <Stat icon="cloud-sun">Planned with the weather</Stat>}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <SaveButton trip={trip} onSave={onSave} saving={saving} />
+          <ShareButton planId={plan.id} />
         </div>
         {saveError && (
-          <p role="alert" className="mt-2 text-xs text-red-700">
+          <p role="alert" className="text-small font-bold text-stop">
             {saveError}
           </p>
         )}
-        {plan.rationale && <p className="mt-3 text-sm text-zinc-700">{plan.rationale}</p>}
+        {plan.rationale && <p className="max-w-[65ch] text-body text-ink-2">{plan.rationale}</p>}
         <WeatherNotes plan={plan} />
         <HoursNotes plan={plan} />
         {plan.edit && !draft && <EditSummary edit={plan.edit} onUndo={onUndo} />}
         {(plan.warnings.length > 0 || plan.dropped.length > 0) && (
-          <div className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-800">
+          <Notice tone="caution">
             {plan.dropped.length > 0 && (
               <p>Didn&apos;t fit the day: {plan.dropped.map((d) => d.name).join(", ")}.</p>
             )}
             {plan.warnings.map((w) => (
               <p key={w}>{w}</p>
             ))}
-          </div>
+          </Notice>
         )}
-      </div>
+      </header>
 
-      <div role="tablist" aria-label="Days" className="flex gap-2 overflow-x-auto pb-1">
-        {plan.days.map((d) => {
-          const active = d.day === day.day;
-          return (
-            <button
-              key={d.day}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => onSelectDay(d.day)}
-              className={`shrink-0 rounded-lg border px-3 py-1.5 text-left text-sm ${
-                active
-                  ? "border-transparent text-white shadow"
-                  : "border-zinc-200 bg-white text-zinc-700"
-              }`}
-              style={active ? { background: dayColor(d.day) } : undefined}
-            >
-              <div className="flex items-baseline justify-between gap-2 font-semibold">
-                Day {d.day}
-                {d.weather && (
-                  <span className="text-xs font-normal" title={d.weather.description}>
-                    {weatherIcon(d.weather)} {formatTemp(d.weather.temp_max_c)}
+      <div className="space-y-4">
+        <DayTabs
+          days={plan.days}
+          active={day.day}
+          onSelect={onSelectDay}
+          panelId={panelId}
+          tabId={tabId}
+        />
+
+        <div id={panelId} role="tabpanel" aria-labelledby={tabId(day.day)} className="space-y-4">
+          <DayWeather day={day} weatherAware={plan.weather_aware} />
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+            <p className="text-small text-ink-2">
+              <span className="font-bold text-ink">{formatDistance(day.walking_m)}</span> on foot
+              {day.transit_legs > 0 &&
+                ` + ${day.transit_legs} ${day.transit_legs === 1 ? "ride" : "rides"}`}
+              ,{" "}
+              <span className="font-display text-[15px] font-semibold text-ink tabular-nums">
+                {day.stops[0]?.arrive}–{day.stops.at(-1)?.leave}
+              </span>
+              {visited && (
+                <>
+                  ,{" "}
+                  <span className="font-bold text-go">
+                    {visitedToday} of {day.stops.length} visited
                   </span>
-                )}
-              </div>
-              <div className={`text-xs ${active ? "text-white/80" : "text-zinc-500"}`}>
-                {d.date && `${formatDate(d.date)} · `}
-                {d.stops.length} stops · {formatDuration(d.duration_min)}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="space-y-2">
-        <DayWeather day={day} weatherAware={plan.weather_aware} />
-        <div className="flex items-start justify-between gap-2">
-          <p className="text-xs text-zinc-500">
-            {formatDistance(day.walking_m)} on foot
-            {day.transit_legs > 0 &&
-              ` + ${day.transit_legs} ${day.transit_legs === 1 ? "ride" : "rides"}`}{" "}
-            · {day.stops[0]?.arrive}–{day.stops.at(-1)?.leave}
-            {visited && ` · ${visitedToday} of ${day.stops.length} visited`}
-            {editing
-              ? " · take stops out or add places, then apply"
-              : !draft && " · tick stops to replace them"}
-          </p>
-          {canEdit && !editing && (
-            <div className="flex shrink-0 gap-1.5">
-              {onFindVenues && (
-                <button
-                  type="button"
-                  onClick={() => onFindVenues(day.day, "food", null)}
-                  className="rounded-md bg-orange-50 px-2 py-1 text-xs font-medium text-orange-800 hover:bg-orange-100"
-                >
-                  Find places to eat
-                </button>
+                </>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  setPicked({ key: selectionKey, ids: [] });
-                  changeEdit({});
-                }}
-                className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200"
-              >
-                Edit day
-              </button>
-            </div>
+            </p>
+            {canEdit && !editing && (
+              <div className="flex shrink-0 gap-2">
+                {onFindVenues && (
+                  <Button
+                    size="sm"
+                    icon="utensils"
+                    onClick={() => onFindVenues(day.day, "food", null)}
+                  >
+                    Find places to eat
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  icon="pencil"
+                  onClick={() => {
+                    setPicked({ key: selectionKey, ids: [] });
+                    changeEdit({});
+                  }}
+                >
+                  Edit day
+                </Button>
+              </div>
+            )}
+          </div>
+          {(editing || !draft) && (
+            <p className="flex items-center gap-1.5 text-meta text-ink-3">
+              <Icon name={editing ? "pencil" : "swap"} size={14} />
+              {editing
+                ? "Take stops out or add places, then apply."
+                : "Tick stops to replace them with new places."}
+            </p>
+          )}
+          <DayStops
+            key={selectionKey}
+            day={day}
+            selected={selected}
+            onToggle={toggle}
+            locked={replacing || applying || draft}
+            fresh={newStops(plan.edit, day.day)}
+            visited={visited}
+            visitLocked={applying || draft || editing !== null}
+            onToggleVisited={onToggleVisited}
+            editing={editing !== null}
+            removed={editing?.remove ?? []}
+            onToggleRemoved={(placeId) => {
+              const remove = editing?.remove ?? [];
+              changeEdit({
+                remove: remove.includes(placeId)
+                  ? remove.filter((id) => id !== placeId)
+                  : [...remove, placeId],
+              });
+            }}
+            onHoverStop={onHoverStop}
+            onFindVenues={
+              canEdit && !editing && onFindVenues
+                ? (near) => onFindVenues(day.day, null, near)
+                : null
+            }
+          />
+          {editing && (
+            <AddPlaces
+              added={editing.add}
+              exclude={new Set([...planned, ...editing.add.map((p) => p.place_id)])}
+              onAdd={(place) => changeEdit({ add: [...editing.add, place] })}
+              onRemove={(placeId) =>
+                changeEdit({ add: editing.add.filter((p) => p.place_id !== placeId) })
+              }
+              disabled={editingDay}
+            />
           )}
         </div>
-        <DayStops
-          day={day}
-          selected={selected}
-          onToggle={toggle}
-          locked={replacing || applying || draft}
-          fresh={newStops(plan.edit, day.day)}
-          visited={visited}
-          visitLocked={applying || draft || editing !== null}
-          onToggleVisited={onToggleVisited}
-          editing={editing !== null}
-          removed={editing?.remove ?? []}
-          onToggleRemoved={(placeId) => {
-            const remove = editing?.remove ?? [];
-            changeEdit({
-              remove: remove.includes(placeId)
-                ? remove.filter((id) => id !== placeId)
-                : [...remove, placeId],
-            });
-          }}
-          onHoverStop={onHoverStop}
-          onFindVenues={
-            canEdit && !editing && onFindVenues ? (near) => onFindVenues(day.day, null, near) : null
-          }
-        />
-        {editing && (
-          <AddPlaces
-            added={editing.add}
-            exclude={new Set([...planned, ...editing.add.map((p) => p.place_id)])}
-            onAdd={(place) => changeEdit({ add: [...editing.add, place] })}
-            onRemove={(placeId) =>
-              changeEdit({ add: editing.add.filter((p) => p.place_id !== placeId) })
-            }
-            disabled={editingDay}
-          />
-        )}
       </div>
 
       {draft && (
@@ -769,78 +1008,76 @@ export default function PlanResult({
       )}
 
       {!draft && editing && onEditDay && (
-        <div className="sticky bottom-0 -mx-4 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] backdrop-blur lg:-mx-6 lg:px-6">
+        <ActionBar>
           {editError && (
-            <p role="alert" className="mb-2 text-xs text-red-700">
+            <p role="alert" className="mb-2 text-small font-bold text-stop">
               {editError}
             </p>
           )}
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
+          <div className="flex items-center gap-2">
+            <Button
+              variant="dark"
+              size="lg"
+              className="flex-1"
               onClick={async () => {
                 const change = { remove: editing.remove, add: editing.add.map((p) => p.place_id) };
                 // The picks became a draft: Discard or Undo must not bring them back.
                 if (await onEditDay(day.day, change)) setEdit(null);
               }}
               disabled={editingDay || (editing.remove.length === 0 && editing.add.length === 0)}
-              className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             >
               {editingDay
                 ? "Planning the day…"
                 : describeDayChange(editing.remove.length, editing.add.length)}
-            </button>
-            <button
-              type="button"
-              onClick={() => setEdit(null)}
-              disabled={editingDay}
-              className="text-sm text-zinc-600 hover:text-zinc-900"
-            >
+            </Button>
+            <Button variant="quiet" size="lg" onClick={() => setEdit(null)} disabled={editingDay}>
               Cancel
-            </button>
+            </Button>
           </div>
-        </div>
+        </ActionBar>
       )}
 
       {!draft && !editing && (selected.length > 0 || editError) && (
-        <div className="sticky bottom-0 -mx-4 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] backdrop-blur lg:-mx-6 lg:px-6">
+        <ActionBar>
           {editError && (
-            <p role="alert" className="mb-2 text-xs text-red-700">
+            <p role="alert" className="mb-2 text-small font-bold text-stop">
               {editError}
             </p>
           )}
           {selected.length > 0 && (
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
+            <div className="flex items-center gap-2">
+              <Button
+                variant="dark"
+                size="lg"
+                icon="swap"
+                className="flex-1"
                 onClick={async () => {
                   // The ticks became a new version: Discard or Undo must not bring them back.
                   if (await onReplace(day.day, selected)) setPicked({ key: selectionKey, ids: [] });
                 }}
                 disabled={replacing}
-                className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-wait disabled:bg-blue-400"
               >
                 {replacing
                   ? "Finding new places…"
                   : `Replace ${selected.length} ${selected.length === 1 ? "stop" : "stops"}`}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="quiet"
+                size="lg"
                 onClick={() => setPicked({ key: selectionKey, ids: [] })}
                 disabled={replacing}
-                className="text-sm text-zinc-600 hover:text-zinc-900"
               >
                 Clear
-              </button>
+              </Button>
             </div>
           )}
-        </div>
+        </ActionBar>
       )}
 
-      <div className="space-y-0.5 text-[11px] text-zinc-400">
-        <p>
-          Plan #{plan.id} · distances: {plan.distance_source}
-          {plan.transit_source && ` · transit: ${plan.transit_source}`} · planned in{" "}
+      <footer className="space-y-1 border-t border-line pt-4 text-meta text-ink-3">
+        <p className="tabular-nums">
+          Plan #{plan.id}, distances from {plan.distance_source}
+          {plan.transit_source && `, transit from ${plan.transit_source}`}, planned in{" "}
           {((plan.timings_ms.total ?? 0) / 1000).toFixed(1)} s
         </p>
         {plan.transit_source && plan.transit_source !== "estimate" && (
@@ -848,9 +1085,14 @@ export default function PlanResult({
             Public transport routes © HERE
             {transitCredits(plan).map((credit) => (
               <span key={credit.text}>
-                {" · "}
+                {", "}
                 {credit.url ? (
-                  <a href={credit.url} target="_blank" rel="noreferrer" className="hover:underline">
+                  <a
+                    href={credit.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline-offset-3 hover:text-ink hover:underline"
+                  >
                     {credit.text}
                   </a>
                 ) : (
@@ -867,13 +1109,13 @@ export default function PlanResult({
               href="https://openweathermap.org/"
               target="_blank"
               rel="noreferrer"
-              className="hover:underline"
+              className="underline-offset-3 hover:text-ink hover:underline"
             >
               OpenWeather
             </a>
           </p>
         )}
-      </div>
+      </footer>
     </section>
   );
 }

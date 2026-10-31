@@ -1,24 +1,25 @@
 import { clockMinutes, dayLength, formatDistance, formatDuration } from "./format";
+import type { IconName } from "./icons";
 import type { OpenState, PlannedDay, StartPoint, TripVisit, Venue, VenueType } from "./types";
 
-const VENUE_TYPES: Record<VenueType, { label: string; icon: string }> = {
-  restaurant: { label: "Restaurant", icon: "🍽️" },
-  fast_food: { label: "Fast food", icon: "🍔" },
-  cafe: { label: "Café", icon: "☕" },
-  ice_cream: { label: "Ice cream", icon: "🍦" },
-  pastry: { label: "Pastry shop", icon: "🥐" },
-  bar: { label: "Bar", icon: "🍸" },
-  pub: { label: "Pub", icon: "🍺" },
-  nightclub: { label: "Club", icon: "🪩" },
-  music_venue: { label: "Live music", icon: "🎵" },
+const VENUE_TYPES: Record<VenueType, { label: string; icon: IconName }> = {
+  restaurant: { label: "Restaurant", icon: "utensils" },
+  fast_food: { label: "Fast food", icon: "burger" },
+  cafe: { label: "Café", icon: "coffee" },
+  ice_cream: { label: "Ice cream", icon: "ice-cream" },
+  pastry: { label: "Pastry shop", icon: "pastry" },
+  bar: { label: "Bar", icon: "cocktail" },
+  pub: { label: "Pub", icon: "beer" },
+  nightclub: { label: "Club", icon: "music" },
+  music_venue: { label: "Live music", icon: "music" },
 };
 
 export function venueTypeLabel(type: VenueType): string {
   return VENUE_TYPES[type]?.label ?? "Venue";
 }
 
-export function venueIcon(type: VenueType): string {
-  return VENUE_TYPES[type]?.icon ?? "📍";
+export function venueIcon(type: VenueType): IconName {
+  return VENUE_TYPES[type]?.icon ?? "pin";
 }
 
 /** OSM cuisine values for people: "coffee_shop" -> "Coffee shop". */

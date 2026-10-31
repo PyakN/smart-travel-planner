@@ -8,6 +8,11 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import PlanForm from "@/components/PlanForm";
 import PlanResult from "@/components/PlanResult";
+import ProofCard from "@/components/ProofCard";
+import { Button } from "@/components/ui/Button";
+import { cn } from "@/components/ui/cn";
+import { Icon } from "@/components/ui/Icon";
+import { Notice } from "@/components/ui/Notice";
 import VenueSearch, { venueCardId } from "@/components/VenueSearch";
 import {
   ApiError,
@@ -42,7 +47,7 @@ import { DEFAULT_RADIUS_M, type SearchPoint, dayUnderWay, defaultSearchPoint } f
 // Leaflet touches `window`, so the map only renders in the browser.
 const RouteMap = dynamic(() => import("@/components/RouteMap"), {
   ssr: false,
-  loading: () => <div className="h-full w-full animate-pulse bg-zinc-200" />,
+  loading: () => <div className="h-full w-full animate-pulse bg-canvas" />,
 });
 
 type Status = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string };
@@ -87,6 +92,9 @@ export default function Planner() {
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [opened, setOpened] = useState<OpenedTrip | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  // With a plan on screen the request folds into one line; "Change" opens it again.
+  const [formOpen, setFormOpen] = useState(false);
+  const [proofHidden, setProofHidden] = useState(false);
   const [text, setText] = useState("");
   const [start, setStart] = useState<StartPoint | null>(null);
   const [mustVisit, setMustVisit] = useState<PlaceRef[]>([]);
@@ -167,6 +175,7 @@ export default function Planner() {
     setOwnHours(saved.day_hours);
     setSelectedDay(saved.edit?.day ?? 1);
     setEditError(null);
+    setFormOpen(false);
     setStatus({ kind: "idle" });
   });
 
@@ -319,6 +328,7 @@ export default function Planner() {
       setSelectedDay(1);
       setEditError(null);
       setSaveError(null);
+      setFormOpen(false);
       setStatus({ kind: "idle" });
       window.history.replaceState(null, "", `?plan=${created.id}`);
     } catch (error) {
@@ -481,9 +491,10 @@ export default function Planner() {
 
   function selectVenue(venueId: number) {
     setHighlightedVenue(venueId);
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     document
       .getElementById(venueCardId(venueId))
-      ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      ?.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "nearest" });
   }
 
   /** Tick a stop of the trip visited, or untick it; shown at once, undone if it fails. */
@@ -526,9 +537,14 @@ export default function Planner() {
     (shown?.days ?? []).flatMap((d) => d.stops.map((s) => [s.place_id, d.day] as const)),
   );
 
+  const formShown = shown === null || formOpen || status.kind !== "idle";
+
   return (
     <div className="flex h-full flex-col lg:flex-row">
-      <main className="relative order-1 h-[42dvh] shrink-0 lg:order-2 lg:h-auto lg:flex-1">
+      <section
+        aria-label="Map"
+        className="relative order-1 h-[38dvh] shrink-0 lg:order-2 lg:h-auto lg:flex-1"
+      >
         <RouteMap
           plan={shown}
           selectedDay={selectedDay}
@@ -550,20 +566,27 @@ export default function Planner() {
           onSelectVenue={selectVenue}
         />
         {pickingNow && (
-          <div className="pointer-events-none absolute inset-x-0 top-3 z-[1000] flex justify-center">
-            <span className="rounded-full bg-zinc-900/85 px-3 py-1.5 text-xs text-white shadow">
+          <div className="pointer-events-none absolute inset-x-0 top-3 z-[1000] flex justify-center px-3">
+            <span className="inline-flex animate-rise items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-bold text-white shadow-float">
+              <Icon name="locate" size={17} className="text-signal" />
               {searching ? "Click the map where you are" : "Click the map to set your start point"}
             </span>
           </div>
         )}
-      </main>
+        {shown === null && !proofHidden && !pickingNow && (
+          <ProofCard
+            onDismiss={() => setProofHidden(true)}
+            className="absolute bottom-8 left-6 z-[1000] hidden w-[340px] animate-rise lg:block"
+          />
+        )}
+      </section>
 
-      <aside
+      <main
         ref={sidebar}
-        className="order-2 min-h-0 flex-1 overflow-y-auto border-zinc-200 bg-zinc-50 lg:order-1 lg:w-[440px] lg:flex-none lg:border-r"
+        className="order-2 min-h-0 flex-1 overflow-y-auto bg-surface lg:order-1 lg:w-[480px] lg:flex-none lg:border-r lg:border-line"
       >
         {searching && searchDay ? (
-          <div className="p-4 lg:p-6">
+          <div className="px-5 pt-6 pb-8 lg:px-8 lg:pt-8">
             <VenueSearch
               day={searchDay}
               point={searchPoint}
@@ -585,72 +608,93 @@ export default function Planner() {
             />
           </div>
         ) : (
-          <div className="space-y-5 p-4 lg:p-6">
-            <header>
-              <h1 className="text-xl font-semibold tracking-tight text-zinc-900">
+          <div className="space-y-6 px-5 pt-6 pb-8 lg:px-8 lg:pt-8">
+            <header className={cn("space-y-2", !formShown && "sr-only")}>
+              <h1 className="font-display text-[28px] leading-[1.05] font-semibold text-balance text-ink lg:text-display">
                 Plan your Lisbon trip
               </h1>
-              <p className="text-sm text-zinc-500">
+              <p className="text-body text-ink-2">
                 An AI picks the places, an optimizer plans the walk.
               </p>
             </header>
 
             {tripNeedsLogIn && (
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+              <Notice tone="info" icon="bed">
                 This link opens a saved trip, which only its owner can see.{" "}
                 <Link
                   href={authHref("/login", `/?trip=${tripId}`)}
-                  className="font-medium underline hover:text-blue-950"
+                  className="font-bold underline underline-offset-3"
                 >
                   Log in
                 </Link>{" "}
                 to open it.
-              </div>
+              </Notice>
             )}
 
-            <PlanForm
-              text={text}
-              onTextChange={setText}
-              start={start}
-              picking={pickingNow}
-              onTogglePicking={() => setPicking((p) => (p === "start" ? null : "start"))}
-              onClearStart={() => setStart(null)}
-              onToggleRoundTrip={() =>
-                setStart((s) => (s ? { ...s, round_trip: !s.round_trip } : s))
-              }
-              mustVisit={mustVisit}
-              onMustVisitChange={setMustVisit}
-              modes={modes}
-              onModesChange={setModes}
-              startDate={startDate}
-              onStartDateChange={changeStartDate}
-              weatherAware={weatherAware}
-              onWeatherAwareChange={setWeatherAware}
-              startTime={startTime}
-              onStartTimeChange={setPickedStart}
-              endTime={endTime}
-              onEndTimeChange={setEndTime}
-              laterStartTime={today ? laterStart : null}
-              onLaterStartTimeChange={setLaterStart}
-              nowMinutes={today ? now.minutes : null}
-              dayCount={dayCount}
-              onDayCountChange={setDayCount}
-              eachDay={eachDay}
-              onEachDayChange={setEachDay}
-              dayHours={dayHours}
-              onDayHoursChange={changeDayHours}
-              loading={status.kind === "loading"}
-              onSubmit={submit}
-            />
+            {formShown ? (
+              <>
+                {shown && formOpen && status.kind === "idle" && (
+                  <div className="-mt-2 flex justify-end">
+                    <Button variant="quiet" size="sm" icon="x" onClick={() => setFormOpen(false)}>
+                      Keep the current plan
+                    </Button>
+                  </div>
+                )}
+                <PlanForm
+                  text={text}
+                  onTextChange={setText}
+                  start={start}
+                  picking={pickingNow}
+                  onTogglePicking={() => setPicking((p) => (p === "start" ? null : "start"))}
+                  onClearStart={() => setStart(null)}
+                  onToggleRoundTrip={() =>
+                    setStart((s) => (s ? { ...s, round_trip: !s.round_trip } : s))
+                  }
+                  mustVisit={mustVisit}
+                  onMustVisitChange={setMustVisit}
+                  modes={modes}
+                  onModesChange={setModes}
+                  startDate={startDate}
+                  onStartDateChange={changeStartDate}
+                  weatherAware={weatherAware}
+                  onWeatherAwareChange={setWeatherAware}
+                  startTime={startTime}
+                  onStartTimeChange={setPickedStart}
+                  endTime={endTime}
+                  onEndTimeChange={setEndTime}
+                  laterStartTime={today ? laterStart : null}
+                  onLaterStartTimeChange={setLaterStart}
+                  nowMinutes={today ? now.minutes : null}
+                  dayCount={dayCount}
+                  onDayCountChange={setDayCount}
+                  eachDay={eachDay}
+                  onEachDayChange={setEachDay}
+                  dayHours={dayHours}
+                  onDayHoursChange={changeDayHours}
+                  loading={status.kind === "loading"}
+                  onSubmit={submit}
+                />
+              </>
+            ) : (
+              <div className="flex items-start gap-3 rounded-panel bg-canvas py-3 pr-3 pl-4">
+                <Icon name="sparkle" size={18} className="mt-0.5 text-ink-3" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-meta font-bold text-ink-2">Your request</p>
+                  <p className="line-clamp-2 text-small text-ink">“{text}”</p>
+                </div>
+                <Button size="sm" icon="pencil" onClick={() => setFormOpen(true)}>
+                  Change
+                </Button>
+              </div>
+            )}
 
             {status.kind === "error" && (
-              <div
-                role="alert"
-                className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
-              >
+              <Notice tone="stop" role="alert">
                 {status.message}
-              </div>
+              </Notice>
             )}
+
+            {shown === null && <ProofCard className="shadow-none lg:hidden" />}
 
             {shown && (
               <PlanResult
@@ -678,7 +722,7 @@ export default function Planner() {
             )}
           </div>
         )}
-      </aside>
+      </main>
     </div>
   );
 }

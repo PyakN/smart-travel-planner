@@ -139,7 +139,7 @@ describe("travelLabel", () => {
 
 describe("rides", () => {
   it("names the line, the stops and the direction", () => {
-    expect(rideBadge(GREEN_LINE)).toBe("🚇 Verde");
+    expect(rideBadge(GREEN_LINE)).toBe("Metro Verde");
     expect(rideName(GREEN_LINE)).toBe("Metro Verde to Cais Do Sodré");
     expect(rideDetails(GREEN_LINE)).toBe(
       "Rossio → Cais do Sodré · 2 stops · towards Cais Do Sodré",
@@ -151,7 +151,7 @@ describe("rides", () => {
 
   it("keeps badge text readable on any line colour", () => {
     expect(textColorOn("#009933")).toBe("#ffffff"); // metro green
-    expect(textColorOn("#FFA500")).toBe("#18181b"); // train orange
+    expect(textColorOn("#FFA500")).toBe("#14202b"); // train orange
     expect(textColorOn("not a colour")).toBe("#ffffff");
   });
 
@@ -204,8 +204,8 @@ describe("formatOpeningHours", () => {
 
 describe("categoryIcon", () => {
   it("has an icon per category and a fallback", () => {
-    expect(categoryIcon("viewpoint")).toBe("🌅");
-    expect(categoryIcon("beach")).toBe("📍");
+    expect(categoryIcon("viewpoint")).toBe("binoculars");
+    expect(categoryIcon("beach")).toBe("pin");
   });
 });
 
@@ -294,19 +294,19 @@ describe("weather", () => {
   };
 
   it.each([
-    ["clear", "01d", "☀️"],
-    ["clear", "01n", "🌙"],
-    ["clouds", "02d", "🌤️"],
-    ["clouds", "03d", "⛅"],
-    ["clouds", "04d", "☁️"],
-    ["clouds", "02n", "☁️"],
-    ["fog", "50d", "🌫️"],
-    ["drizzle", "09d", "🌦️"],
-    ["rain", "10n", "🌧️"],
-    ["snow", "13d", "🌨️"],
-    ["thunderstorm", "11d", "⛈️"],
-  ] as const)("%s %s is %s", (condition, icon, emoji) => {
-    expect(weatherIcon({ condition, icon })).toBe(emoji);
+    ["clear", "01d", "sun"],
+    ["clear", "01n", "moon"],
+    ["clouds", "02d", "cloud-sun"],
+    ["clouds", "03d", "cloud-sun"],
+    ["clouds", "04d", "cloud"],
+    ["clouds", "02n", "cloud"],
+    ["fog", "50d", "fog"],
+    ["drizzle", "09d", "drizzle"],
+    ["rain", "10n", "rain"],
+    ["snow", "13d", "snow"],
+    ["thunderstorm", "11d", "storm"],
+  ] as const)("%s %s is %s", (condition, icon, name) => {
+    expect(weatherIcon({ condition, icon })).toBe(name);
   });
 
   it("formats temperatures and dates", () => {
@@ -452,8 +452,8 @@ describe("day hours", () => {
 
   it("labels places to eat and drink", () => {
     expect(categoryLabel("nightlife")).toBe("Bar & nightlife");
-    expect(categoryIcon("restaurant")).toBe("🍽️");
+    expect(categoryIcon("restaurant")).toBe("utensils");
     expect(categoryLabel("cafe")).toBe("Café");
-    expect(categoryIcon("cafe")).toBe("☕");
+    expect(categoryIcon("cafe")).toBe("coffee");
   });
 });

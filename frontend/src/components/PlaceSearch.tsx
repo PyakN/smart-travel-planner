@@ -2,6 +2,9 @@
 
 import { useEffect, useId, useState } from "react";
 
+import { cn } from "@/components/ui/cn";
+import { INPUT } from "@/components/ui/Field";
+import { Icon } from "@/components/ui/Icon";
 import { searchPlaces } from "@/lib/api";
 import { categoryIcon, categoryLabel } from "@/lib/format";
 import type { Place } from "@/lib/types";
@@ -76,6 +79,11 @@ export default function PlaceSearch({
   return (
     <>
       <div className="relative">
+        <Icon
+          name="search"
+          size={18}
+          className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-3"
+        />
         <input
           id={inputId}
           type="text"
@@ -107,13 +115,13 @@ export default function PlaceSearch({
               if (showList) pick(options[Math.min(active, options.length - 1)]);
             }
           }}
-          className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-zinc-50"
+          className={cn(INPUT, "pl-10")}
         />
         {showList && (
           <ul
             id={`${listId}-list`}
             role="listbox"
-            className="absolute inset-x-0 top-full z-[1100] mt-1 max-h-64 overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 text-sm shadow-lg"
+            className="absolute inset-x-0 top-full z-[1100] mt-1.5 max-h-72 overflow-y-auto rounded-panel border border-line bg-surface p-1 shadow-float"
           >
             {options.map((place, i) => (
               <li
@@ -127,13 +135,14 @@ export default function PlaceSearch({
                   pick(place);
                 }}
                 onMouseEnter={() => setActive(i)}
-                className={`flex cursor-pointer items-center gap-2 px-3 py-1.5 ${
-                  i === active ? "bg-blue-50" : ""
-                }`}
+                className={cn(
+                  "flex cursor-pointer items-center gap-2.5 rounded-control px-2.5 py-2 text-sm",
+                  i === active && "bg-canvas",
+                )}
               >
-                <span aria-hidden>{categoryIcon(place.category)}</span>
-                <span className="min-w-0 flex-1 truncate text-zinc-900">{place.name}</span>
-                <span className="shrink-0 text-xs text-zinc-400">
+                <Icon name={categoryIcon(place.category)} size={18} className="text-ink-3" />
+                <span className="min-w-0 flex-1 truncate font-bold text-ink">{place.name}</span>
+                <span className="shrink-0 text-meta text-ink-3">
                   {categoryLabel(place.category)}
                 </span>
               </li>
@@ -141,7 +150,11 @@ export default function PlaceSearch({
           </ul>
         )}
       </div>
-      {failed && <p className="text-xs text-red-600">Place search is unavailable right now.</p>}
+      {failed && (
+        <p role="alert" className="text-small font-bold text-stop">
+          Place search is unavailable right now.
+        </p>
+      )}
     </>
   );
 }

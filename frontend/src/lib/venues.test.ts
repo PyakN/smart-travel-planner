@@ -17,7 +17,7 @@ describe("venue labels", () => {
   it("names the kind of venue", () => {
     expect(venueTypeLabel("pastry")).toBe("Pastry shop");
     expect(venueTypeLabel("nightclub")).toBe("Club");
-    expect(venueIcon("ice_cream")).toBe("🍦");
+    expect(venueIcon("ice_cream")).toBe("ice-cream");
   });
 
   it("writes OSM cuisines for people", () => {

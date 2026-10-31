@@ -9,6 +9,7 @@ import {
   CircleMarker,
   MapContainer,
   Marker,
+  Pane,
   Polyline,
   Popup,
   TileLayer,
@@ -18,11 +19,15 @@ import {
 } from "react-leaflet";
 
 import { categoryLabel, dayColor, rideName } from "@/lib/format";
+import { iconSvg } from "@/lib/icons";
 import type { LonLat, PlanResponse, RouteSegment, StartPoint, Venue } from "@/lib/types";
 import { openingLabel, venueIcon, venueTypeLabel } from "@/lib/venues";
 
 const LISBON: L.LatLngTuple = [38.7223, -9.1393];
-const INACTIVE = "#94a3b8";
+// Other days, muted: DESIGN.md `field`.
+const INACTIVE = "#8c959e";
+// The white casing under every line, as on a transit diagram.
+const CASING = "#ffffff";
 
 // Standard OpenStreetMap tiles: free with attribution, fine for development and light use
 // (https://operations.osmfoundation.org/policies/tiles/). Point NEXT_PUBLIC_TILE_URL at a
@@ -57,7 +62,7 @@ function stopIcon(label: number, color: string, highlighted: boolean): L.DivIcon
   const size = highlighted ? 36 : 28;
   return L.divIcon({
     className: "",
-    html: `<div class="stop-marker" style="background:${color};width:${size}px;height:${size}px">${label}</div>`,
+    html: `<div class="stop-marker${highlighted ? " is-highlighted" : ""}" style="background:${color};width:${size}px;height:${size}px">${label}</div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   });
@@ -68,24 +73,25 @@ function venueMarker(venue: Venue, highlighted: boolean): L.DivIcon {
   const kind = venue.category === "nightlife" ? "drinks" : "food";
   return L.divIcon({
     className: "",
-    html: `<div class="venue-marker venue-marker-${kind}" style="width:${size}px;height:${size}px">${venueIcon(venue.venue_type)}</div>`,
+    html: `<div class="venue-marker venue-marker-${kind}${highlighted ? " is-highlighted" : ""}" style="width:${size}px;height:${size}px">${iconSvg(venueIcon(venue.venue_type), Math.round(size * 0.55), 2)}</div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   });
 }
 
+// A map pin in ink with a tram-yellow centre: where the venue search looks.
 const pinIcon = L.divIcon({
   className: "",
-  html: '<div class="search-pin" title="Where the search looks">📍</div>',
-  iconSize: [28, 28],
-  iconAnchor: [14, 26],
+  html: `<svg class="search-pin" viewBox="0 0 32 40" width="32" height="40" aria-hidden="true"><title>Where the search looks</title><path d="M16 38s13-11.6 13-22.5a13 13 0 0 0-26 0C3 26.4 16 38 16 38z" fill="#14202b" stroke="#fff" stroke-width="2"/><circle cx="16" cy="15.5" r="5.5" fill="#ffc629"/></svg>`,
+  iconSize: [32, 40],
+  iconAnchor: [16, 38],
 });
 
 const hotelIcon = L.divIcon({
   className: "",
-  html: '<div class="hotel-marker" title="Start point">H</div>',
-  iconSize: [30, 30],
-  iconAnchor: [15, 15],
+  html: `<div class="hotel-marker" title="Start point">${iconSvg("bed", 18, 2)}</div>`,
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
 });
 
 /** Zooms to the selected day whenever the plan or the day changes. */
@@ -113,8 +119,8 @@ function RideStops({ segment, color }: { segment: RouteSegment; color: string })
     <CircleMarker
       key={i}
       center={toLatLng(point)}
-      radius={4}
-      pathOptions={{ color, weight: 2, fillColor: "white", fillOpacity: 1 }}
+      radius={4.5}
+      pathOptions={{ color, weight: 2.5, fillColor: "white", fillOpacity: 1 }}
     >
       {name && <Tooltip>{name}</Tooltip>}
     </CircleMarker>
@@ -179,7 +185,7 @@ export default function RouteMap({
       ]
     : [];
 
-  if (!shown) return <div className="h-full w-full bg-zinc-200" />;
+  if (!shown) return <div className="h-full w-full bg-canvas" />;
   return (
     <MapContainer
       center={LISBON}
@@ -227,14 +233,29 @@ export default function RouteMap({
         <>
           {active.segments.map((seg, i) => (
             <Polyline
+              key={`casing-${i}`}
+              positions={seg.geometry.map(toLatLng)}
+              interactive={false}
+              pathOptions={{
+                color: CASING,
+                weight: seg.mode === "transit" ? 8 : 9,
+                opacity: 0.85,
+                lineCap: "round",
+                lineJoin: "round",
+              }}
+            />
+          ))}
+          {active.segments.map((seg, i) => (
+            <Polyline
               key={`active-${i}`}
               positions={seg.geometry.map(toLatLng)}
               pathOptions={{
                 color: dayColor(active.day),
                 weight: seg.mode === "transit" ? 4 : 5,
-                opacity: 0.9,
-                dashArray: seg.mode === "transit" ? "2 10" : undefined,
+                opacity: 1,
+                dashArray: seg.mode === "transit" ? "1 9" : undefined,
                 lineCap: "round",
+                lineJoin: "round",
               }}
             >
               {seg.ride && <Tooltip sticky>{rideName(seg.ride)}</Tooltip>}
@@ -256,7 +277,7 @@ export default function RouteMap({
               <Popup>
                 <strong>{s.name}</strong>
                 <br />
-                {categoryLabel(s.category)} · {s.arrive}–{s.leave}
+                {categoryLabel(s.category)}, {s.arrive}–{s.leave}
               </Popup>
             </Marker>
           ))}
@@ -268,18 +289,22 @@ export default function RouteMap({
       {search && (
         <>
           <FitToSearch {...search} />
-          <Circle
-            center={[search.lat, search.lon]}
-            radius={search.radius_m}
-            pathOptions={{
-              color: "#0f172a",
-              weight: 1,
-              opacity: 0.5,
-              dashArray: "4 6",
-              fill: false,
-            }}
-            interactive={false}
-          />
+          {/* The search area lightens the map under the route, below the lines (pane 400). */}
+          <Pane name="search-area" style={{ zIndex: 350 }}>
+            <Circle
+              center={[search.lat, search.lon]}
+              radius={search.radius_m}
+              pathOptions={{
+                color: "#14202b",
+                weight: 1.5,
+                opacity: 0.55,
+                dashArray: "4 6",
+                fillColor: "#ffffff",
+                fillOpacity: 0.45,
+              }}
+              interactive={false}
+            />
+          </Pane>
           {venues.map((venue) => (
             <Marker
               key={`${venue.id}-${picking}`}
@@ -292,7 +317,7 @@ export default function RouteMap({
               <Tooltip direction="top" offset={[0, -12]}>
                 <strong>{venue.name}</strong>
                 <br />
-                {venueTypeLabel(venue.venue_type)} · {openingLabel(venue).text}
+                {venueTypeLabel(venue.venue_type)}, {openingLabel(venue).text}
               </Tooltip>
             </Marker>
           ))}

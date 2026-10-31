@@ -2,6 +2,11 @@
 
 import { useEffect, useId, useState, type ReactNode } from "react";
 
+import { Button } from "@/components/ui/Button";
+import { cn } from "@/components/ui/cn";
+import { SELECT } from "@/components/ui/Field";
+import { Icon } from "@/components/ui/Icon";
+import { Checkbox, OptionChip } from "@/components/ui/Toggle";
 import { searchVenues } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import type { PlannedDay, Venue, VenueKind, VenuePage } from "@/lib/types";
@@ -82,9 +87,9 @@ function radiusLabel(meters: number): string {
 }
 
 const OPEN_STYLES = {
-  open: "text-emerald-700",
-  closed: "text-red-700",
-  unknown: "text-zinc-500",
+  open: { text: "text-go", dot: "bg-go" },
+  closed: { text: "text-stop", dot: "bg-stop" },
+  unknown: { text: "text-ink-2", dot: "bg-line-strong" },
 };
 
 /** How long to stay, and the button that adds the venue to the day. */
@@ -106,15 +111,15 @@ function AddToRoute({
   const stayId = useId();
   const [stay, setStay] = useState(venue.stay_min);
   return (
-    <div className="mt-2 space-y-2 rounded-md bg-orange-50 p-2.5 text-xs text-zinc-700">
-      <label htmlFor={stayId} className="flex items-center gap-2">
+    <div className="mt-3 animate-rise space-y-3 rounded-control bg-canvas p-3 text-small text-ink-2">
+      <label htmlFor={stayId} className="flex items-center gap-2.5 font-bold text-ink">
         Stay for
         <select
           id={stayId}
           value={stay}
           onChange={(event) => setStay(Number(event.target.value))}
           disabled={adding}
-          className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm"
+          className={SELECT}
         >
           {stayOptions(venue.stay_min).map((option) => (
             <option key={option.minutes} value={option.minutes}>
@@ -129,23 +134,13 @@ function AddToRoute({
           : `Day ${day} is planned again with it, when it suits the day (restaurants and bars in the evening).`}{" "}
         You see the changes before they are saved.
       </p>
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => onAdd(stay)}
-          disabled={adding}
-          className="rounded-lg bg-orange-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:cursor-wait disabled:bg-orange-400"
-        >
+      <div className="flex items-center gap-2">
+        <Button variant="primary" onClick={() => onAdd(stay)} disabled={adding} className="flex-1">
           {adding ? "Planning the day…" : live ? "Go here next" : `Add to day ${day}`}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={adding}
-          className="text-sm text-zinc-600 hover:text-zinc-900"
-        >
+        </Button>
+        <Button variant="quiet" onClick={onCancel} disabled={adding}>
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -166,55 +161,75 @@ function VenueCard({
   children: ReactNode;
 }) {
   const opening = openingLabel(venue);
+  const open = OPEN_STYLES[opening.state];
   const details = [
     ...dietLabels(venue.diets),
     ...(venue.outdoor_seating ? ["Outdoor seating"] : []),
   ];
+  const drinks = venue.category === "nightlife";
   return (
     <article
       id={venueCardId(venue.id)}
       onMouseEnter={() => onHover(venue.id)}
       onMouseLeave={() => onHover(null)}
-      className={`scroll-mt-40 rounded-lg border bg-white p-3 shadow-sm transition ${
-        highlighted ? "border-orange-400 ring-2 ring-orange-500/20" : "border-zinc-200"
-      }`}
+      className={cn(
+        "scroll-mt-44 rounded-panel border bg-surface p-3.5 transition-colors duration-200",
+        highlighted ? "border-ink" : "border-line hover:border-line-strong",
+      )}
     >
       <div className="flex items-start gap-3">
-        <span className="text-2xl leading-none" aria-hidden>
-          {venueIcon(venue.venue_type)}
+        <span
+          className={cn(
+            "flex size-10 shrink-0 items-center justify-center rounded-full text-white",
+            drinks ? "bg-evening" : "bg-ink",
+          )}
+          aria-hidden
+        >
+          <Icon name={venueIcon(venue.venue_type)} size={20} />
         </span>
-        <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="leading-snug font-medium text-zinc-900">{venue.name}</h3>
+            <h3 className="text-base leading-snug font-bold text-ink">{venue.name}</h3>
             {plannedDay !== undefined && (
-              <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-600">
+              <span className="inline-flex h-6 shrink-0 items-center rounded-tag bg-canvas px-1.5 text-meta font-bold text-ink-2">
                 On day {plannedDay}
               </span>
             )}
           </div>
-          <p className="text-xs text-zinc-600">
+          <p className="text-small text-ink-2">
             {venueTypeLabel(venue.venue_type)}
-            {venue.cuisines.length > 0 && ` · ${venue.cuisines.map(cuisineLabel).join(", ")}`}
+            {venue.cuisines.length > 0 && `, ${venue.cuisines.map(cuisineLabel).join(", ")}`}
           </p>
-          <p className="text-xs">
-            <span className={OPEN_STYLES[opening.state]}>{opening.text}</span>
-            <span className="text-zinc-500"> · {walkLabel(venue)}</span>
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-small">
+            <span className={cn("inline-flex items-center gap-1.5 font-bold", open.text)}>
+              <span className={cn("size-2 rounded-full", open.dot)} aria-hidden />
+              {opening.text}
+            </span>
+            <span className="inline-flex items-center gap-1 text-ink-2 tabular-nums">
+              <Icon name="walk" size={15} className="text-ink-3" />
+              {walkLabel(venue)}
+            </span>
           </p>
-          {details.length > 0 && <p className="text-xs text-zinc-600">{details.join(" · ")}</p>}
+          {details.length > 0 && <p className="text-small text-ink-2">{details.join(", ")}</p>}
           {(venue.website || venue.phone) && (
-            <p className="flex gap-3 text-xs">
+            <p className="flex flex-wrap gap-x-4 gap-y-1 pt-0.5 text-small">
               {venue.website && (
                 <a
                   href={venue.website}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-blue-700 hover:underline"
+                  className="inline-flex items-center gap-1 font-bold text-ink underline-offset-3 hover:underline"
                 >
+                  <Icon name="globe" size={15} className="text-ink-3" />
                   Website
                 </a>
               )}
               {venue.phone && (
-                <a href={`tel:${venue.phone}`} className="text-blue-700 hover:underline">
+                <a
+                  href={`tel:${venue.phone}`}
+                  className="inline-flex items-center gap-1 font-bold text-ink underline-offset-3 hover:underline"
+                >
+                  <Icon name="phone" size={15} className="text-ink-3" />
                   {venue.phone}
                 </a>
               )}
@@ -340,73 +355,70 @@ export default function VenueSearch({
       : cuisines;
 
   return (
-    <section className="space-y-4" aria-label="Places to eat and drink">
-      <div className="sticky top-0 z-10 -mx-4 -mt-4 space-y-1 border-b border-zinc-200 bg-zinc-50/95 px-4 pt-4 pb-3 backdrop-blur lg:-mx-6 lg:-mt-6 lg:px-6 lg:pt-6">
+    <section className="space-y-5" aria-label="Places to eat and drink">
+      <div className="sticky top-0 z-10 -mx-5 -mt-6 space-y-2 border-b border-line bg-surface px-5 pt-4 pb-4 lg:-mx-8 lg:-mt-8 lg:px-8 lg:pt-6">
         <button
           type="button"
           onClick={onBack}
-          className="text-sm font-medium text-blue-700 hover:text-blue-900"
+          className="-ml-2 inline-flex h-9 items-center gap-1.5 rounded-control px-2 text-sm font-bold text-ink transition-colors hover:bg-canvas"
         >
-          ← Back to route
+          <Icon name="arrow-left" size={17} />
+          Back to route
         </button>
-        <h2 className="text-lg font-semibold tracking-tight text-zinc-900">
-          Places to eat &amp; drink
-        </h2>
-        <p className="text-xs text-zinc-500">
-          For day {day.day}
-          {day.date && ` · ${formatDate(day.date)}`}
-        </p>
+        <div>
+          <h2 className="font-display text-title font-semibold text-ink">
+            Places to eat &amp; drink
+          </h2>
+          <p className="text-small text-ink-2">
+            For day {day.day}
+            {day.date && `, ${formatDate(day.date)}`}
+          </p>
+        </div>
       </div>
 
-      <div className="space-y-2 rounded-lg border border-zinc-200 bg-white p-3 text-sm">
-        <p className="text-zinc-800">
-          <span aria-hidden>📍 </span>
-          {point ? `Near ${point.label}` : "Where are you? Use your location or pin it."}
+      <div className="space-y-3 rounded-panel border border-line bg-surface p-3.5">
+        <p className="flex items-start gap-2 text-sm text-ink">
+          <Icon name="pin" size={18} className="mt-px text-ink-3" />
+          <span className="font-bold">
+            {point ? `Near ${point.label}` : "Where are you? Use your location or pin it."}
+          </span>
         </p>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={locate}
-            disabled={locating}
-            className="rounded-md bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200 disabled:cursor-wait"
-          >
+          <Button size="sm" icon="locate" onClick={locate} disabled={locating}>
             {locating ? "Locating…" : "Use my location"}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            size="sm"
+            variant={picking ? "dark" : "secondary"}
+            icon="pin"
             onClick={onTogglePicking}
             aria-pressed={picking}
-            className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-              picking ? "bg-blue-600 text-white" : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-            }`}
           >
             {picking ? "Click the map…" : "Pin on the map"}
-          </button>
+          </Button>
         </div>
-        {locateError && <p className="text-xs text-red-700">{locateError}</p>}
+        {locateError && (
+          <p role="alert" className="text-small font-bold text-stop">
+            {locateError}
+          </p>
+        )}
       </div>
 
-      <div className="space-y-3">
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Kind of place">
+      <div className="space-y-4">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Kind of place">
           {KINDS.map(({ kind, label }) => (
-            <button
+            <OptionChip
               key={label}
-              type="button"
-              aria-pressed={filters.kind === kind}
+              pressed={filters.kind === kind}
               onClick={() => change({ kind, cuisine: null })}
-              className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                filters.kind === kind
-                  ? "border-zinc-900 bg-zinc-900 text-white"
-                  : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400"
-              }`}
             >
               {label}
-            </button>
+            </OptionChip>
           ))}
         </div>
-        <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
-          <label htmlFor={radiusId} className="flex items-center gap-2 text-zinc-700">
-            Within
+        <div className="grid grid-cols-2 gap-3">
+          <label htmlFor={radiusId} className="block space-y-1.5">
+            <span className="block text-small font-bold text-ink-2">Within</span>
             <select
               id={radiusId}
               value={radius}
@@ -414,7 +426,7 @@ export default function VenueSearch({
                 onRadiusChange(Number(event.target.value));
                 setLimit(PAGE_SIZE);
               }}
-              className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm"
+              className={cn(SELECT, "w-full")}
             >
               {RADIUS_OPTIONS.map((meters) => (
                 <option key={meters} value={meters}>
@@ -423,13 +435,13 @@ export default function VenueSearch({
               ))}
             </select>
           </label>
-          <label htmlFor={cuisineId} className="flex items-center gap-2 text-zinc-700">
-            Cuisine
+          <label htmlFor={cuisineId} className="block min-w-0 space-y-1.5">
+            <span className="block text-small font-bold text-ink-2">Cuisine</span>
             <select
               id={cuisineId}
               value={filters.cuisine ?? ""}
               onChange={(event) => change({ cuisine: event.target.value || null })}
-              className="max-w-44 rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm"
+              className={cn(SELECT, "w-full")}
             >
               <option value="">Any</option>
               {cuisineOptions.map(({ cuisine, count }) => (
@@ -440,25 +452,25 @@ export default function VenueSearch({
             </select>
           </label>
         </div>
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm text-zinc-700">
+        <div className="flex flex-wrap gap-x-5 gap-y-2.5">
           {TOGGLES.map(({ key: toggle, label }) => (
-            <label key={toggle} className="flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={filters[toggle]}
-                onChange={(event) => change({ [toggle]: event.target.checked })}
-                className="h-4 w-4 rounded border-zinc-300"
-              />
+            <Checkbox
+              key={toggle}
+              checked={filters[toggle]}
+              onChange={(event) => change({ [toggle]: event.target.checked })}
+            >
               {label}
-            </label>
+            </Checkbox>
           ))}
         </div>
       </div>
 
-      <div aria-live="polite" className="text-xs text-zinc-500">
+      <div aria-live="polite" className="text-small text-ink-2">
         {loading && "Searching…"}
         {failed && (
-          <span className="text-red-700">The search is unavailable right now. Try again.</span>
+          <span className="font-bold text-stop">
+            The search is unavailable right now. Try again.
+          </span>
         )}
         {page &&
           !loading &&
@@ -470,7 +482,7 @@ export default function VenueSearch({
       </div>
 
       {page && page.items.length > 0 && (
-        <ul className={`space-y-2 ${loading ? "opacity-60" : ""}`}>
+        <ul className={cn("space-y-2.5 transition-opacity", loading && "opacity-55")}>
           {page.items.map((venue) => (
             <li key={venue.id}>
               <VenueCard
@@ -489,19 +501,19 @@ export default function VenueSearch({
                     adding={adding}
                   />
                 ) : (
-                  <div className="mt-2 flex justify-end">
-                    <button
-                      type="button"
+                  <div className="mt-3 flex justify-end">
+                    <Button
+                      size="sm"
+                      icon="plus"
                       onClick={() => setChoosing(venue.id)}
                       disabled={adding}
-                      className="rounded-md bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-900 hover:bg-orange-200"
                     >
                       Add to route
-                    </button>
+                    </Button>
                   </div>
                 )}
                 {choosing === venue.id && error && (
-                  <p role="alert" className="mt-2 text-xs text-red-700">
+                  <p role="alert" className="mt-2 text-small font-bold text-stop">
                     {error}
                   </p>
                 )}
@@ -511,15 +523,11 @@ export default function VenueSearch({
         </ul>
       )}
       {page && page.items.length < page.total && limit < MAX_RESULTS && (
-        <button
-          type="button"
-          onClick={() => setLimit((l) => Math.min(l + PAGE_SIZE, MAX_RESULTS))}
-          className="w-full rounded-lg border border-zinc-300 bg-white py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-        >
+        <Button block onClick={() => setLimit((l) => Math.min(l + PAGE_SIZE, MAX_RESULTS))}>
           Show more
-        </button>
+        </Button>
       )}
-      <p className="text-[11px] text-zinc-400">
+      <p className="text-meta text-ink-3">
         Venues from OpenStreetMap, which has no ratings or prices. Opening hours as mapped: check
         before you go.
       </p>

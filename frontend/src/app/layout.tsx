@@ -1,5 +1,5 @@
-import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Barlow_Semi_Condensed, Public_Sans } from "next/font/google";
 import { Suspense, type ReactNode } from "react";
 
 import { AuthProvider } from "@/components/AuthProvider";
@@ -7,9 +7,17 @@ import SiteHeader, { HeaderShell } from "@/components/SiteHeader";
 
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+// Reading text: drawn for legibility in public services, with plain zeros for times.
+const publicSans = Public_Sans({
+  variable: "--font-public",
+  subsets: ["latin", "latin-ext"],
+});
+
+// Signage voice: headlines, times and the numbers on stops.
+const barlow = Barlow_Semi_Condensed({
+  variable: "--font-barlow",
+  subsets: ["latin", "latin-ext"],
+  weight: ["400", "600"],
 });
 
 export const metadata: Metadata = {
@@ -17,9 +25,13 @@ export const metadata: Metadata = {
   description: "AI-picked places in Lisbon, ordered into the shortest walking route.",
 };
 
+export const viewport: Viewport = {
+  themeColor: "#14202b",
+};
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
+    <html lang="en" className={`${publicSans.variable} ${barlow.variable} h-full antialiased`}>
       <body className="flex h-full flex-col">
         <AuthProvider>
           {/* The header reads the URL (to come back after logging in): a Suspense boundary. */}

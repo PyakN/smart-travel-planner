@@ -5,22 +5,39 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { useAuth } from "@/components/AuthProvider";
+import { Button, buttonClass } from "@/components/ui/Button";
+import { cn } from "@/components/ui/cn";
+import { INPUT } from "@/components/ui/Field";
+import { Icon } from "@/components/ui/Icon";
+import { LogoMark } from "@/components/ui/Logo";
+import { Notice } from "@/components/ui/Notice";
 import { ApiError, deleteAccount, deleteTrip, listTrips, updateTrip } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { authHref } from "@/lib/navigation";
 import type { TripSummary, User } from "@/lib/types";
 
-const LINK = "font-medium text-blue-600 hover:underline";
-const QUIET_BUTTON = "rounded-md px-2 py-1 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900";
+const LINK = "font-bold text-ink underline underline-offset-3";
 
 function describe(error: unknown): string {
   return error instanceof ApiError ? error.message : "Something went wrong. Try again.";
 }
 
-function summary(trip: TripSummary): string {
+function TripFacts({ trip }: { trip: TripSummary }) {
   const city = trip.city.charAt(0).toUpperCase() + trip.city.slice(1);
-  const days = `${trip.days} ${trip.days === 1 ? "day" : "days"} in ${city}`;
-  return trip.start_date ? `${days} · from ${formatDate(trip.start_date)}` : days;
+  return (
+    <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-2">
+      <span className="inline-flex items-center gap-1.5">
+        <Icon name="pin" size={15} className="text-ink-3" />
+        {trip.days} {trip.days === 1 ? "day" : "days"} in {city}
+      </span>
+      {trip.start_date && (
+        <span className="inline-flex items-center gap-1.5">
+          <Icon name="calendar" size={15} className="text-ink-3" />
+          From {formatDate(trip.start_date)}
+        </span>
+      )}
+    </p>
+  );
 }
 
 function TripCard({
@@ -65,35 +82,38 @@ function TripCard({
   }
 
   return (
-    <li className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+    <li className="rounded-panel border border-line bg-surface p-4 transition-colors hover:border-line-strong sm:p-5">
       {title === null ? (
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <Link
               href={`/?trip=${trip.id}`}
-              className="font-semibold text-zinc-900 hover:text-blue-700"
+              className="font-display text-[20px] leading-tight font-semibold text-ink underline-offset-3 hover:underline"
             >
               {trip.title}
             </Link>
-            <p className="text-sm text-zinc-600">{summary(trip)}</p>
+            <TripFacts trip={trip} />
           </div>
-          <div className="flex shrink-0 gap-1 text-sm">
-            <button
-              type="button"
+          <div className="flex shrink-0 gap-1">
+            <Button
+              variant="quiet"
+              size="sm"
+              icon="pencil"
               onClick={() => setTitle(trip.title)}
               disabled={busy}
-              className={QUIET_BUTTON}
             >
               Rename
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="quiet"
+              size="sm"
+              icon="trash"
               onClick={remove}
               disabled={busy}
-              className="rounded-md px-2 py-1 text-red-700 hover:bg-red-50"
+              className="enabled:hover:bg-stop-soft enabled:hover:text-stop"
             >
               Delete
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
@@ -105,23 +125,21 @@ function TripCard({
             maxLength={100}
             autoFocus
             aria-label="Trip title"
-            className="min-w-0 flex-1 rounded-md border border-zinc-300 px-2 py-1 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            className={cn(INPUT, "min-w-0 flex-1")}
           />
-          <button
-            type="submit"
-            disabled={busy}
-            className="rounded-md bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-blue-400"
-          >
+          <Button type="submit" variant="dark" disabled={busy} className="h-11">
             Save
-          </button>
-          <button type="button" onClick={() => setTitle(null)} className={QUIET_BUTTON}>
+          </Button>
+          <Button variant="quiet" onClick={() => setTitle(null)} className="h-11">
             Cancel
-          </button>
+          </Button>
         </form>
       )}
-      <p className="mt-2 line-clamp-2 text-sm text-zinc-500">“{trip.request_text}”</p>
+      <p className="mt-3 line-clamp-2 border-t border-line pt-3 text-small text-ink-2">
+        “{trip.request_text}”
+      </p>
       {error && (
-        <p role="alert" className="mt-2 text-sm text-red-700">
+        <p role="alert" className="mt-2 text-small font-bold text-stop">
           {error}
         </p>
       )}
@@ -148,16 +166,20 @@ function Account({ user }: { user: User }) {
   }
 
   return (
-    <section className="space-y-1 border-t border-zinc-200 pt-6 text-sm text-zinc-600">
-      <h2 className="font-medium text-zinc-900">Account</h2>
+    <section className="space-y-2 border-t border-line pt-6 text-sm text-ink-2">
+      <h2 className="font-display text-[19px] font-semibold text-ink">Account</h2>
       <p>
-        Logged in as {user.display_name} ({user.email}).
+        Logged in as <span className="font-bold text-ink">{user.display_name}</span> ({user.email}).
       </p>
-      <button type="button" onClick={remove} className="text-red-700 hover:underline">
+      <button
+        type="button"
+        onClick={remove}
+        className="font-bold text-stop underline-offset-3 hover:underline"
+      >
         Delete my account
       </button>
       {error && (
-        <p role="alert" className="text-red-700">
+        <p role="alert" className="font-bold text-stop">
           {error}
         </p>
       )}
@@ -197,22 +219,38 @@ export default function TripList() {
 
   return (
     <main className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-2xl space-y-6 px-4 py-8">
-        <div className="flex items-baseline justify-between gap-3">
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-900">My trips</h1>
-          <Link href="/" className={`text-sm ${LINK}`}>
+      <div className="mx-auto max-w-2xl space-y-6 px-4 py-8 sm:py-12">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="font-display text-[30px] leading-[1.05] font-semibold text-ink sm:text-display">
+              My trips
+            </h1>
+            {trips && trips.length > 0 && (
+              <p className="mt-1 text-body text-ink-2">
+                {trips.length} saved, the most recently changed first.
+              </p>
+            )}
+          </div>
+          <Link href="/" className={buttonClass({ variant: "primary" })}>
+            <Icon name="plus" size={17} />
             Plan a new trip
           </Link>
         </div>
 
         {user === null && (
-          <div className="rounded-lg border border-zinc-200 bg-white p-6 text-center text-sm text-zinc-600">
-            <p>Log in to see the trips you saved.</p>
-            <p className="mt-3 space-x-4">
-              <Link href={authHref("/login", "/trips")} className={LINK}>
+          <div className="rounded-panel border border-line bg-surface p-8 text-center">
+            <span className="inline-flex text-ink">
+              <LogoMark size={36} />
+            </span>
+            <p className="mt-3 text-body text-ink">Log in to see the trips you saved.</p>
+            <p className="mt-4 flex justify-center gap-2">
+              <Link
+                href={authHref("/login", "/trips")}
+                className={buttonClass({ variant: "dark" })}
+              >
                 Log in
               </Link>
-              <Link href={authHref("/signup", "/trips")} className={LINK}>
+              <Link href={authHref("/signup", "/trips")} className={buttonClass()}>
                 Create an account
               </Link>
             </p>
@@ -220,23 +258,29 @@ export default function TripList() {
         )}
 
         {error && (
-          <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+          <Notice tone="stop" role="alert">
             {error}
-          </p>
+          </Notice>
         )}
 
         {user && trips === null && !error && (
-          <div className="h-24 animate-pulse rounded-lg bg-zinc-200" aria-label="Loading trips" />
+          <ul className="space-y-3" aria-label="Loading trips">
+            {[0, 1].map((i) => (
+              <li key={i} className="h-32 animate-pulse rounded-panel bg-canvas" />
+            ))}
+          </ul>
         )}
 
         {trips?.length === 0 && (
-          <p className="rounded-lg border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-600">
-            No saved trips yet.{" "}
-            <Link href="/" className={LINK}>
-              Plan a trip
-            </Link>
-            , then press “Save to my trips”.
-          </p>
+          <div className="rounded-panel border border-dashed border-line-strong p-8 text-center text-body text-ink-2">
+            <p className="font-bold text-ink">No saved trips yet.</p>
+            <p className="mt-1">
+              <Link href="/" className={LINK}>
+                Plan a trip
+              </Link>
+              , then press “Save to my trips”.
+            </p>
+          </div>
         )}
 
         {trips && trips.length > 0 && (

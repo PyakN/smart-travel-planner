@@ -1,3 +1,4 @@
+import type { IconName } from "./icons";
 import type {
   Adjustment,
   Attribution,
@@ -46,15 +47,15 @@ export function categoryLabel(slug: string): string {
   return CATEGORY_LABELS[slug] ?? slug.charAt(0).toUpperCase() + slug.slice(1);
 }
 
-const VEHICLES: Record<TransitVehicle, { label: string; icon: string }> = {
-  metro: { label: "Metro", icon: "🚇" },
-  tram: { label: "Tram", icon: "🚋" },
-  bus: { label: "Bus", icon: "🚌" },
-  train: { label: "Train", icon: "🚆" },
-  ferry: { label: "Ferry", icon: "⛴️" },
-  funicular: { label: "Funicular", icon: "🚞" },
-  cable_car: { label: "Cable car", icon: "🚡" },
-  other: { label: "Transit", icon: "🚏" },
+const VEHICLES: Record<TransitVehicle, string> = {
+  metro: "Metro",
+  tram: "Tram",
+  bus: "Bus",
+  train: "Train",
+  ferry: "Ferry",
+  funicular: "Funicular",
+  cable_car: "Cable car",
+  other: "Transit",
 };
 
 /**
@@ -67,18 +68,18 @@ export function travelLabel(stop: PlannedStop): string | null {
   if (stop.travel_mode === "walk") return `Walk ${formatDuration(stop.travel_min)} · ${distance}`;
   if (stop.rides.length === 0)
     return `Tram / metro ~${formatDuration(stop.travel_min)} · ${distance}`;
-  const vehicles = [...new Set(stop.rides.map((r) => VEHICLES[r.vehicle].label))].join(" + ");
+  const vehicles = [...new Set(stop.rides.map((r) => VEHICLES[r.vehicle]))].join(" + ");
   return `${vehicles} ${formatDuration(stop.travel_min)} · ${distance}`;
 }
 
-/** Badge text for a ride, e.g. "🚋 28E". */
+/** Badge text for a ride, e.g. "Tram 28E". */
 export function rideBadge(ride: TransitRide): string {
-  return `${VEHICLES[ride.vehicle].icon} ${ride.line}`;
+  return `${VEHICLES[ride.vehicle]} ${ride.line}`;
 }
 
 /** "Metro Verde to Cais do Sodré", for map tooltips. */
 export function rideName(ride: TransitRide): string {
-  const name = `${VEHICLES[ride.vehicle].label} ${ride.line}`;
+  const name = `${VEHICLES[ride.vehicle]} ${ride.line}`;
   return ride.headsign ? `${name} to ${ride.headsign}` : name;
 }
 
@@ -96,7 +97,7 @@ export function textColorOn(background: string): string {
   if (!/^[0-9a-f]{6}$/i.test(hex)) return "#ffffff";
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
   // Perceived brightness (ITU-R BT.601 weights).
-  return 0.299 * r + 0.587 * g + 0.114 * b > 0.6 ? "#18181b" : "#ffffff";
+  return 0.299 * r + 0.587 * g + 0.114 * b > 0.6 ? "#14202b" : "#ffffff";
 }
 
 /** The transit operators' data credits for every ride in the plan, once each. */
@@ -110,40 +111,40 @@ export function transitCredits(plan: PlanResponse): Attribution[] {
   return [...credits.values()];
 }
 
-/** Distinct colours for up to seven days; repeats after that. */
+/** Line colours for up to seven days, each readable under white numerals; repeats after that. */
 export const DAY_COLORS = [
-  "#2563eb",
-  "#db2777",
-  "#16a34a",
-  "#ea580c",
-  "#7c3aed",
-  "#0891b2",
-  "#ca8a04",
+  "#1f5edb",
+  "#d52f6e",
+  "#12805c",
+  "#c2410c",
+  "#6d3fd1",
+  "#0b7285",
+  "#8a6100",
 ];
 
 export function dayColor(day: number): string {
   return DAY_COLORS[(day - 1) % DAY_COLORS.length];
 }
 
-const CATEGORY_ICONS: Record<string, string> = {
-  museum: "🏛️",
-  gallery: "🖼️",
-  landmark: "🏰",
-  monument: "🗿",
-  viewpoint: "🌅",
-  religious: "⛪",
-  park: "🌳",
-  culture: "🎭",
-  market: "🧺",
-  attraction: "🎡",
-  nightlife: "🍸",
-  restaurant: "🍽️",
-  cafe: "☕",
+const CATEGORY_ICONS: Record<string, IconName> = {
+  museum: "museum",
+  gallery: "gallery",
+  landmark: "castle",
+  monument: "monument",
+  viewpoint: "binoculars",
+  religious: "church",
+  park: "tree",
+  culture: "mask",
+  market: "basket",
+  attraction: "wheel",
+  nightlife: "cocktail",
+  restaurant: "utensils",
+  cafe: "coffee",
 };
 
-/** Stand-in picture for places without a photo. */
-export function categoryIcon(slug: string): string {
-  return CATEGORY_ICONS[slug] ?? "📍";
+/** The icon of a category, also the stand-in picture for places without a photo. */
+export function categoryIcon(slug: string): IconName {
+  return CATEGORY_ICONS[slug] ?? "pin";
 }
 
 const WEEKDAYS: Record<string, string> = {
@@ -359,24 +360,25 @@ export function freeEveningLabel(day: Pick<PlannedDay, "free_from" | "end">): st
     : `Free time from ${day.free_from}`;
 }
 
-const WEATHER_ICONS: Record<WeatherCondition, string> = {
-  clear: "☀️",
-  clouds: "☁️",
-  fog: "🌫️",
-  drizzle: "🌦️",
-  rain: "🌧️",
-  snow: "🌨️",
-  thunderstorm: "⛈️",
+const WEATHER_ICONS: Record<WeatherCondition, IconName> = {
+  clear: "sun",
+  clouds: "cloud",
+  fog: "fog",
+  drizzle: "drizzle",
+  rain: "rain",
+  snow: "snow",
+  thunderstorm: "storm",
 };
 
-/** Emoji for a forecast; OpenWeatherMap's icon code tells night ("01n") and how cloudy. */
-export function weatherIcon({ condition, icon }: Pick<ForecastSlot, "condition" | "icon">): string {
+/** Icon for a forecast; OpenWeatherMap's icon code tells night ("01n") and how cloudy. */
+export function weatherIcon({
+  condition,
+  icon,
+}: Pick<ForecastSlot, "condition" | "icon">): IconName {
   const night = icon.endsWith("n");
-  if (condition === "clear") return night ? "🌙" : "☀️";
-  if (condition === "clouds" && !night) {
-    if (icon.startsWith("02")) return "🌤️"; // few clouds
-    if (icon.startsWith("03")) return "⛅"; // scattered clouds
-  }
+  if (condition === "clear") return night ? "moon" : "sun";
+  // Few ("02d") or scattered ("03d") clouds by day.
+  if (condition === "clouds" && !night && /^0[23]/.test(icon)) return "cloud-sun";
   return WEATHER_ICONS[condition];
 }
 

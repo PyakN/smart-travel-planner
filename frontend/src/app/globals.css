@@ -1,63 +1,304 @@
 @import "tailwindcss";
 
+/* Design tokens: DESIGN.md is the source; keep the two in step. */
 @theme inline {
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-public), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-barlow), "Arial Narrow", ui-sans-serif, sans-serif;
 }
 
-body {
-  background: var(--color-zinc-50);
-  color: var(--color-zinc-900);
+@theme {
+  --color-ink: #14202b;
+  --color-ink-2: #4a5763;
+  --color-ink-3: #66717c;
+  --color-field: #8c959e;
+  --color-line: #e2e5e7;
+  --color-line-strong: #c9cfd4;
+  --color-canvas: #f3f4f2;
+  --color-surface: #ffffff;
+  --color-signal: #ffc629;
+  --color-signal-hover: #f5b70a;
+  --color-signal-soft: #fff3c4;
+  --color-signal-ink: #6b4e00;
+  --color-go: #0e7a50;
+  --color-go-soft: #e2f3ea;
+  --color-stop: #c42b2b;
+  --color-stop-soft: #fcebea;
+  --color-caution: #8a5300;
+  --color-caution-soft: #fdebd3;
+  --color-info: #1d5bbf;
+  --color-info-soft: #e8effc;
+  --color-evening: #5b3cc4;
+  --color-evening-soft: #eeeafb;
+
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1.4;
+  --text-small: 0.8125rem;
+  --text-small--line-height: 1.45;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.5;
+  --text-title: 1.5rem;
+  --text-title--line-height: 1.15;
+  --text-display: 2rem;
+  --text-display--line-height: 1.05;
+
+  --radius-tag: 4px;
+  --radius-control: 8px;
+  --radius-panel: 12px;
+
+  --shadow-float: 0 12px 32px -12px rgb(20 32 43 / 0.28), 0 2px 6px rgb(20 32 43 / 0.08);
+  --shadow-bar: 0 -8px 24px -12px rgb(20 32 43 / 0.18);
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --animate-reveal-down: reveal-down 520ms var(--ease-out-expo) both;
+  --animate-rise: rise 260ms var(--ease-out-expo) both;
+
+  @keyframes reveal-down {
+    from {
+      clip-path: inset(0 0 100% 0);
+    }
+    to {
+      clip-path: inset(0 0 0 0);
+    }
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+  }
+
+  ::selection {
+    background: var(--color-signal);
+    color: var(--color-ink);
+  }
+
+  input,
+  textarea,
+  select {
+    caret-color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+
+  a {
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+
+  /* Native date and time pickers: the city's numerals, in the system's controls. */
+  input[type="date"],
+  input[type="time"] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Selects draw their own chevron so they match the inputs. */
+  select.select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a5763' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 16px;
+    padding-right: 34px;
+  }
+
+  /* Less motion: entrances and reveals land at once; state changes still show. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-delay: 0ms !important;
+    }
+  }
+
+  /* No lone word on the last line of a paragraph, where the browser supports it. */
+  p,
+  li,
+  figcaption {
+    text-wrap: pretty;
+  }
+}
+
+/* ---------- Map (Leaflet draws these outside React) ---------- */
+
+.leaflet-container {
+  background: var(--color-canvas);
   font-family: var(--font-sans);
 }
 
-/* Map markers (Leaflet divIcons; Tailwind classes don't reach injected HTML reliably). */
-.stop-marker,
+/* The map is paper: only the trip itself is saturated. */
+.leaflet-tile-pane {
+  filter: grayscale(1) brightness(1.05) contrast(0.88);
+}
+
+.leaflet-control-attribution.leaflet-control {
+  background: rgb(255 255 255 / 0.88);
+  color: var(--color-ink-2);
+  font-size: var(--text-meta);
+  border-top-left-radius: var(--radius-tag);
+  padding: 2px 6px;
+}
+
+.leaflet-control-attribution a {
+  color: var(--color-ink);
+}
+
+.leaflet-bar.leaflet-control {
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-float);
+  overflow: hidden;
+}
+
+.leaflet-bar a,
+.leaflet-bar a:hover {
+  width: 34px;
+  height: 34px;
+  line-height: 34px;
+  color: var(--color-ink);
+  border-bottom-color: var(--color-line);
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-tooltip {
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-float);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+.leaflet-tooltip {
+  border-color: var(--color-line);
+  font-size: var(--text-small);
+  padding: 6px 10px;
+}
+
+.leaflet-popup-content {
+  margin: 10px 14px;
+  font-size: var(--text-small);
+  line-height: 1.45;
+}
+
+/* Station roundels: a stop, numbered in its day's line colour. */
+.stop-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+  border-radius: 9999px;
+  color: #fff;
+  font: 600 14px/1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 3px rgb(20 32 43 / 0.35);
+  transition:
+    width 160ms var(--ease-out-expo),
+    height 160ms var(--ease-out-expo);
+}
+
+.stop-marker.is-highlighted {
+  box-shadow:
+    0 0 0 3px var(--color-signal),
+    0 2px 6px rgb(20 32 43 / 0.35);
+}
+
 .hotel-marker {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid white;
-  border-radius: 9999px;
-  color: white;
-  font: 600 13px/1 var(--font-sans);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
-  transition:
-    width 0.15s,
-    height 0.15s;
-}
-
-.hotel-marker {
-  width: 30px;
-  height: 30px;
-  background: var(--color-zinc-900);
+  width: 32px;
+  height: 32px;
+  border: 2px solid #fff;
+  border-radius: var(--radius-control);
+  background: var(--color-ink);
+  color: #fff;
+  box-shadow: 0 1px 3px rgb(20 32 43 / 0.35);
 }
 
 .venue-marker {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid white;
+  border: 2px solid #fff;
   border-radius: 9999px;
-  font-size: 14px;
-  line-height: 1;
-  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  color: #fff;
+  box-shadow: 0 1px 3px rgb(20 32 43 / 0.35);
   transition:
-    width 0.15s,
-    height 0.15s;
+    width 160ms var(--ease-out-expo),
+    height 160ms var(--ease-out-expo);
 }
 
 .venue-marker-food {
-  background: var(--color-orange-100);
-  border-color: var(--color-orange-500);
+  background: var(--color-ink);
 }
 
 .venue-marker-drinks {
-  background: var(--color-violet-100);
-  border-color: var(--color-violet-500);
+  background: var(--color-evening);
+}
+
+.venue-marker.is-highlighted {
+  box-shadow:
+    0 0 0 3px var(--color-signal),
+    0 2px 6px rgb(20 32 43 / 0.35);
 }
 
 .search-pin {
-  font-size: 26px;
-  line-height: 1;
-  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.4));
+  filter: drop-shadow(0 2px 2px rgb(20 32 43 / 0.35));
+}
+
+/* ---------- The proof diagram on the empty planner ---------- */
+
+.proof-path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: proof-draw 1100ms var(--ease-out-expo) forwards;
+}
+
+.proof-path-ai {
+  animation-delay: 250ms;
+}
+
+.proof-path-route {
+  animation-delay: 1250ms;
+  animation-duration: 1300ms;
+}
+
+@keyframes proof-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proof-path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
 }
