@@ -11,6 +11,9 @@ class Settings(BaseSettings):
 
     database_url: str
     default_city: str = "lisbon"
+    # Logs (app.logs): one JSON object per line for log collectors, or readable text.
+    log_level: str = "INFO"
+    log_format: Literal["text", "json"] = "text"
     # Upper bound for POST /plan end to end (two LLM calls with retries + routing).
     plan_timeout_s: float = 90.0
 

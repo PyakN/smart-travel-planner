@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
@@ -97,12 +98,14 @@ class LLMService:
     async def generate[T: BaseModel](self, *, system: str, prompt: str, schema: type[T]) -> T:
         key = ResponseCache.key(self.models[0], system, prompt, schema)
         if (cached := self.cache.get(key)) is not None:
+            logger.info("LLM answer from the cache", extra={"schema": schema.__name__})
             return schema.model_validate(cached)
 
         self.budget.check()
         last_error: Exception | None = None
         for model in self.models:
             for attempt in range(self.max_retries + 1):
+                started = time.perf_counter()
                 try:
                     response = await asyncio.wait_for(
                         self.provider.generate(
@@ -121,6 +124,17 @@ class LLMService:
                         await self._sleep(2**attempt)
                     continue
                 self.budget.record(response.input_tokens + response.output_tokens)
+                logger.info(
+                    "LLM answered",
+                    extra={
+                        "schema": schema.__name__,
+                        "model": model,
+                        "attempt": attempt + 1,
+                        "input_tokens": response.input_tokens,
+                        "output_tokens": response.output_tokens,
+                        "duration_ms": round((time.perf_counter() - started) * 1000),
+                    },
+                )
                 self.cache.put(key, response.parsed.model_dump(mode="json"))
                 return response.parsed
         raise LLMUnavailableError(f"LLM failed after retries on {self.models}") from last_error

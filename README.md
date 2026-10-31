@@ -277,6 +277,21 @@ They use it to plan:
 
 Limits: days never pause for rain to pass; and the forecast's 3-hour steps blur the exact hour a shower starts.
 
+## Reliability
+
+### Logs and request ids
+
+Every log line goes through one handler (`app/logs.py`), uvicorn's included: readable text by default, one JSON object per line with `LOG_FORMAT=json` (for a log collector); `LOG_LEVEL` sets the level (`INFO`).
+
+- **Request ids:** every request gets an id, the caller's `X-Request-ID` when it is plain and up to 64 characters (a proxy's), else a new one. Every line logged while the request runs carries it as `request_id`, and the response returns it in `X-Request-ID`: an error a user reports leads to its log lines.
+- **One line per request** once it is answered: method, path, status, `duration_ms` and the client's address (`/health` only at `DEBUG`). uvicorn's own access log is off.
+- **Events** carry their numbers as fields: each LLM answer (`model`, `input_tokens`, `output_tokens`, `duration_ms`), each plan made (`plan_id`, `city`, `days`, `stops`, `timings_ms`), and each outgoing HTTP call (httpx, API keys hidden).
+- **Unexpected errors** answer 500 with the request id; the traceback is in the log.
+
+```json
+{"time": "2026-10-31T22:05:57.759+00:00", "level": "INFO", "logger": "app.requests", "message": "GET /cities 200", "request_id": "demo-1", "method": "GET", "path": "/cities", "status": 200, "duration_ms": 2, "client": "127.0.0.1"}
+```
+
 ## Everyday commands
 
 ```bash

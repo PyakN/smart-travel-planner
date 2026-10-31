@@ -535,7 +535,7 @@ async def plan_trip(
         "day_count": day_count,
         "windows": [window_params(w) for w in windows],
     }
-    return await save_plan(
+    plan = await save_plan(
         session,
         city=selection.city,
         text=text,
@@ -568,6 +568,20 @@ async def plan_trip(
             day_count=day_count,
         ),
     )
+    logger.info(
+        "plan %d created",
+        plan.id,
+        extra={
+            "plan_id": plan.id,
+            "city": plan.city,
+            "days": len(plan.days),
+            "stops": sum(len(d.stops) for d in plan.days),
+            "dropped": len(plan.dropped),
+            "distance_source": plan.distance_source,
+            "timings_ms": plan.timings_ms,
+        },
+    )
+    return plan
 
 
 async def get_plan(session: AsyncSession, plan_id: int) -> PlanResponse | None:

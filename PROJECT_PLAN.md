@@ -187,7 +187,7 @@ A traveller saves a trip, ticks off places during the day and changes the rest o
 
 ## Phase 7. Quality and reliability
 - [ ] E2E tests (Playwright)
-- [ ] Structured logs, request id
+- [x] Structured logs, request id: one handler for every log line (JSON with `LOG_FORMAT=json`); each request gets an id (the caller's `X-Request-ID` when plain, else a new one) that every line it logs carries and its response returns, and one line once answered (status, duration, client). LLM answers and new plans are logged with their numbers (tokens, timings)
 - [ ] Rate limiting and protection against LLM abuse
 - [ ] Handling LLM outages (fallback / clear message)
 - [ ] Check that no secrets are in the repository
