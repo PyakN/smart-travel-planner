@@ -94,10 +94,22 @@ export function rideDetails(ride: TransitRide): string {
 /** Black or white, whichever reads better on a line colour such as "#FFA500". */
 export function textColorOn(background: string): string {
   const hex = background.replace("#", "");
-  if (!/^[0-9a-f]{6}$/i.test(hex)) return "#ffffff";
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
-  // Perceived brightness (ITU-R BT.601 weights).
-  return 0.299 * r + 0.587 * g + 0.114 * b > 0.6 ? "#14202b" : "#ffffff";
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return WHITE;
+  // Whichever has the higher WCAG contrast ratio on it: a mid green takes ink, not white.
+  const base = luminance(hex);
+  const contrast = (text: number) => (Math.max(base, text) + 0.05) / (Math.min(base, text) + 0.05);
+  return contrast(luminance(INK.slice(1))) > contrast(1) ? INK : WHITE;
+}
+
+const INK = "#14202b";
+const WHITE = "#ffffff";
+
+/** WCAG relative luminance of "rrggbb". */
+function luminance(hex: string): number {
+  const [r, g, b] = [0, 2, 4]
+    .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
 /** The transit operators' data credits for every ride in the plan, once each. */

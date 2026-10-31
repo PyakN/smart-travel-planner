@@ -150,8 +150,11 @@ describe("rides", () => {
   });
 
   it("keeps badge text readable on any line colour", () => {
-    expect(textColorOn("#009933")).toBe("#ffffff"); // metro green
+    expect(textColorOn("#1eb53a")).toBe("#14202b"); // Barcelona metro green: white is 2.7:1
+    expect(textColorOn("#009933")).toBe("#14202b"); // Lisbon metro green: ink beats white
     expect(textColorOn("#FFA500")).toBe("#14202b"); // train orange
+    expect(textColorOn("#0055a4")).toBe("#ffffff"); // a dark blue line
+    expect(textColorOn("#D52F6E")).toBe("#ffffff"); // magenta
     expect(textColorOn("not a colour")).toBe("#ffffff");
   });
 
