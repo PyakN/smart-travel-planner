@@ -21,6 +21,7 @@ from app.ingest.wiki import (
     parse_sparql,
     photo_file,
     sparql_query,
+    wikipedia_languages,
 )
 
 TRINDADE = "https://commons.wikimedia.org/wiki/Special:FilePath/Teatro%20da%20Trindade%202017.jpg"
@@ -62,6 +63,7 @@ class TestSparql:
                         image=TRINDADE,
                         description="theatre in Lisbon",
                         article="https://en.wikipedia.org/wiki/Teatro_da_Trindade",
+                        wikipedias="7",
                     ),
                     binding(
                         "Q1", image="https://commons.wikimedia.org/wiki/Special:FilePath/B.jpg"
@@ -72,9 +74,9 @@ class TestSparql:
         }
         assert parse_sparql(payload) == {
             "Q1": WikidataInfo(
-                "Teatro da Trindade 2017.jpg", "theatre in Lisbon", "Teatro_da_Trindade"
+                "Teatro da Trindade 2017.jpg", "theatre in Lisbon", "Teatro_da_Trindade", 7
             ),
-            "Q2": WikidataInfo(None, None, None),
+            "Q2": WikidataInfo(None, None, None, 0),  # in no Wikipedia
         }
 
 
@@ -142,7 +144,7 @@ class TestExtracts:
 
 
 class TestChoosing:
-    INFO = WikidataInfo("Wikidata.jpg", "church in Lisbon, Portugal", "Igreja_X")
+    INFO = WikidataInfo("Wikidata.jpg", "church in Lisbon, Portugal", "Igreja_X", 12)
 
     def test_wikidata_image_wins(self) -> None:
         assert photo_file({"wikimedia_commons": "File:Osm.jpg"}, self.INFO) == "Wikidata.jpg"
@@ -168,6 +170,11 @@ class TestChoosing:
         assert article_title({}, self.INFO) == "Igreja X"
         assert article_title({"wikipedia": "en:Galveias Palace"}, None) == "Galveias Palace"
         assert article_title({"wikipedia": "pt:Palácio Galveias"}, None) is None
+
+    def test_wikipedia_languages_from_wikidata_or_wikipedia_tag(self) -> None:
+        assert wikipedia_languages({"wikipedia": "pt:Igreja X"}, self.INFO) == 12
+        assert wikipedia_languages({"wikipedia": "pt:Palácio Galveias"}, None) == 1
+        assert wikipedia_languages({}, None) == 0
 
     def test_description_preference(self) -> None:
         assert description({}, self.INFO, {"Igreja X": "A church."}) == "A church."

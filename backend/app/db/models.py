@@ -48,6 +48,8 @@ class Place(Base):
     geom: Mapped[WKBElement] = mapped_column(Geography("POINT", srid=4326, spatial_index=False))
     tags: Mapped[dict[str, str]] = mapped_column(JSONB, server_default="{}")
     wikidata: Mapped[str | None] = mapped_column(String(32))
+    # Fame: Wikipedia languages with an article about the place (app.ingest.enrich).
+    wikipedia_languages: Mapped[int] = mapped_column(SmallInteger, server_default="0")
     opening_hours: Mapped[str | None] = mapped_column(Text)
     website: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
