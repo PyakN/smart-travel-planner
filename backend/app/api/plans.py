@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -14,37 +13,24 @@ from app.api.deps import (
     TransitDep,
     WeatherDep,
 )
-from app.llm.base import LLMBudgetExceededError, LLMError, LLMUnavailableError
 from app.schemas.plan import PlanRequest, PlanResponse, ReplaceRequest
 from app.services.day_hours import DailyHours
 from app.services.place_selection import PlanningError
 from app.services.plan_editing import replace_stops
 from app.services.trip_planner import get_plan, plan_trip
 
-logger = logging.getLogger(__name__)
 router = APIRouter(tags=["plans"])
 
 
 @asynccontextmanager
 async def planning_errors(timeout_s: float) -> AsyncIterator[None]:
-    """Run planning work under a deadline and turn its failures into clear HTTP errors."""
+    """Run planning work under a deadline and turn its failures into clear HTTP errors. LLM
+    failures are none: plans are made without it then (app.services.ai_fallback)."""
     try:
         async with asyncio.timeout(timeout_s):
             yield
     except PlanningError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
-    except LLMBudgetExceededError as exc:
-        raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS, "Planning capacity for today is used up."
-        ) from exc
-    except LLMUnavailableError as exc:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "The AI planner is temporarily unavailable. Try again shortly.",
-        ) from exc
-    except LLMError as exc:
-        logger.exception("LLM rejected the planning request")
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "The AI planner failed.") from exc
     except TimeoutError as exc:
         raise HTTPException(
             status.HTTP_504_GATEWAY_TIMEOUT, "Planning took too long. Try a shorter trip."

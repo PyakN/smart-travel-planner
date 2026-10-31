@@ -5,7 +5,8 @@
 2. Candidates are ranked as for a new plan, anchored on the stops that stay on the day (or,
    if none stay, where the removed ones were), and limited to visits that fit the time the
    removed stops free up.
-3. The LLM picks as many replacements as were removed, by id; the guard backfills.
+3. The LLM picks as many replacements as were removed, by id; the guard backfills. When
+   the LLM is unavailable, the best-ranked places that fit are taken (app.services.ai_fallback).
 4. Only that day is re-optimized; the other days are copied unchanged. On a saved trip,
    the day's visited stops cannot be replaced: they stay first, as they were, and only the
    rest of the day is planned again after them, as day edits do (app.services.day_editing).
@@ -65,6 +66,7 @@ from app.schemas.plan import (
     StartIn,
 )
 from app.schemas.trip import PlaceSelection, TripRequest
+from app.services.ai_fallback import REPLACE_FALLBACK_NOTE, ask_llm
 from app.services.place_selection import (
     HOURS_GUIDE,
     PlanningError,
@@ -312,8 +314,10 @@ async def replace_stops(
     chosen: list[Candidate] = []
     notes: dict[int, str] = {}
     warnings: list[str] = []
+    edit_warnings: list[str] = []
     if fitting:
-        selection = await llm.generate(
+        selection = await ask_llm(
+            llm,
             system=REPLACE_SYSTEM,
             prompt=_replace_prompt(
                 trip,
@@ -326,8 +330,12 @@ async def replace_stops(
             ),
             schema=PlaceSelection,
         )
-        chosen, warnings = validate_selection(selection.place_ids, fitting, len(removed))
-        notes = validate_notes(selection.notes, {c.id for c in chosen})
+        if selection is None:  # the best-ranked places that fit, as the guard backfills them
+            chosen, _ = validate_selection([], fitting, len(removed))
+            edit_warnings.append(REPLACE_FALLBACK_NOTE)
+        else:
+            chosen, warnings = validate_selection(selection.place_ids, fitting, len(removed))
+            notes = validate_notes(selection.notes, {c.id for c in chosen})
     watch.lap("selection")
 
     # Kept stops keep their selection rank; replacements come after them, so a day that
@@ -500,6 +508,7 @@ async def replace_stops(
             )
             for s in lost
         ],
+        warnings=edit_warnings,
     )
     new_params = {
         **params,

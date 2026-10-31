@@ -15,7 +15,8 @@ class HealthOut(BaseModel):
     status: Literal["ok"]
     database: Literal["ok"]
     llm: Literal["ok", "unavailable", "not_configured"] = Field(
-        description="unavailable: it failed repeatedly and is not called for a while"
+        description="unavailable: it failed repeatedly and is not called for a while; plans "
+        "are made without it meanwhile"
     )
 
 

@@ -566,6 +566,7 @@ async def plan_trip(
             hours_swaps=hours_swaps,
             **hours.as_params(),
             day_count=day_count,
+            ai_fallback=selection.ai_fallback,
         ),
     )
     logger.info(
@@ -578,6 +579,7 @@ async def plan_trip(
             "stops": sum(len(d.stops) for d in plan.days),
             "dropped": len(plan.dropped),
             "distance_source": plan.distance_source,
+            "ai_fallback": plan.ai_fallback,
             "timings_ms": plan.timings_ms,
         },
     )

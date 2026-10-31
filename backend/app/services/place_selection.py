@@ -1,7 +1,9 @@
 """Request text -> structured trip -> ranked candidates -> LLM pick -> validated places.
 
 The LLM never invents places: it may only return ids from the candidate list, and
-`validate_selection` enforces that deterministically.
+`validate_selection` enforces that deterministically. When the LLM is unavailable, the
+request is read by rules and the best-ranked candidates are chosen
+(app.services.ai_fallback).
 
 Plans suggest sights only: food and drink venues (app.catalog.VENUE_CATEGORIES) are never
 candidates, even when the request names them, and are planned only as must-visit places.
@@ -46,6 +48,7 @@ from app.schemas.trip import (
     PlaceSelection,
     TripRequest,
 )
+from app.services.ai_fallback import FALLBACK_RATIONALE, ask_llm, read_request
 from app.services.weather_service import TripWeather, describe_day, hhmm, with_daylight
 
 MIN_POOL, MAX_POOL, POOL_PER_STOP = 30, 100, 3
@@ -175,6 +178,8 @@ class SelectionResult:
     windows: list[DayWindow] = field(default_factory=list)
     # Picks the days' hours had no room for, what replaced them, and why.
     hours_swaps: list[tuple[Candidate, Candidate, str]] = field(default_factory=list)
+    # Made without the LLM, which was unavailable (app.services.ai_fallback).
+    ai_fallback: bool = False
 
 
 def _half_up(x: float) -> int:
@@ -403,9 +408,10 @@ def validate_notes(notes: Sequence[PlaceNote], place_ids: Collection[int]) -> di
     return valid
 
 
-async def parse_trip_request(llm: LLMService, text: str) -> TripRequest:
-    return await llm.generate(
-        system=PARSE_SYSTEM, prompt=f"Traveller request:\n<<<\n{text}\n>>>", schema=TripRequest
+async def parse_trip_request(llm: LLMService, text: str) -> TripRequest | None:
+    """The LLM's reading of the request; None when it is unavailable."""
+    return await ask_llm(
+        llm, system=PARSE_SYSTEM, prompt=f"Traveller request:\n<<<\n{text}\n>>>", schema=TripRequest
     )
 
 
@@ -551,6 +557,9 @@ async def select_places(
         raise PlanningError(f"Keep the request under {MAX_REQUEST_CHARS} characters.")
 
     trip = await parse_trip_request(llm, text)
+    ai = trip is not None
+    if trip is None:
+        trip = read_request(text)
     if day_count is not None:
         trip = trip.model_copy(update={"days": day_count})
     resolved = resolve_city(trip.city or chosen_city or default_city)
@@ -584,6 +593,7 @@ async def select_places(
             must_visit=must,
             weather=forecast,
             windows=windows,
+            ai_fallback=not ai,
         )
     note = None
     if weather_aware and forecast is not None:
@@ -636,15 +646,29 @@ async def select_places(
             must_visit=must,
             weather=forecast,
             windows=windows,
+            ai_fallback=not ai,
         )
 
     timed = list(zip(windows, slots, strict=True)) if is_timed(slots) else []
-    selection = await llm.generate(
-        system=SELECT_SYSTEM,
-        prompt=_selection_prompt(trip, candidates, target, must, note, timed),
-        schema=PlaceSelection,
+    # Once the LLM failed to read the request, it is not asked to choose either.
+    selection = (
+        await ask_llm(
+            llm,
+            system=SELECT_SYSTEM,
+            prompt=_selection_prompt(trip, candidates, target, must, note, timed),
+            schema=PlaceSelection,
+        )
+        if ai
+        else None
     )
+    if selection is None:  # the best-ranked candidates, as the guard backfills them
+        ai = False
+        selection = PlaceSelection(
+            place_ids=[], rationale=FALLBACK_RATIONALE.format(city=resolved.name)
+        )
     places, warnings = validate_selection(selection.place_ids, candidates, target)
+    if not ai:
+        warnings = []  # the backfill is the selection
     places, hours_swaps = fit_hours(places, candidates, slots, must, evening_pool)
     swaps: list[tuple[Candidate, Candidate]] = []
     if note is not None:
@@ -663,4 +687,5 @@ async def select_places(
         weather_swaps=swaps,
         windows=windows,
         hours_swaps=hours_swaps,
+        ai_fallback=not ai,
     )

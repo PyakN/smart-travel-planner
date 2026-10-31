@@ -118,9 +118,8 @@ Error statuses:
 - **404:** no such plan, or a trip that does not exist or belongs to someone else.
 - **409:** an email that has an account; a trip version that leaves out a visited place, or a draft made from an outdated version.
 - **422:** the request can't be planned, for example an unsupported city, or a text that names another city than `city`.
-- **429:** too many requests to the AI planner from this client (see [Rate limits](#rate-limits-and-llm-abuse)), or the daily LLM token budget is used up.
-- **502:** the LLM rejected the request.
-- **503:** the LLM is unavailable or not configured.
+- **429:** too many requests to the AI planner from this client (see [Rate limits](#rate-limits-and-llm-abuse)).
+- **503:** the LLM is not configured. When it fails, plans are [made without it](#when-the-llm-is-down).
 - **504:** planning timed out.
 
 ## Accounts and saved trips
@@ -170,6 +169,8 @@ The LLM never invents places. A request goes through four steps:
 2. **Candidates:** SQL ranks the city's sights by fame, interests and keywords, plus closeness to the hotel and the must-visit places (PostGIS distance; full weight at the anchor, none beyond 2.5 km on foot or 5 km with transit). Fame grows with the log of the Wikipedia languages that cover a place (1 gives 0.6, 30 give 3, 100 give the full 4), so a world-famous place outranks an obscure match for the interests, and a known match outranks it. One place stands for each Wikidata item (OSM maps some sights in pieces: 24 of Lisbon's aqueduct). The interests are a guess at categories (the Sagrada Família is a church on a Gaudí day), so the city's most famous places, a third of the pool's size, always join it, and they lead the list the LLM sees. Food and drink venues are never candidates.
 3. **Select:** the LLM fills the slots the must-visit places leave, picking ids from that candidate list (it sees the distances), and writes a one-sentence note per place on why it suits the traveller.
 4. **Guard:** a deterministic check drops any id that isn't a candidate, and places with the same name as one already chosen (OSM maps some sights twice).
+
+When the LLM is unavailable, rules read the request and the best-ranked candidates are chosen: see [When the LLM is down](#when-the-llm-is-down).
 
 Configure it in `.env`: `LLM_PROVIDER`, the matching API key, and optionally `LLM_MODEL` and `LLM_FALLBACK_MODEL`. For real public transport routes, also set `HERE_API_KEY` (see [Route optimizer](#route-optimizer)); for the weather, `OPENWEATHER_API_KEY` (see [Weather](#weather)).
 
@@ -297,7 +298,7 @@ Every log line goes through one handler (`app/logs.py`), uvicorn's included: rea
 The endpoints that call the LLM (`POST /plan`, `POST /plans/{id}/replace`, `POST /trips/{id}/replace`) cost tokens and seconds, so each client gets a share:
 
 - **Per client:** at most 5 requests a minute and 100 a day (`AI_REQUESTS_PER_MINUTE`, `AI_REQUESTS_PER_DAY`; 0 turns one off), then 429 with `Retry-After` and "Try again in 40 s". Clients are told apart by address, in memory per process (`app/rate_limit.py`). Other endpoints are not limited; failed log-ins have [their own limit](#accounts-and-saved-trips).
-- **For everyone:** a daily token budget (`LLM_DAILY_TOKEN_BUDGET`), and identical requests answered from a cache without calling the LLM.
+- **For everyone:** a daily token budget (`LLM_DAILY_TOKEN_BUDGET`; once it is used up, plans are [made without the LLM](#when-the-llm-is-down)), and identical requests answered from a cache without calling the LLM.
 - **Small requests:** the text is at most 1,000 characters, a trip at most 7 days and 10 must-visit places.
 - **Nothing to steer:** the LLM only fills in a schema, a parsed request or a list of ids from the candidates with a short note each (validated by Pydantic, unknown ids dropped), so it cannot be used as a general chatbot, and a request that tries to instruct it can at most change which candidates it picks and how the notes read.
 
@@ -307,8 +308,8 @@ Behind a proxy, the client's address comes from `X-Forwarded-For`, which uvicorn
 
 - **Retries, then a fallback model:** a failed call (rate limit, server error, malformed answer, timeout) is retried with backoff (`LLM_MAX_RETRIES`), then tried on `LLM_FALLBACK_MODEL` if set.
 - **A deadline:** one call ends within `LLM_DEADLINE_S` (40 s), retries included; a plan makes two calls and has 90 s.
-- **A circuit breaker:** after 3 calls in a row that failed (`LLM_CIRCUIT_FAILURES`), the LLM is not called for 60 s (`LLM_CIRCUIT_COOLDOWN_S`): requests fail at once instead of waiting out the retries. Then calls go through again, and the first success closes it. `GET /health` says `"llm": "unavailable"` meanwhile.
-- **A clear message:** 503 "The AI planner is temporarily unavailable. Try again shortly."
+- **A circuit breaker:** after 3 calls in a row that failed (`LLM_CIRCUIT_FAILURES`), the LLM is not called for 60 s (`LLM_CIRCUIT_COOLDOWN_S`): plans are made without it at once instead of waiting out the retries. Then calls go through again, and the first success closes it. `GET /health` says `"llm": "unavailable"` meanwhile.
+- **Plans without the AI:** when the LLM fails anyway (down, the token budget used up, or it refuses), the plan is still made, without it (`app/services/ai_fallback.py`). Rules read the request: the city it names, its days ("2 days", "a weekend", "48 hours"), interests and what to avoid ("museums, no churches"), the pace ("with kids" is relaxed) and the names it gives ("the Torre de Belém"). The places are the best-ranked candidates (fame, those interests and names, closeness to the hotel and the must-visit places), and the plan says so: `"ai_fallback": true` and a rationale ("The AI planner is unavailable right now, so this plan has the best-known places in Lisbon for the interests your request names, without a note on each. Try again later for a plan made for you."). Replacing stops takes the best-ranked places that fit, and says so in `edit.warnings`. What only the LLM gives is missing: wishes in the traveller's own words, the notes on each place, and refusing a city we do not support (a text that names no supported city is planned for the chosen one, which the notice names).
 
 ## Everyday commands
 
