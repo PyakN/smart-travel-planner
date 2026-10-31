@@ -1,6 +1,6 @@
 from app.config import Settings
 from app.llm.base import LLMError, LLMProvider
-from app.llm.service import LLMService, ResponseCache, TokenBudget
+from app.llm.service import CircuitBreaker, LLMService, ResponseCache, TokenBudget
 
 # Chosen for latency and cost: selection is a narrow task with the answer space fixed by us.
 DEFAULT_MODELS = {"gemini": "gemini-3.5-flash-lite", "openai": "gpt-5-mini"}
@@ -27,8 +27,10 @@ def create_llm_service(settings: Settings) -> LLMService:
         model=settings.llm_model or DEFAULT_MODELS[settings.llm_provider],
         fallback_model=settings.llm_fallback_model,
         timeout_s=settings.llm_timeout_s,
+        deadline_s=settings.llm_deadline_s,
         max_retries=settings.llm_max_retries,
         max_output_tokens=settings.llm_max_output_tokens,
         budget=TokenBudget(daily_limit=settings.llm_daily_token_budget),
         cache=ResponseCache(max_size=settings.llm_cache_size),
+        circuit=CircuitBreaker(settings.llm_circuit_failures, settings.llm_circuit_cooldown_s),
     )

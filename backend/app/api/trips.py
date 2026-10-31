@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    AI_RATE_LIMIT,
     CurrentUserDep,
     DistancesDep,
     LLMDep,
@@ -191,7 +192,9 @@ async def edit_trip_day(
         )
 
 
-@router.post("/{trip_id}/replace", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{trip_id}/replace", status_code=status.HTTP_201_CREATED, dependencies=[AI_RATE_LIMIT]
+)
 async def replace_trip_stops(
     trip_id: int,
     body: ReplaceRequest,

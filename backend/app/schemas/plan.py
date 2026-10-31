@@ -342,3 +342,8 @@ class PlanResponse(BaseModel):
     day_hours: list[DayHours] = Field(default_factory=list)
     # The number of days asked for in the request; None: the text's.
     day_count: int | None = None
+    ai_fallback: bool = Field(
+        default=False,
+        description="Made without the AI, which was unavailable: the request read by rules, "
+        "the best-ranked places chosen, no notes (the rationale says so)",
+    )

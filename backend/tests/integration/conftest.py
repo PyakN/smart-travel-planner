@@ -221,6 +221,9 @@ def database_url() -> Iterator[str]:
         monkeypatch.setenv("DATABASE_URL", url)
         monkeypatch.setenv("TRANSIT_PROVIDER", "estimate")  # tests that ride use a fake
         monkeypatch.setenv("OPENWEATHER_API_KEY", "")  # tests with weather use a fake
+        # Every test plans from the same address; tests of the limits set their own.
+        monkeypatch.setenv("AI_REQUESTS_PER_MINUTE", "0")
+        monkeypatch.setenv("AI_REQUESTS_PER_DAY", "0")
         get_settings.cache_clear()
         command.upgrade(Config(str(BACKEND_DIR / "alembic.ini")), "head")
         asyncio.run(_seed())

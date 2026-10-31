@@ -10,9 +10,11 @@ from httpx import Response
 
 from app.geo import BBox
 from app.ingest.cities import CITIES, City
+from app.llm.base import TransientLLMError
 from app.optimizer.distance import HaversineProvider
 from app.optimizer.planner import DAY_BUDGET_MIN, Stop, plan_route
 from app.schemas.trip import PlaceNote, PlaceSelection
+from app.services.ai_fallback import REPLACE_FALLBACK_NOTE
 from tests.fakes import FakeProvider
 from tests.integration.conftest import SEED_PLACES
 from tests.test_trip_schema import trip
@@ -106,6 +108,23 @@ def test_replace_one_stop(client: TestClient, llm: FakeProvider, place_ids: dict
     assert "Removed by the traveller:\n- Clock Tower (landmark)" in str(llm.calls[-1]["prompt"])
     assert names(client.get(f"/plans/{plan['id']}").json()) == names(plan)
     assert client.get(f"/plans/{new['id']}").json() == new
+
+
+def test_replaces_with_a_ranked_place_when_the_llm_fails(
+    client: TestClient, llm: FakeProvider, place_ids: dict[str, int]
+) -> None:
+    plan = create_plan(client, llm, place_ids, FIRST_DAY)
+    llm.queue(TransientLLMError("503"))
+    response = replace(client, plan, 1, [place_ids["Clock Tower"]])
+    assert response.status_code == 201, response.text
+    new = response.json()
+    assert new["edit"]["warnings"] == [REPLACE_FALLBACK_NOTE]
+    [added] = new["edit"]["added"]
+    assert added["place_id"] in candidate_ids(llm)  # one the LLM would have been offered
+    assert len(names(new)) == 4
+    [stop] = [s for s in new["days"][0]["stops"] if s["place_id"] == added["place_id"]]
+    assert stop["note"] is None
+    assert new["ai_fallback"] is False  # the plan's own places were the LLM's
 
 
 def test_replacing_keeps_the_days_hours(

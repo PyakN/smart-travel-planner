@@ -174,6 +174,9 @@ function EditSummary({ edit, onUndo }: { edit: PlanEdit; onUndo: PlanResultProps
       {edit.adjustments.map((a) => (
         <p key={`${a.removed?.place_id}-${a.added?.place_id}`}>{describeAdjustment(a)}</p>
       ))}
+      {edit.warnings.map((w) => (
+        <p key={w}>{w}</p>
+      ))}
     </Notice>
   );
 }
@@ -886,7 +889,13 @@ export default function PlanResult({
             {saveError}
           </p>
         )}
-        {plan.rationale && <p className="max-w-[65ch] text-body text-ink-2">{plan.rationale}</p>}
+        {plan.ai_fallback ? (
+          <Notice tone="caution" title="Planned without the AI" role="status">
+            {plan.rationale && <p className="max-w-[65ch]">{plan.rationale}</p>}
+          </Notice>
+        ) : (
+          plan.rationale && <p className="max-w-[65ch] text-body text-ink-2">{plan.rationale}</p>
+        )}
         <WeatherNotes plan={plan} />
         <HoursNotes plan={plan} />
         {plan.edit && !draft && <EditSummary edit={plan.edit} onUndo={onUndo} />}

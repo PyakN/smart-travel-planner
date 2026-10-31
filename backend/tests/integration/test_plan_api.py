@@ -13,6 +13,7 @@ from app.llm.base import LLMError, TransientLLMError
 from app.llm.service import TokenBudget
 from app.optimizer.transit import parse_routes
 from app.schemas.trip import PlaceNote, PlaceSelection
+from app.services.ai_fallback import FALLBACK_RATIONALE
 from tests.fakes import FakeProvider, FakeTransit
 from tests.integration.conftest import SEED_DETAILS, SessionFactory, use_llm
 from tests.optimizer.test_transit import fixture
@@ -298,21 +299,60 @@ def test_unsupported_city_is_a_clear_422(client: TestClient, llm: FakeProvider) 
     assert response.json()["detail"].startswith("'tokyo' is not supported yet")
 
 
+def assert_planned_without_llm(response: Any) -> dict[str, Any]:
+    assert response.status_code == 201, response.text
+    plan: dict[str, Any] = response.json()
+    assert plan["ai_fallback"] is True
+    assert plan["rationale"] == FALLBACK_RATIONALE.format(city="Lisbon")
+    stops = [s for d in plan["days"] for s in d["stops"]]
+    assert stops
+    assert all(s["note"] is None for s in stops)
+    assert plan["warnings"] == []  # taking the ranking is no backfill to warn of
+    return plan
+
+
 @pytest.mark.parametrize(
-    ("error", "status"),
-    [(TransientLLMError("503"), 503), (LLMError("bad key"), 502)],
-    ids=["unavailable", "rejected"],
+    "error", [TransientLLMError("503"), LLMError("bad key")], ids=["unavailable", "rejected"]
 )
-def test_llm_failures(client: TestClient, llm: FakeProvider, error: Exception, status: int) -> None:
+def test_plans_without_the_llm_when_it_fails(
+    client: TestClient, llm: FakeProvider, error: Exception
+) -> None:
     llm.queue(error)
-    response = post_plan(client)
-    assert response.status_code == status
+    response = post_plan(client, text="2 days in Lisbon: museums, no churches")
+    plan = assert_planned_without_llm(response)
+    assert len(llm.calls) == 1  # once reading the request failed, it is not asked to choose
     assert "bad key" not in response.text  # internal details are not leaked
+    # The request read by rules.
+    assert plan["trip"]["days"] == 2
+    assert plan["trip"]["interests"] == ["museum"]
+    assert plan["trip"]["avoid"] == ["religious"]
+    assert len(plan["days"]) == 2
+    # Saved as made, for share links.
+    assert client.get(f"/plans/{plan['id']}").json() == plan
 
 
-def test_budget_exhausted_is_429(client: TestClient, llm: FakeProvider) -> None:
+def test_plans_without_the_llm_when_the_budget_is_used_up(
+    client: TestClient, llm: FakeProvider
+) -> None:
     use_llm(client, llm, budget=TokenBudget(daily_limit=0))
-    assert post_plan(client).status_code == 429
+    assert_planned_without_llm(post_plan(client))
+    assert llm.calls == []
+
+
+def test_chooses_the_best_ranked_places_when_only_the_choice_fails(
+    client: TestClient, llm: FakeProvider, place_ids: dict[str, int]
+) -> None:
+    llm.queue(trip(city=None, days=1, pace="relaxed"), TransientLLMError("503"))
+    plan = assert_planned_without_llm(post_plan(client))
+    assert plan["trip"]["pace"] == "relaxed"  # the LLM's reading stays
+    # A relaxed day has 4 places: Lisbon's three famous ones, and the viewpoint the
+    # request's interests rank above the museum.
+    assert {s["name"] for d in plan["days"] for s in d["stops"]} == {
+        "Torre de Belém",
+        "Praça do Comércio",
+        "Castelo de São Jorge",
+        "Miradouro de Santa Luzia",
+    }
 
 
 def test_llm_not_configured_is_503(client: TestClient) -> None:

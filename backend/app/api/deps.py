@@ -10,6 +10,7 @@ from app.db.models import User
 from app.llm.service import LLMService
 from app.optimizer.distance import DistanceProvider
 from app.optimizer.transit import TransitProvider
+from app.rate_limit import RateLimitedError, RateLimiter, describe_wait
 from app.services.accounts import LoginLimiter, session_user
 from app.services.weather_service import WeatherProvider
 
@@ -57,6 +58,30 @@ def get_now() -> datetime:
 def get_login_limiter(request: Request) -> LoginLimiter:
     limiter: LoginLimiter = request.app.state.login_limiter
     return limiter
+
+
+def get_ai_limiter(request: Request) -> RateLimiter:
+    limiter: RateLimiter = request.app.state.ai_limiter
+    return limiter
+
+
+def limit_ai_requests(
+    request: Request, limiter: Annotated[RateLimiter, Depends(get_ai_limiter)]
+) -> None:
+    """429 for a client that asks the AI planner too often (app.rate_limit)."""
+    try:
+        limiter.hit(request.client.host if request.client else "unknown")
+    except RateLimitedError as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many requests to the AI planner. "
+            f"Try again in {describe_wait(exc.retry_after_s)}.",
+            headers={"Retry-After": str(exc.retry_after_s)},
+        ) from exc
+
+
+# For the endpoints that call the LLM: `dependencies=[AI_RATE_LIMIT]`.
+AI_RATE_LIMIT = Depends(limit_ai_requests)
 
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]

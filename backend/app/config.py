@@ -11,6 +11,9 @@ class Settings(BaseSettings):
 
     database_url: str
     default_city: str = "lisbon"
+    # Logs (app.logs): one JSON object per line for log collectors, or readable text.
+    log_level: str = "INFO"
+    log_format: Literal["text", "json"] = "text"
     # Upper bound for POST /plan end to end (two LLM calls with retries + routing).
     plan_timeout_s: float = 90.0
 
@@ -22,10 +25,19 @@ class Settings(BaseSettings):
     llm_fallback_model: str | None = None
     llm_timeout_s: float = 30.0
     llm_max_retries: int = 2
+    # One LLM call, retries included, ends by then: a plan makes two, within plan_timeout_s.
+    llm_deadline_s: float = 40.0
+    # After this many calls in a row that failed, the LLM is not called for the cooldown.
+    llm_circuit_failures: int = 3
+    llm_circuit_cooldown_s: float = 60.0
     # Room for a short note per place: a 7-day intense trip has 56 of them.
     llm_max_output_tokens: int = 4096
     llm_daily_token_budget: int = 1_000_000
     llm_cache_size: int = 256
+    # Requests per client (address) to the endpoints that call the LLM: POST /plan and the
+    # replaces (app.rate_limit). 0 turns a limit off.
+    ai_requests_per_minute: int = 5
+    ai_requests_per_day: int = 100
 
     # Walking distances: OSRM foot routing (public FOSSGIS server by default), with a
     # haversine fallback when it is unavailable.

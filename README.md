@@ -67,7 +67,7 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 
 | Endpoint | Description |
 |---|---|
-| `GET /health` | Service and database status |
+| `GET /health` | Service, database and LLM status (`llm`: `ok`, `unavailable` while it is [not called after failures](#when-the-llm-is-down), or `not_configured`) |
 | `GET /cities` | Supported cities: `slug`, `name`, `timezone` (IANA) and `bbox` (west, south, east, north) |
 | `GET /places` | Search: `q` (name contains, accents ignored), `city`, `category` (repeatable), `bbox=west,south,east,north`, or `lat`+`lon`+`radius_m` (sorted by distance); `limit` / `offset` |
 | `GET /places/{id}` | One place |
@@ -118,9 +118,8 @@ Error statuses:
 - **404:** no such plan, or a trip that does not exist or belongs to someone else.
 - **409:** an email that has an account; a trip version that leaves out a visited place, or a draft made from an outdated version.
 - **422:** the request can't be planned, for example an unsupported city, or a text that names another city than `city`.
-- **429:** the daily LLM token budget is used up.
-- **502:** the LLM rejected the request.
-- **503:** the LLM is unavailable or not configured.
+- **429:** too many requests to the AI planner from this client (see [Rate limits](#rate-limits-and-llm-abuse)).
+- **503:** the LLM is not configured. When it fails, plans are [made without it](#when-the-llm-is-down).
 - **504:** planning timed out.
 
 ## Accounts and saved trips
@@ -170,6 +169,8 @@ The LLM never invents places. A request goes through four steps:
 2. **Candidates:** SQL ranks the city's sights by fame, interests and keywords, plus closeness to the hotel and the must-visit places (PostGIS distance; full weight at the anchor, none beyond 2.5 km on foot or 5 km with transit). Fame grows with the log of the Wikipedia languages that cover a place (1 gives 0.6, 30 give 3, 100 give the full 4), so a world-famous place outranks an obscure match for the interests, and a known match outranks it. One place stands for each Wikidata item (OSM maps some sights in pieces: 24 of Lisbon's aqueduct). The interests are a guess at categories (the Sagrada Família is a church on a Gaudí day), so the city's most famous places, a third of the pool's size, always join it, and they lead the list the LLM sees. Food and drink venues are never candidates.
 3. **Select:** the LLM fills the slots the must-visit places leave, picking ids from that candidate list (it sees the distances), and writes a one-sentence note per place on why it suits the traveller.
 4. **Guard:** a deterministic check drops any id that isn't a candidate, and places with the same name as one already chosen (OSM maps some sights twice).
+
+When the LLM is unavailable, rules read the request and the best-ranked candidates are chosen: see [When the LLM is down](#when-the-llm-is-down).
 
 Configure it in `.env`: `LLM_PROVIDER`, the matching API key, and optionally `LLM_MODEL` and `LLM_FALLBACK_MODEL`. For real public transport routes, also set `HERE_API_KEY` (see [Route optimizer](#route-optimizer)); for the weather, `OPENWEATHER_API_KEY` (see [Weather](#weather)).
 
@@ -277,6 +278,39 @@ They use it to plan:
 
 Limits: days never pause for rain to pass; and the forecast's 3-hour steps blur the exact hour a shower starts.
 
+## Reliability
+
+### Logs and request ids
+
+Every log line goes through one handler (`app/logs.py`), uvicorn's included: readable text by default, one JSON object per line with `LOG_FORMAT=json` (for a log collector); `LOG_LEVEL` sets the level (`INFO`).
+
+- **Request ids:** every request gets an id, the caller's `X-Request-ID` when it is plain and up to 64 characters (a proxy's), else a new one. Every line logged while the request runs carries it as `request_id`, and the response returns it in `X-Request-ID`: an error a user reports leads to its log lines.
+- **One line per request** once it is answered: method, path, status, `duration_ms` and the client's address (`/health` only at `DEBUG`). uvicorn's own access log is off.
+- **Events** carry their numbers as fields: each LLM answer (`model`, `input_tokens`, `output_tokens`, `duration_ms`), each plan made (`plan_id`, `city`, `days`, `stops`, `timings_ms`), and each outgoing HTTP call (httpx, API keys hidden).
+- **Unexpected errors** answer 500 with the request id; the traceback is in the log.
+
+```json
+{"time": "2026-10-31T22:05:57.759+00:00", "level": "INFO", "logger": "app.requests", "message": "GET /cities 200", "request_id": "demo-1", "method": "GET", "path": "/cities", "status": 200, "duration_ms": 2, "client": "127.0.0.1"}
+```
+
+### Rate limits and LLM abuse
+
+The endpoints that call the LLM (`POST /plan`, `POST /plans/{id}/replace`, `POST /trips/{id}/replace`) cost tokens and seconds, so each client gets a share:
+
+- **Per client:** at most 5 requests a minute and 100 a day (`AI_REQUESTS_PER_MINUTE`, `AI_REQUESTS_PER_DAY`; 0 turns one off), then 429 with `Retry-After` and "Try again in 40 s". Clients are told apart by address, in memory per process (`app/rate_limit.py`). Other endpoints are not limited; failed log-ins have [their own limit](#accounts-and-saved-trips).
+- **For everyone:** a daily token budget (`LLM_DAILY_TOKEN_BUDGET`; once it is used up, plans are [made without the LLM](#when-the-llm-is-down)), and identical requests answered from a cache without calling the LLM.
+- **Small requests:** the text is at most 1,000 characters, a trip at most 7 days and 10 must-visit places.
+- **Nothing to steer:** the LLM only fills in a schema, a parsed request or a list of ids from the candidates with a short note each (validated by Pydantic, unknown ids dropped), so it cannot be used as a general chatbot, and a request that tries to instruct it can at most change which candidates it picks and how the notes read.
+
+Behind a proxy, the client's address comes from `X-Forwarded-For`, which uvicorn trusts only from `--forwarded-allow-ips` (127.0.0.1 by default: the Next.js proxy on the same host). Next.js passes on a header the browser sent, so in production the edge in front of it must set the header itself; the token budget holds either way.
+
+### When the LLM is down
+
+- **Retries, then a fallback model:** a failed call (rate limit, server error, malformed answer, timeout) is retried with backoff (`LLM_MAX_RETRIES`), then tried on `LLM_FALLBACK_MODEL` if set.
+- **A deadline:** one call ends within `LLM_DEADLINE_S` (40 s), retries included; a plan makes two calls and has 90 s.
+- **A circuit breaker:** after 3 calls in a row that failed (`LLM_CIRCUIT_FAILURES`), the LLM is not called for 60 s (`LLM_CIRCUIT_COOLDOWN_S`): plans are made without it at once instead of waiting out the retries. Then calls go through again, and the first success closes it. `GET /health` says `"llm": "unavailable"` meanwhile.
+- **Plans without the AI:** when the LLM fails anyway (down, the token budget used up, or it refuses), the plan is still made, without it (`app/services/ai_fallback.py`). Rules read the request: the city it names, its days ("2 days", "a weekend", "48 hours"), interests and what to avoid ("museums, no churches"), the pace ("with kids" is relaxed) and the names it gives ("the Torre de Belém"). The places are the best-ranked candidates (fame, those interests and names, closeness to the hotel and the must-visit places), and the plan says so: `"ai_fallback": true` and a rationale ("The AI planner is unavailable right now, so this plan has the best-known places in Lisbon for the interests your request names, without a note on each. Try again later for a plan made for you."), which the frontend shows as a "Planned without the AI" notice. Replacing stops takes the best-ranked places that fit, and says so in `edit.warnings`. What only the LLM gives is missing: wishes in the traveller's own words, the notes on each place, and refusing a city we do not support (a text that names no supported city is planned for the chosen one, which the notice names).
+
 ## Everyday commands
 
 ```bash
@@ -292,8 +326,22 @@ pytest                             # all tests (integration tests need Docker)
 pytest -m "not integration"        # unit tests only
 
 pre-commit run --all-files         # run every hook manually
+
+cd frontend
+npm test                           # unit tests (vitest)
+npx playwright install chromium    # once
+npm run test:e2e                   # end-to-end tests in a browser (needs the database)
 ```
+
+The end-to-end tests run the real frontend and API on a database of their own, with a scripted LLM: see [frontend/README.md](frontend/README.md#end-to-end-tests).
 
 ## Secrets
 
-Never commit `.env`. Only `.env.example` lives in git. A pre-commit hook blocks `.env` files, and gitleaks scans for hardcoded secrets.
+Never commit `.env`. Only `.env.example` lives in git.
+
+- **Every commit:** pre-commit runs gitleaks on what is being committed, blocks `.env` files and private keys.
+- **Every push and pull request:** CI's `secrets` job runs gitleaks over the whole history, every branch included. To run it locally: `gitleaks git --redact -v` (the binary pre-commit built is in `~/.cache/pre-commit/*/golangenv-default/bin/`).
+- **At run time:** keys come from the environment only, as `SecretStr` (hidden in reprs and errors); the keys HERE and OpenWeatherMap take in the query string are masked in logged URLs (`app/http_logging.py`), and request logs carry the path only.
+- **Checked on 2026-10-31:** gitleaks found nothing in the 167 commits of every branch; the only env files ever committed are the two `.env.example`; no Google, OpenAI, HERE or OpenWeatherMap key pattern appears anywhere in the history, and the test fixtures hold no keys.
+
+If a secret lands in a commit anyway, treat it as compromised: rotate the key first, then clean the history.
