@@ -38,7 +38,7 @@ So the product never invents a place, and its route quality is measured: 55% les
 
 ## Capabilities and Constraints
 
-- **Cities:** the backend plans Lisbon, Berlin and Barcelona. The frontend still assumes Lisbon (map, clock, place search); a city picker is planned.
+- **Cities:** Lisbon, Berlin and Barcelona, listed by `GET /cities`. The traveller chooses one in the planner; the map, clock, dates, place search and examples follow it. A new city in the backend appears in the frontend without code changes (with general example requests until it gets its own).
 - **Sights only:** generated plans and AI replacements never include restaurants, cafés, bars, clubs or fado houses. Those come in only as must-visit places or from the venue search.
 - **Data sources:** places, opening hours, cuisines, diets and outdoor seating come from OpenStreetMap. Photos (with author and licence) and descriptions come from Wikimedia Commons, Wikipedia and Wikidata. Coverage is partial: in Lisbon, 634 of ~7.2k places have a photo and 440 a description.
 - **No ratings or prices:** OSM has none, so the UI shows none until an optional provider (e.g. Foursquare) is added. Google Places is ruled out because its terms forbid showing its content on a non-Google map.

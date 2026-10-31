@@ -194,7 +194,7 @@ Two families, clearly distinct. **Barlow Semi Condensed** carries the signage vo
 ## Layout
 
 - **Shell:** an ink header band (56px) over a two-pane workspace. On desktop (1024px and up) a 480px sidebar (the page's `main`) sits on the left, with the full-bleed map to its right. Below 1024px the map sits on top (38dvh) and the sidebar scrolls below it. Below 480px the header keeps the mark and drops the wordmark, which stays the link's spoken name.
-- **Planner states:** with no plan, the sidebar leads with the display question, the request field, examples and trip settings, and the map shows the proof card. With a plan, the request folds into a one-line summary with "Change request", and the plan takes the sidebar.
+- **Planner states:** with no plan, the sidebar leads with the display question ("Plan your Berlin trip"), the city picker, the request field, examples and trip settings, and the map shows the whole city with the proof card over it. With a plan, the request folds into a one-line summary with its city and "Change", and the plan takes the sidebar.
 - **Itinerary grid:** a 44px time column, a 28px rail, then the stop content. The rail is continuous from first to last stop. Below 640px the time column goes and the times lead each card, so stop names keep their width.
 - **Spacing:** a 4px base (4, 8, 12, 16, 20, 24, 32, 40). Groups are tight (8–12px). Sections are separated by 24–32px, with more space above a heading than below it.
 - **Alignment:** left-aligned throughout. Numerals align on a column.
@@ -263,6 +263,12 @@ Travel legs sit on the rail between stops ("Walk 12 min · 900 m", ride badges i
 
 ### Motion
 One authored moment per surface: the proof card's two routes on the empty planner, and the itinerary's top-down reveal when a plan arrives. Action bars and dialogs rise 6px as they appear (260ms). Under reduced motion, entrances and reveals land at once, while colour changes and the switch thumb still show state.
+
+### City picker
+The first field of the request: a card per city, its name over its local time (numerals, ticking each 20 s), like a departures board. Native radio buttons underneath, so arrow keys move between cities. The chosen card is ink with the tram-yellow map pin beside its time; the others are white with a `line-strong` border. Cards share the row equally, three to a row on any width, so every city stays in view; past six cities a select takes over. While the list loads, three canvas placeholders hold its place.
+- **Choosing a city** retitles the planner (the name settles in, 260ms), flies the map to the city's bounds (900ms; at once under reduced motion), and sets the examples, the placeholder and the place search's hint.
+- **Switching** clears the start point and must-visit places of the old city. A neutral notice says what went ("Cleared 1 must-visit place in Berlin.") with Undo.
+- **A request naming another city** gets a caution notice under the request field, in the backend's words ("Your request names Lisbon, but Barcelona is chosen.") with "Plan in Lisbon instead".
 
 ### Proof card (empty planner)
 A floating panel on the map (desktop) or below the form (mobile). An SVG of seven roundels shows the AI's own order as a grey zigzag, then the optimizer's route drawn over it in day-1 blue, with the benchmark result as one sentence. It plays once when it enters the viewport, and is static under reduced motion.

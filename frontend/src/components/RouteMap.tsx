@@ -3,7 +3,7 @@
 import "leaflet/dist/leaflet.css";
 
 import L from "leaflet";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Circle,
   CircleMarker,
@@ -18,12 +18,14 @@ import {
   useMapEvents,
 } from "react-leaflet";
 
+import { cityBounds } from "@/lib/cities";
 import { categoryLabel, dayColor, rideName } from "@/lib/format";
 import { iconSvg } from "@/lib/icons";
-import type { LonLat, PlanResponse, RouteSegment, StartPoint, Venue } from "@/lib/types";
+import type { City, LonLat, PlanResponse, RouteSegment, StartPoint, Venue } from "@/lib/types";
 import { openingLabel, venueIcon, venueTypeLabel } from "@/lib/venues";
 
-const LISBON: L.LatLngTuple = [38.7223, -9.1393];
+// Before the city is known: the whole world, zoomed out.
+const WORLD: L.LatLngTuple = [30, 0];
 // Other days, muted: DESIGN.md `field`.
 const INACTIVE = "#8c959e";
 // The white casing under every line, as on a transit diagram.
@@ -40,6 +42,8 @@ const TILE_ATTRIBUTION =
 
 export interface RouteMapProps {
   plan: PlanResponse | null;
+  /** The city on the map: the plan's, or the one being planned. */
+  city: Pick<City, "bbox"> | null;
   selectedDay: number;
   onSelectDay: (day: number) => void;
   start: StartPoint | null;
@@ -127,6 +131,24 @@ function RideStops({ segment, color }: { segment: RouteSegment; color: string })
   ));
 }
 
+/**
+ * Shows the whole city while no plan is on the map: at once when the map opens, then flying
+ * to each city chosen after (unless the traveller asked for less motion).
+ */
+function FitToCity({ city }: { city: Pick<City, "bbox"> }) {
+  const map = useMap();
+  const opened = useRef(false);
+  const [west, south, east, north] = city.bbox;
+  useEffect(() => {
+    const bounds = L.latLngBounds(cityBounds({ bbox: [west, south, east, north] }));
+    const still = !opened.current || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    opened.current = true;
+    if (still) map.fitBounds(bounds, { padding: [16, 16] });
+    else map.flyToBounds(bounds, { padding: [16, 16], duration: 0.9 });
+  }, [map, west, south, east, north]);
+  return null;
+}
+
 /** Zooms to the search area whenever its point or radius changes. */
 function FitToSearch({ lat, lon, radius_m }: { lat: number; lon: number; radius_m: number }) {
   const map = useMap();
@@ -164,6 +186,7 @@ function useShown(): boolean {
 
 export default function RouteMap({
   plan,
+  city,
   selectedDay,
   onSelectDay,
   start,
@@ -188,13 +211,15 @@ export default function RouteMap({
   if (!shown) return <div className="h-full w-full bg-canvas" />;
   return (
     <MapContainer
-      center={LISBON}
-      zoom={13}
+      bounds={city ? cityBounds(city) : undefined}
+      center={city ? undefined : WORLD}
+      zoom={city ? undefined : 2}
       className={`h-full w-full ${picking ? "cursor-crosshair" : ""}`}
       scrollWheelZoom
     >
       <TileLayer attribution={TILE_ATTRIBUTION} url={TILE_URL} />
       <PickStart enabled={picking} onPick={onPick} />
+      {!plan && !search && city && <FitToCity city={city} />}
       {plan && active && !search && (
         <FitToDay points={fitPoints} fitKey={`${plan.id}:${selectedDay}`} />
       )}

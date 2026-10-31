@@ -235,16 +235,14 @@ export function describeHoursSwap({ removed, added, reason }: Adjustment): strin
   return `${added?.name ?? "Another place"} instead of ${removed?.name ?? "a pick"}: ${reason}`;
 }
 
-/** Plans are in the city's local time (Lisbon is the only city so far). */
-export const CITY_TIME_ZONE = "Europe/Lisbon";
-export const CITY_NAME = "Lisbon";
+// Plans are in their city's local time: `timeZone` below is the city's (GET /cities).
 export const DEFAULT_DAY_START = "09:30";
 export const DEFAULT_DAY_END = "21:30";
 const MINUTES_PER_DAY = 24 * 60;
 
 /** Today's date ("YYYY-MM-DD") and the time in minutes since midnight, in `timeZone`. */
 export function cityNow(
-  timeZone: string = CITY_TIME_ZONE,
+  timeZone: string,
   now: Date = new Date(),
 ): { date: string; minutes: number } {
   const parts = Object.fromEntries(
@@ -398,10 +396,10 @@ export function formatDate(isoDate: string): string {
 }
 
 /**
- * "YYYY-MM-DD" of the day `days` after today in the city: trip dates are the city's, so
- * "today" is Lisbon's today wherever the traveller's browser is.
+ * "YYYY-MM-DD" of the day `days` after today in the city (its IANA `timeZone`): trip dates
+ * are the city's, so "today" is the city's today wherever the traveller's browser is.
  */
-export function cityDate(days = 0, now: Date = new Date(), timeZone = CITY_TIME_ZONE): string {
+export function cityDate(timeZone: string, days = 0, now: Date = new Date()): string {
   return addDays(cityNow(timeZone, now).date, days);
 }
 

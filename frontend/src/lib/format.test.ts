@@ -317,10 +317,10 @@ describe("weather", () => {
 
   it("counts days from the city's today, not the browser's", () => {
     const newYearsEve = new Date(Date.UTC(2026, 11, 31, 23, 30)); // 23:30 in Lisbon
-    expect(cityDate(0, newYearsEve)).toBe("2026-12-31");
-    expect(cityDate(1, newYearsEve)).toBe("2027-01-01");
-    // Already the 1st in Kyiv, still the 31st in Lisbon.
-    expect(cityDate(0, newYearsEve, "Europe/Kyiv")).toBe("2027-01-01");
+    expect(cityDate("Europe/Lisbon", 0, newYearsEve)).toBe("2026-12-31");
+    expect(cityDate("Europe/Lisbon", 1, newYearsEve)).toBe("2027-01-01");
+    // Already the 1st in Berlin, still the 31st in Lisbon.
+    expect(cityDate("Europe/Berlin", 0, newYearsEve)).toBe("2027-01-01");
   });
 
   it("counts the dates of a trip's days", () => {

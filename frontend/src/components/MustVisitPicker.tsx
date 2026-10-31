@@ -5,11 +5,14 @@ import { useId } from "react";
 import PlaceSearch from "@/components/PlaceSearch";
 import { Label } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { placeSearchHint } from "@/lib/cities";
 import type { PlaceRef } from "@/lib/types";
 
 export const MAX_MUST_VISIT = 10;
 
 export interface MustVisitPickerProps {
+  /** The trip's city, a slug; null while it is not known (the search waits for it). */
+  city: string | null;
   value: PlaceRef[];
   onChange: (places: PlaceRef[]) => void;
   disabled?: boolean;
@@ -44,7 +47,7 @@ export function PlaceChip({
 }
 
 /** Search box for places that must be in the plan; picked places show as removable chips. */
-export default function MustVisitPicker({ value, onChange, disabled }: MustVisitPickerProps) {
+export default function MustVisitPicker({ city, value, onChange, disabled }: MustVisitPickerProps) {
   const inputId = useId();
   const picked = new Set(value.map((p) => p.place_id));
   const full = value.length >= MAX_MUST_VISIT;
@@ -71,9 +74,10 @@ export default function MustVisitPicker({ value, onChange, disabled }: MustVisit
 
       <PlaceSearch
         inputId={inputId}
+        city={city ?? ""}
         exclude={picked}
-        disabled={disabled || full}
-        placeholder={full ? `Up to ${MAX_MUST_VISIT} places` : "Search, e.g. Jerónimos or castelo"}
+        disabled={disabled || full || city === null}
+        placeholder={full ? `Up to ${MAX_MUST_VISIT} places` : placeSearchHint(city)}
         onPick={(place) => onChange([...value, { place_id: place.id, name: place.name }])}
       />
     </div>

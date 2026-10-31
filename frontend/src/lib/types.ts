@@ -26,8 +26,22 @@ export interface DayHours {
   end: string;
 }
 
+/** A city plans can be made for (GET /cities). */
+export interface City {
+  /** `city` in POST /plan and GET /places. */
+  slug: string;
+  name: string;
+  /** IANA time zone: trip dates and hours are the city's. */
+  timezone: string;
+  /** Where its places are: west, south, east, north. */
+  bbox: [number, number, number, number];
+}
+
 export interface PlanRequest {
   text: string;
+  /** A slug from GET /cities; a text that names another city is refused (422). Unset: the
+   * city the text names. */
+  city?: string | null;
   start?: StartPoint | null;
   /** Place ids from GET /places. */
   must_visit?: number[];

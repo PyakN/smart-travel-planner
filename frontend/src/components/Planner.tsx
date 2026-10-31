@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { useAuth } from "@/components/AuthProvider";
+import { useCities } from "@/components/CitiesProvider";
 import PlanForm from "@/components/PlanForm";
 import PlanResult from "@/components/PlanResult";
 import ProofCard from "@/components/ProofCard";
@@ -27,9 +28,26 @@ import {
   unmarkVisited,
   updateTrip,
 } from "@/lib/api";
-import { DEFAULT_DAY_END, DEFAULT_DAY_START, cityDate, cityNow, startingNow } from "@/lib/format";
+import {
+  browserTimeZone,
+  cityName,
+  conflictingCity,
+  findCity,
+  pickCity,
+  storeCity,
+  storedCity,
+} from "@/lib/cities";
+import {
+  DEFAULT_DAY_END,
+  DEFAULT_DAY_START,
+  addDays,
+  cityDate,
+  cityNow,
+  startingNow,
+} from "@/lib/format";
 import { authHref } from "@/lib/navigation";
 import type {
+  City,
   DayEditRequest,
   DayHours,
   PlaceRef,
@@ -75,9 +93,27 @@ function describeTripError(error: unknown): string {
   return describe(error);
 }
 
-/** A saved plan's first day, unless it is past: then tomorrow, for planning it again. */
-function upcoming(startDate: string | null): string {
-  return startDate && startDate >= cityDate(0) ? startDate : cityDate(1);
+/** A saved plan's first day, unless it is past in its city: then tomorrow, to plan it again. */
+function upcoming(startDate: string | null, timeZone: string): string {
+  return startDate && startDate >= cityDate(timeZone) ? startDate : cityDate(timeZone, 1);
+}
+
+/** What changing the city cleared, to put back with Undo. */
+interface CitySwitch {
+  from: City;
+  start: StartPoint | null;
+  mustVisit: PlaceRef[];
+}
+
+/** "your start point and 2 must-visit places". */
+function clearedPlaces({ start, mustVisit }: CitySwitch): string {
+  const places = mustVisit.length === 1 ? "place" : "places";
+  return [
+    start && "your start point",
+    mustVisit.length > 0 && `${mustVisit.length} must-visit ${places}`,
+  ]
+    .filter(Boolean)
+    .join(" and ");
 }
 
 /** A plan or trip id from the URL. */
@@ -89,7 +125,13 @@ export default function Planner() {
   const params = useSearchParams();
   const router = useRouter();
   const { user } = useAuth();
+  const { cities, failed: citiesFailed, retry: retryCities } = useCities();
   const [plan, setPlan] = useState<PlanResponse | null>(null);
+  // The city the traveller chose (or the one of the plan opened); null: not chosen yet.
+  const [chosenCity, setChosenCity] = useState<string | null>(null);
+  // The city chosen on this device last time.
+  const [rememberedCity] = useState(storedCity);
+  const [citySwitch, setCitySwitch] = useState<CitySwitch | null>(null);
   const [opened, setOpened] = useState<OpenedTrip | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   // With a plan on screen the request folds into one line; "Change" opens it again.
@@ -99,7 +141,7 @@ export default function Planner() {
   const [start, setStart] = useState<StartPoint | null>(null);
   const [mustVisit, setMustVisit] = useState<PlaceRef[]>([]);
   const [modes, setModes] = useState<TravelMode[]>(["walk", "transit"]);
-  const [startDate, setStartDate] = useState(() => cityDate(1));
+  const [startDate, setStartDate] = useState(() => cityDate(browserTimeZone(), 1));
   const [weatherAware, setWeatherAware] = useState(false);
   // The start the traveller picked; null for the default: 09:30, or now for a trip today.
   const [pickedStart, setPickedStart] = useState<string | null>(null);
@@ -158,14 +200,25 @@ export default function Planner() {
     (trip && searchDay ? defaultSearchPoint(searchDay, trip.visits, shown?.start ?? null) : null);
   const pickingNow = picking === (searching ? "venues" : "start");
 
+  // The city to plan for: the one chosen, the link's (?city=), the last one on this device,
+  // or the first the backend lists. Dates and hours are in its time zone.
+  const city = cities ? pickCity(cities, [chosenCity, params.get("city"), rememberedCity]) : null;
+  const timeZone = city?.timezone ?? browserTimeZone();
+  // The plan on screen has its own city, which the map, its clock and its searches follow.
+  const planCity = shown ? findCity(cities, shown.city) : null;
+  const planTimeZone = planCity?.timezone ?? timeZone;
+  const conflict = cities ? conflictingCity(text, city, cities) : null;
+
   /** Show a saved plan, with its request in the form for planning it again. */
   const showSaved = useEffectEvent((saved: PlanResponse) => {
     setPlan(saved);
+    setChosenCity(saved.city);
+    setCitySwitch(null);
     setText(saved.request_text);
     setStart(saved.start);
     setMustVisit(saved.must_visit);
     setModes(saved.modes);
-    setStartDate(upcoming(saved.start_date));
+    setStartDate(upcoming(saved.start_date, findCity(cities, saved.city)?.timezone ?? timeZone));
     setWeatherAware(saved.weather_aware);
     setPickedStart(saved.day_start === DEFAULT_DAY_START ? null : saved.day_start);
     setLaterStart(saved.day_start);
@@ -281,7 +334,7 @@ export default function Planner() {
   }, [saveRequested, sharedId]);
 
   // A trip that starts today starts now by default; the days after it keep their own start.
-  const now = cityNow();
+  const now = cityNow(timeZone);
   const today = startDate === now.date;
   const startTime = pickedStart ?? (today ? startingNow(now.minutes) : DEFAULT_DAY_START);
   const dayHours: DayHours[] = Array.from({ length: dayCount ?? 0 }, (_, i) => ({
@@ -299,6 +352,47 @@ export default function Planner() {
     setStartDate(date);
   }
 
+  /** Plan for `next` from now on: remembered on this device, and in the link while no plan
+   * has one. Dates follow its own today. */
+  function chooseCity(next: City) {
+    setChosenCity(next.slug);
+    storeCity(next.slug);
+    if (sharedId === null && tripId === null) {
+      window.history.replaceState(null, "", `?city=${next.slug}`);
+    }
+    // A first day already past there moves to tomorrow; starting today or not changes what
+    // the start time means.
+    const cityToday = cityNow(next.timezone).date;
+    const date = startDate < cityToday ? addDays(cityToday, 1) : startDate;
+    if ((date === cityToday) !== today) {
+      setPickedStart(null);
+      setOwnHours(([first, ...rest]) => [{ ...first, start: undefined }, ...rest]);
+    }
+    setStartDate(date);
+  }
+
+  /** Switch the trip to another city. A start point and must-visit places belong to their
+   * city (the backend refuses them in another), so they are cleared, and Undo puts them back. */
+  function changeCity(slug: string) {
+    const next = findCity(cities, slug);
+    if (!next || next.slug === city?.slug) return;
+    setCitySwitch(
+      city && (start !== null || mustVisit.length > 0) ? { from: city, start, mustVisit } : null,
+    );
+    setStart(null);
+    setMustVisit([]);
+    setPicking(null);
+    chooseCity(next);
+  }
+
+  function undoCitySwitch() {
+    if (!citySwitch) return;
+    chooseCity(citySwitch.from);
+    setStart(citySwitch.start);
+    setMustVisit(citySwitch.mustVisit);
+    setCitySwitch(null);
+  }
+
   function changeDayHours(index: number, change: Partial<DayHours>) {
     setOwnHours((hours) => {
       const changed = [...hours];
@@ -310,9 +404,11 @@ export default function Planner() {
   async function submit() {
     setStatus({ kind: "loading" });
     setPicking(null);
+    setCitySwitch(null);
     try {
       const created = await createPlan({
         text: text.trim(),
+        city: city?.slug ?? null,
         start,
         must_visit: mustVisit.map((p) => p.place_id),
         modes,
@@ -470,7 +566,7 @@ export default function Planner() {
 
   // On a day under way, a place to eat is the next stop, from where the traveller is now;
   // otherwise the day takes it when it suits (restaurants and bars in the evening).
-  const liveSearch = searchDay ? dayUnderWay(searchDay, cityNow()) : false;
+  const liveSearch = searchDay ? dayUnderWay(searchDay, cityNow(planTimeZone)) : false;
 
   /** Re-plan the search's day with a venue (no AI): a draft that opens on the route. */
   async function addVenue(venue: Venue, stayMin: number) {
@@ -547,6 +643,7 @@ export default function Planner() {
       >
         <RouteMap
           plan={shown}
+          city={shown ? planCity : city}
           selectedDay={selectedDay}
           onSelectDay={setSelectedDay}
           start={start}
@@ -611,10 +708,19 @@ export default function Planner() {
           <div className="space-y-6 px-5 pt-6 pb-8 lg:px-8 lg:pt-8">
             <header className={cn("space-y-2", !formShown && "sr-only")}>
               <h1 className="font-display text-[28px] leading-[1.05] font-semibold text-balance text-ink lg:text-display">
-                Plan your Lisbon trip
+                Plan your{" "}
+                {city && (
+                  <>
+                    {/* The name changes with the city chosen: it settles in, a beat late. */}
+                    <span key={city.slug} className="inline-block animate-rise">
+                      {city.name}
+                    </span>{" "}
+                  </>
+                )}
+                trip
               </h1>
               <p className="text-body text-ink-2">
-                An AI picks the places, an optimizer plans the walk.
+                An AI picks the places, an optimizer plans the&nbsp;walk.
               </p>
             </header>
 
@@ -641,6 +747,34 @@ export default function Planner() {
                   </div>
                 )}
                 <PlanForm
+                  cities={cities}
+                  citiesFailed={citiesFailed}
+                  onRetryCities={retryCities}
+                  city={city}
+                  onCityChange={changeCity}
+                  cityNote={
+                    citySwitch &&
+                    city && (
+                      <Notice
+                        tone="neutral"
+                        icon="swap"
+                        role="status"
+                        title={`Cleared ${clearedPlaces(citySwitch)} in ${citySwitch.from.name}.`}
+                        action={
+                          <button
+                            type="button"
+                            onClick={undoCitySwitch}
+                            className="inline-flex shrink-0 items-center gap-1 font-bold text-ink underline-offset-3 hover:underline"
+                          >
+                            <Icon name="undo" size={15} />
+                            Undo
+                          </button>
+                        }
+                      />
+                    )
+                  }
+                  conflict={conflict}
+                  timeZone={timeZone}
                   text={text}
                   onTextChange={setText}
                   start={start}
@@ -679,7 +813,15 @@ export default function Planner() {
               <div className="flex items-start gap-3 rounded-panel bg-canvas py-3 pr-3 pl-4">
                 <Icon name="sparkle" size={18} className="mt-0.5 text-ink-3" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-meta font-bold text-ink-2">Your request</p>
+                  <p className="flex flex-wrap items-center gap-x-2 text-meta font-bold text-ink-2">
+                    Your request
+                    {shown && (
+                      <span className="inline-flex items-center gap-0.5 text-ink">
+                        <Icon name="pin" size={13} className="text-ink-3" />
+                        {cityName(cities, shown.city)}
+                      </span>
+                    )}
+                  </p>
                   <p className="line-clamp-2 text-small text-ink">“{text}”</p>
                 </div>
                 <Button size="sm" icon="pencil" onClick={() => setFormOpen(true)}>
@@ -699,6 +841,7 @@ export default function Planner() {
             {shown && (
               <PlanResult
                 plan={shown}
+                cityName={cityName(cities, shown.city)}
                 trip={trip}
                 draft={tripDraft !== null}
                 onSaveDraft={saveDraft}

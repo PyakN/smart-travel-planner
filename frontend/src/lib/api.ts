@@ -1,4 +1,5 @@
 import type {
+  City,
   DayEditRequest,
   LoginRequest,
   PlacePage,
@@ -80,14 +81,16 @@ export function replaceStops(
   return request<PlanResponse>(`/plans/${planId}/replace`, sendJson("POST", body), fetchImpl);
 }
 
-/** Places whose name contains `query` (accents ignored), for the must-visit picker. */
+/** The cities plans can be made for. */
+export function listCities(fetchImpl: typeof fetch = fetch) {
+  return request<City[]>("/cities", { method: "GET" }, fetchImpl);
+}
+
+/** Places in `city` whose name contains `query` (accents ignored), for the must-visit picker. */
 export function searchPlaces(
   query: string,
-  {
-    city = "lisbon",
-    limit = 8,
-    signal,
-  }: { city?: string; limit?: number; signal?: AbortSignal } = {},
+  city: string,
+  { limit = 8, signal }: { limit?: number; signal?: AbortSignal } = {},
   fetchImpl: typeof fetch = fetch,
 ) {
   const params = new URLSearchParams({ q: query, city, limit: String(limit) });

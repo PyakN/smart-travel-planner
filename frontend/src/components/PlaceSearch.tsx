@@ -15,6 +15,8 @@ const DEBOUNCE_MS = 250;
 export interface PlaceSearchProps {
   /** The input's id, for a `<label htmlFor>`. */
   inputId: string;
+  /** The city to search, a slug from GET /cities. */
+  city: string;
   onPick: (place: Place) => void;
   /** Places not to offer: picked or planned already. */
   exclude?: ReadonlySet<number>;
@@ -24,12 +26,14 @@ export interface PlaceSearchProps {
 
 interface Results {
   query: string;
+  city: string;
   items: Place[];
 }
 
 /** Search box for places by name, with a list of matches to pick from by mouse or keyboard. */
 export default function PlaceSearch({
   inputId,
+  city,
   onPick,
   exclude,
   disabled,
@@ -37,7 +41,7 @@ export default function PlaceSearch({
 }: PlaceSearchProps) {
   const listId = useId();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Results>({ query: "", items: [] });
+  const [results, setResults] = useState<Results>({ query: "", city: "", items: [] });
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -47,9 +51,9 @@ export default function PlaceSearch({
     if (trimmed.length < MIN_QUERY) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      searchPlaces(trimmed, { signal: controller.signal })
+      searchPlaces(trimmed, city, { signal: controller.signal })
         .then((page) => {
-          setResults({ query: trimmed, items: page.items });
+          setResults({ query: trimmed, city, items: page.items });
           setFailed(false);
           setActive(0);
         })
@@ -61,11 +65,11 @@ export default function PlaceSearch({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [trimmed]);
+  }, [trimmed, city]);
 
-  // Only results for what is typed now.
+  // Only results for what is typed now, in the city searched now.
   const options =
-    trimmed.length >= MIN_QUERY && results.query === trimmed
+    trimmed.length >= MIN_QUERY && results.query === trimmed && results.city === city
       ? results.items.filter((p) => !exclude?.has(p.id))
       : [];
   const showList = open && options.length > 0;

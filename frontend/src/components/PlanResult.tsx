@@ -24,6 +24,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Notice } from "@/components/ui/Notice";
 import { Roundel } from "@/components/ui/Roundel";
 import { Tag } from "@/components/ui/Tag";
+import { placeSearchHint } from "@/lib/cities";
 import {
   DEFAULT_DAY_END,
   DEFAULT_DAY_START,
@@ -68,6 +69,8 @@ const VISITED = "var(--color-go)";
 
 export interface PlanResultProps {
   plan: PlanResponse;
+  /** The plan's city, by name: "Berlin". */
+  cityName: string;
   /** The saved trip this plan is the current version (or a draft) of; null for a plan not saved. */
   trip: Trip | null;
   /** The plan is a draft of the trip: shown, but not used by the trip until it is saved. */
@@ -359,12 +362,15 @@ const MAX_ADDED = 20;
 
 /** Places to add to a day being edited: a search, and the ones picked so far. */
 function AddPlaces({
+  city,
   added,
   exclude,
   onAdd,
   onRemove,
   disabled,
 }: {
+  /** The plan's city: places to add come from it. */
+  city: string;
   added: PlaceRef[];
   exclude: ReadonlySet<number>;
   onAdd: (place: PlaceRef) => void;
@@ -390,9 +396,10 @@ function AddPlaces({
       )}
       <PlaceSearch
         inputId={inputId}
+        city={city}
         exclude={exclude}
         disabled={disabled || added.length >= MAX_ADDED}
-        placeholder="Search, e.g. Jerónimos or castelo"
+        placeholder={placeSearchHint(city)}
         onPick={(place) => onAdd({ place_id: place.id, name: place.name })}
       />
       <Hint>
@@ -773,6 +780,7 @@ function DayTabs({
 
 export default function PlanResult({
   plan,
+  cityName,
   trip,
   draft,
   onSaveDraft,
@@ -795,9 +803,8 @@ export default function PlanResult({
 }: PlanResultProps) {
   const ids = useId();
   const day = plan.days.find((d) => d.day === selectedDay) ?? plan.days[0];
-  const city = plan.city.charAt(0).toUpperCase() + plan.city.slice(1);
   const title =
-    trip?.title ?? `${plan.days.length} ${plan.days.length === 1 ? "day" : "days"} in ${city}`;
+    trip?.title ?? `${plan.days.length} ${plan.days.length === 1 ? "day" : "days"} in ${cityName}`;
   const walking = plan.days.reduce((sum, d) => sum + d.walking_m, 0);
   const visited = trip ? new Set(trip.visits.map((v) => v.place_id)) : null;
   const transitLegs = plan.days.reduce((sum, d) => sum + d.transit_legs, 0);
@@ -985,6 +992,7 @@ export default function PlanResult({
           />
           {editing && (
             <AddPlaces
+              city={plan.city}
               added={editing.add}
               exclude={new Set([...planned, ...editing.add.map((p) => p.place_id)])}
               onAdd={(place) => changeEdit({ add: [...editing.add, place] })}

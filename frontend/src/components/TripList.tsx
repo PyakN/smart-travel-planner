@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { useAuth } from "@/components/AuthProvider";
+import { useCities } from "@/components/CitiesProvider";
 import { Button, buttonClass } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { INPUT } from "@/components/ui/Field";
@@ -12,6 +13,7 @@ import { Icon } from "@/components/ui/Icon";
 import { LogoMark } from "@/components/ui/Logo";
 import { Notice } from "@/components/ui/Notice";
 import { ApiError, deleteAccount, deleteTrip, listTrips, updateTrip } from "@/lib/api";
+import { cityName } from "@/lib/cities";
 import { formatDate } from "@/lib/format";
 import { authHref } from "@/lib/navigation";
 import type { TripSummary, User } from "@/lib/types";
@@ -23,7 +25,7 @@ function describe(error: unknown): string {
 }
 
 function TripFacts({ trip }: { trip: TripSummary }) {
-  const city = trip.city.charAt(0).toUpperCase() + trip.city.slice(1);
+  const city = cityName(useCities().cities, trip.city);
   return (
     <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-2">
       <span className="inline-flex items-center gap-1.5">

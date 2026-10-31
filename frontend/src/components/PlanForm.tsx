@@ -2,14 +2,16 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 
+import CityPicker from "@/components/CityPicker";
 import MustVisitPicker from "@/components/MustVisitPicker";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { Hint, INPUT_COMPACT, SELECT } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { Notice } from "@/components/ui/Notice";
 import { Switch, ToggleChip } from "@/components/ui/Toggle";
+import { examplesFor } from "@/lib/cities";
 import {
-  CITY_NAME,
   addDays,
   cityDate,
   clockTime,
@@ -19,13 +21,7 @@ import {
   hoursHint,
 } from "@/lib/format";
 import type { IconName } from "@/lib/icons";
-import type { DayHours, PlaceRef, StartPoint, TravelMode } from "@/lib/types";
-
-const EXAMPLES = [
-  "2 days in Lisbon, first time here. Viewpoints, the castle, Belém and one great museum.",
-  "A slow day with kids: parks, the aquarium and a couple of miradouros.",
-  "One intense day of art: museums and galleries, no churches please.",
-];
+import type { City, DayHours, PlaceRef, StartPoint, TravelMode } from "@/lib/types";
 
 const LOADING_STEPS = [
   "Understanding your request…",
@@ -51,15 +47,28 @@ function modesHint(modes: TravelMode[]): string {
 // The free OpenWeatherMap forecast reaches five days ahead.
 const FORECAST_DAYS = 5;
 
-function weatherHint(weatherAware: boolean, startDate: string): string {
+function weatherHint(weatherAware: boolean, startDate: string, timeZone: string): string {
   if (!weatherAware) return "Off: the plan ignores the weather, and no forecast is\u00a0fetched.";
-  if (startDate > cityDate(FORECAST_DAYS - 1)) {
+  if (startDate > cityDate(timeZone, FORECAST_DAYS - 1)) {
     return "No forecast that far ahead yet: the plan will go without it.";
   }
   return "Rain, snow, fog and poor visibility within your hours (and only those) send outdoor stops to drier hours, or swap them for museums, churches and market halls.";
 }
 
 export interface PlanFormProps {
+  /** The supported cities; null while they load (or when they failed). */
+  cities: City[] | null;
+  citiesFailed: boolean;
+  onRetryCities: () => void;
+  /** The trip's city; null until the cities are known. */
+  city: City | null;
+  onCityChange: (slug: string) => void;
+  /** Shown under the cities: what changing the city did, with a way back. */
+  cityNote?: ReactNode;
+  /** A city the request text names that is not the chosen one: planning it would fail. */
+  conflict: City | null;
+  /** The city's IANA time zone: dates and hours are the city's. */
+  timeZone: string;
   text: string;
   onTextChange: (text: string) => void;
   start: StartPoint | null;
@@ -210,6 +219,14 @@ function EachDayHours({
 }
 
 export default function PlanForm({
+  cities,
+  citiesFailed,
+  onRetryCities,
+  city,
+  onCityChange,
+  cityNote,
+  conflict,
+  timeZone,
   text,
   onTextChange,
   start,
@@ -244,7 +261,9 @@ export default function PlanForm({
   const canSubmit = text.trim().length > 0 && !loading;
   const perDay = eachDay && dayHours.length > 1;
   const perDayHint = perDay ? eachDayHint(dayHours) : null;
-  const nowNote = nowMinutes !== null && ` It is ${clockTime(nowMinutes)} in ${CITY_NAME} now.`;
+  const nowNote =
+    nowMinutes !== null && ` It is ${clockTime(nowMinutes)} in ${city?.name ?? "the city"} now.`;
+  const examples = city ? examplesFor(city) : [];
 
   return (
     <form
@@ -255,6 +274,18 @@ export default function PlanForm({
         if (canSubmit) onSubmit();
       }}
     >
+      <div className="space-y-3">
+        <CityPicker
+          cities={cities}
+          failed={citiesFailed}
+          onRetry={onRetryCities}
+          value={city?.slug ?? null}
+          onChange={onCityChange}
+          disabled={loading}
+        />
+        {cityNote}
+      </div>
+
       <div className="space-y-3">
         <label htmlFor="trip-text" className="block text-sm font-bold text-ink">
           Describe your trip
@@ -271,7 +302,7 @@ export default function PlanForm({
             }}
             maxLength={MAX_CHARS}
             rows={4}
-            placeholder="e.g. 2 days in Lisbon with kids, we love viewpoints and old churches"
+            placeholder={`e.g. 2 days${city ? ` in ${city.name}` : ""} with kids, we love viewpoints and old churches`}
             className="block min-h-28 w-full resize-y rounded-panel bg-transparent px-4 pt-3.5 pb-1 text-base leading-relaxed text-ink placeholder:text-ink-3 focus-visible:outline-none lg:text-[16px]"
           />
           <div className="flex items-center justify-between px-4 pt-1 pb-3 text-meta text-ink-3">
@@ -282,8 +313,23 @@ export default function PlanForm({
           </div>
         </div>
 
+        {conflict && city && (
+          <Notice tone="caution" icon="pin" role="status">
+            <p>
+              Your request names {conflict.name}, but {city.name} is chosen.
+            </p>
+            <button
+              type="button"
+              onClick={() => onCityChange(conflict.slug)}
+              className="inline-flex items-center gap-1.5 font-bold text-ink underline underline-offset-3"
+            >
+              Plan in {conflict.name} instead
+            </button>
+          </Notice>
+        )}
+
         <div role="group" aria-label="Example requests" className="flex flex-wrap gap-2">
-          {EXAMPLES.map((example) => (
+          {examples.map((example) => (
             <button
               key={example}
               type="button"
@@ -344,7 +390,12 @@ export default function PlanForm({
           </SettingRow>
 
           <SettingRow icon="star">
-            <MustVisitPicker value={mustVisit} onChange={onMustVisitChange} disabled={loading} />
+            <MustVisitPicker
+              city={city?.slug ?? null}
+              value={mustVisit}
+              onChange={onMustVisitChange}
+              disabled={loading}
+            />
           </SettingRow>
 
           <SettingRow icon="walk">
@@ -386,7 +437,7 @@ export default function PlanForm({
                   <input
                     type="date"
                     value={startDate}
-                    min={cityDate(0)}
+                    min={cityDate(timeZone)}
                     required
                     disabled={loading}
                     onChange={(event) => onStartDateChange(event.target.value)}
@@ -496,7 +547,7 @@ export default function PlanForm({
             >
               Optimize route based on weather conditions
             </Switch>
-            <Hint className="mt-1.5">{weatherHint(weatherAware, startDate)}</Hint>
+            <Hint className="mt-1.5">{weatherHint(weatherAware, startDate, timeZone)}</Hint>
           </SettingRow>
         </div>
       </section>

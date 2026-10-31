@@ -10,6 +10,7 @@ import {
   getMe,
   getPlan,
   getTrip,
+  listCities,
   listTrips,
   logIn,
   logOut,
@@ -37,6 +38,21 @@ describe("createPlan", () => {
     expect(url).toBe("/api/plan");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({ text: "A day in Lisbon" });
+  });
+
+  it("sends the chosen city", async () => {
+    const fetchImpl = fakeFetch(201, { id: 8 });
+    await createPlan({ text: "A day of museums", city: "berlin" }, fetchImpl);
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ text: "A day of museums", city: "berlin" });
+  });
+
+  it("shows a city mismatch as the backend words it", async () => {
+    const detail = "Your request is for Lisbon, but Berlin is chosen.";
+    const fetchImpl = fakeFetch(422, { detail });
+    await expect(
+      createPlan({ text: "A day in Lisbon", city: "berlin" }, fetchImpl),
+    ).rejects.toEqual(new ApiError(422, detail));
   });
 
   it("surfaces the backend's message", async () => {
@@ -75,12 +91,31 @@ describe("replaceStops", () => {
   });
 });
 
-describe("searchPlaces", () => {
-  it("encodes the query", async () => {
-    const fetchImpl = fakeFetch(200, { items: [], total: 0 });
-    await searchPlaces("São Jorge & co", { limit: 5 }, fetchImpl);
+describe("listCities", () => {
+  it("reads the supported cities", async () => {
+    const berlin = {
+      slug: "berlin",
+      name: "Berlin",
+      timezone: "Europe/Berlin",
+      bbox: [13.0883, 52.3382, 13.7612, 52.6756],
+    };
+    const fetchImpl = fakeFetch(200, [berlin]);
+    await expect(listCities(fetchImpl)).resolves.toEqual([berlin]);
     const [url] = fetchImpl.mock.calls[0] as unknown as [string];
-    expect(url).toBe("/api/places?q=S%C3%A3o+Jorge+%26+co&city=lisbon&limit=5");
+    expect(url).toBe("/api/cities");
+  });
+});
+
+describe("searchPlaces", () => {
+  it("encodes the query and searches the given city", async () => {
+    const fetchImpl = fakeFetch(200, { items: [], total: 0 });
+    await searchPlaces("São Jorge & co", "lisbon", { limit: 5 }, fetchImpl);
+    await searchPlaces("Tor", "berlin", {}, fetchImpl);
+    const urls = (fetchImpl.mock.calls as unknown as [string][]).map(([url]) => url);
+    expect(urls).toEqual([
+      "/api/places?q=S%C3%A3o+Jorge+%26+co&city=lisbon&limit=5",
+      "/api/places?q=Tor&city=berlin&limit=8",
+    ]);
   });
 });
 
