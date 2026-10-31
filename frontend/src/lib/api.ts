@@ -31,8 +31,7 @@ export class ApiError extends Error {
 
 const FALLBACK_MESSAGES: Record<number, string> = {
   404: "This plan does not exist.",
-  429: "Planning capacity for today is used up. Try again tomorrow.",
-  502: "The AI planner failed. Try again.",
+  429: "Too many requests to the AI planner. Try again in a minute.",
   503: "The AI planner is temporarily unavailable. Try again shortly.",
   504: "Planning took too long. Try a shorter trip.",
 };

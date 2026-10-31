@@ -291,6 +291,11 @@ export interface PlanResponse {
   day_hours: DayHours[];
   /** The number of days asked for; null: the text's. */
   day_count: number | null;
+  /**
+   * Made without the AI, which was unavailable: the request read by rules and the
+   * best-ranked places chosen, without notes. The rationale says so.
+   */
+  ai_fallback: boolean;
 }
 
 /** The logged-in user (GET /auth/me). */
