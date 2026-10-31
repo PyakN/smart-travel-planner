@@ -70,8 +70,52 @@ class ResponseCache:
             self._items.popitem(last=False)
 
 
+class CircuitBreaker:
+    """Stops calling an LLM that keeps failing. After `threshold` calls in a row that gave
+    up (every retry of every model failed), calls fail at once for `cooldown_s`: during an
+    outage, requests get their answer without waiting out the retries. Then calls go
+    through again; a success closes the circuit, the next failure opens it again."""
+
+    def __init__(
+        self,
+        threshold: int = 3,
+        cooldown_s: float = 60.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.threshold = threshold
+        self.cooldown_s = cooldown_s
+        self.clock = clock
+        self.failures = 0
+        self._opened_at: float | None = None
+
+    @property
+    def is_open(self) -> bool:
+        return self._opened_at is not None and self.clock() < self._opened_at + self.cooldown_s
+
+    def check(self) -> None:
+        if self.is_open:
+            raise LLMUnavailableError("the LLM failed repeatedly: not calling it for a while")
+
+    def failed(self) -> None:
+        self.failures += 1
+        if self.failures >= self.threshold:
+            logger.error(
+                "LLM failed %d times in a row: not calling it for %.0f s",
+                self.failures,
+                self.cooldown_s,
+            )
+            self._opened_at = self.clock()
+
+    def succeeded(self) -> None:
+        if self._opened_at is not None:
+            logger.info("LLM answers again")
+        self.failures = 0
+        self._opened_at = None
+
+
 class LLMService:
-    """Provider-agnostic structured generation with retries, fallback, timeout, cache, budget."""
+    """Provider-agnostic structured generation with retries, fallback, timeout, cache, budget
+    and a circuit breaker. One call takes at most `deadline_s`, retries included."""
 
     def __init__(
         self,
@@ -80,19 +124,23 @@ class LLMService:
         model: str,
         fallback_model: str | None = None,
         timeout_s: float = 30.0,
+        deadline_s: float = 40.0,
         max_retries: int = 2,
         max_output_tokens: int = 2048,
         budget: TokenBudget | None = None,
         cache: ResponseCache | None = None,
+        circuit: CircuitBreaker | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.provider = provider
         self.models = [model] + ([fallback_model] if fallback_model else [])
         self.timeout_s = timeout_s
+        self.deadline_s = deadline_s
         self.max_retries = max_retries
         self.max_output_tokens = max_output_tokens
         self.budget = budget or TokenBudget(daily_limit=1_000_000)
         self.cache = cache or ResponseCache(max_size=0)
+        self.circuit = circuit or CircuitBreaker()
         self._sleep = sleep
 
     async def generate[T: BaseModel](self, *, system: str, prompt: str, schema: type[T]) -> T:
@@ -101,40 +149,49 @@ class LLMService:
             logger.info("LLM answer from the cache", extra={"schema": schema.__name__})
             return schema.model_validate(cached)
 
+        self.circuit.check()
         self.budget.check()
+        clock = asyncio.get_running_loop().time
+        deadline = clock() + self.deadline_s
         last_error: Exception | None = None
-        for model in self.models:
-            for attempt in range(self.max_retries + 1):
-                started = time.perf_counter()
-                try:
-                    response = await asyncio.wait_for(
-                        self.provider.generate(
-                            model=model,
-                            system=system,
-                            prompt=prompt,
-                            schema=schema,
-                            max_output_tokens=self.max_output_tokens,
-                        ),
-                        timeout=self.timeout_s,
-                    )
-                except (TransientLLMError, TimeoutError) as exc:
-                    last_error = exc
-                    logger.warning("LLM %s attempt %d failed: %r", model, attempt + 1, exc)
-                    if attempt < self.max_retries:
-                        await self._sleep(2**attempt)
-                    continue
-                self.budget.record(response.input_tokens + response.output_tokens)
-                logger.info(
-                    "LLM answered",
-                    extra={
-                        "schema": schema.__name__,
-                        "model": model,
-                        "attempt": attempt + 1,
-                        "input_tokens": response.input_tokens,
-                        "output_tokens": response.output_tokens,
-                        "duration_ms": round((time.perf_counter() - started) * 1000),
-                    },
+        attempts = [(m, a) for m in self.models for a in range(self.max_retries + 1)]
+        for model, attempt in attempts:
+            if (left := deadline - clock()) <= 0:
+                break
+            started = time.perf_counter()
+            try:
+                response = await asyncio.wait_for(
+                    self.provider.generate(
+                        model=model,
+                        system=system,
+                        prompt=prompt,
+                        schema=schema,
+                        max_output_tokens=self.max_output_tokens,
+                    ),
+                    timeout=min(self.timeout_s, left),
                 )
-                self.cache.put(key, response.parsed.model_dump(mode="json"))
-                return response.parsed
+            except (TransientLLMError, TimeoutError) as exc:
+                last_error = exc
+                logger.warning("LLM %s attempt %d failed: %r", model, attempt + 1, exc)
+                if attempt < self.max_retries:
+                    if clock() + 2**attempt >= deadline:  # no time left to try again
+                        break
+                    await self._sleep(2**attempt)
+                continue
+            self.circuit.succeeded()
+            self.budget.record(response.input_tokens + response.output_tokens)
+            logger.info(
+                "LLM answered",
+                extra={
+                    "schema": schema.__name__,
+                    "model": model,
+                    "attempt": attempt + 1,
+                    "input_tokens": response.input_tokens,
+                    "output_tokens": response.output_tokens,
+                    "duration_ms": round((time.perf_counter() - started) * 1000),
+                },
+            )
+            self.cache.put(key, response.parsed.model_dump(mode="json"))
+            return response.parsed
+        self.circuit.failed()
         raise LLMUnavailableError(f"LLM failed after retries on {self.models}") from last_error

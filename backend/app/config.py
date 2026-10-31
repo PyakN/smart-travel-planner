@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     llm_fallback_model: str | None = None
     llm_timeout_s: float = 30.0
     llm_max_retries: int = 2
+    # One LLM call, retries included, ends by then: a plan makes two, within plan_timeout_s.
+    llm_deadline_s: float = 40.0
+    # After this many calls in a row that failed, the LLM is not called for the cooldown.
+    llm_circuit_failures: int = 3
+    llm_circuit_cooldown_s: float = 60.0
     # Room for a short note per place: a 7-day intense trip has 56 of them.
     llm_max_output_tokens: int = 4096
     llm_daily_token_budget: int = 1_000_000

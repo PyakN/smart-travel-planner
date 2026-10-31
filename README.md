@@ -67,7 +67,7 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 
 | Endpoint | Description |
 |---|---|
-| `GET /health` | Service and database status |
+| `GET /health` | Service, database and LLM status (`llm`: `ok`, `unavailable` while it is [not called after failures](#when-the-llm-is-down), or `not_configured`) |
 | `GET /cities` | Supported cities: `slug`, `name`, `timezone` (IANA) and `bbox` (west, south, east, north) |
 | `GET /places` | Search: `q` (name contains, accents ignored), `city`, `category` (repeatable), `bbox=west,south,east,north`, or `lat`+`lon`+`radius_m` (sorted by distance); `limit` / `offset` |
 | `GET /places/{id}` | One place |
@@ -302,6 +302,13 @@ The endpoints that call the LLM (`POST /plan`, `POST /plans/{id}/replace`, `POST
 - **Nothing to steer:** the LLM only fills in a schema, a parsed request or a list of ids from the candidates with a short note each (validated by Pydantic, unknown ids dropped), so it cannot be used as a general chatbot, and a request that tries to instruct it can at most change which candidates it picks and how the notes read.
 
 Behind a proxy, the client's address comes from `X-Forwarded-For`, which uvicorn trusts only from `--forwarded-allow-ips` (127.0.0.1 by default: the Next.js proxy on the same host). Next.js passes on a header the browser sent, so in production the edge in front of it must set the header itself; the token budget holds either way.
+
+### When the LLM is down
+
+- **Retries, then a fallback model:** a failed call (rate limit, server error, malformed answer, timeout) is retried with backoff (`LLM_MAX_RETRIES`), then tried on `LLM_FALLBACK_MODEL` if set.
+- **A deadline:** one call ends within `LLM_DEADLINE_S` (40 s), retries included; a plan makes two calls and has 90 s.
+- **A circuit breaker:** after 3 calls in a row that failed (`LLM_CIRCUIT_FAILURES`), the LLM is not called for 60 s (`LLM_CIRCUIT_COOLDOWN_S`): requests fail at once instead of waiting out the retries. Then calls go through again, and the first success closes it. `GET /health` says `"llm": "unavailable"` meanwhile.
+- **A clear message:** 503 "The AI planner is temporarily unavailable. Try again shortly."
 
 ## Everyday commands
 
