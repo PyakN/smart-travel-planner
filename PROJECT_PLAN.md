@@ -190,7 +190,7 @@ A traveller saves a trip, ticks off places during the day and changes the rest o
 - [x] Structured logs, request id: one handler for every log line (JSON with `LOG_FORMAT=json`); each request gets an id (the caller's `X-Request-ID` when plain, else a new one) that every line it logs carries and its response returns, and one line once answered (status, duration, client). LLM answers and new plans are logged with their numbers (tokens, timings)
 - [x] Rate limiting and protection against LLM abuse: the endpoints that call the LLM allow each client (address) 5 requests a minute and 100 a day, then 429 with `Retry-After`; on top of the daily token budget, the response cache, the request size caps and output limited to a schema of candidate ids
 - [x] Handling LLM outages (fallback / clear message): one LLM call ends within 40 s, retries included, and after 3 failed calls in a row a circuit breaker skips the LLM for 60 s (`GET /health` says so). When it fails (down, budget used up, refusing), plans are still made: rules read the request (city, days, interests and what to avoid, pace, names) and the best-ranked candidates are chosen; the plan says so (`ai_fallback` and its rationale, a notice in the frontend), and replacements take the best-ranked places that fit
-- [ ] Check that no secrets are in the repository
+- [x] Check that no secrets are in the repository: gitleaks found nothing in the 167 commits of every branch, the only env files ever committed are the `.env.example` files, and no provider key pattern is in the history; CI's `secrets` job now scans the whole history on every push (pre-commit only scans what is committed)
 
 ## Phase 8. Deployment
 - [ ] Dockerfiles for backend and frontend

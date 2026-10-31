@@ -19,6 +19,21 @@ jobs:
           # Need node_modules; the frontend job runs the same checks.
           SKIP: frontend-eslint,frontend-prettier
 
+  # The pre-commit hook scans what is committed; this scans every commit there is.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      # The version .pre-commit-config.yaml pins.
+      - run: go install github.com/zricethezav/gitleaks/v8@v8.21.2
+      - run: gitleaks git --redact --verbose
+
   test:
     runs-on: ubuntu-latest
     defaults:

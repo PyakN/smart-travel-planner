@@ -337,4 +337,11 @@ The end-to-end tests run the real frontend and API on a database of their own, w
 
 ## Secrets
 
-Never commit `.env`. Only `.env.example` lives in git. A pre-commit hook blocks `.env` files, and gitleaks scans for hardcoded secrets.
+Never commit `.env`. Only `.env.example` lives in git.
+
+- **Every commit:** pre-commit runs gitleaks on what is being committed, blocks `.env` files and private keys.
+- **Every push and pull request:** CI's `secrets` job runs gitleaks over the whole history, every branch included. To run it locally: `gitleaks git --redact -v` (the binary pre-commit built is in `~/.cache/pre-commit/*/golangenv-default/bin/`).
+- **At run time:** keys come from the environment only, as `SecretStr` (hidden in reprs and errors); the keys HERE and OpenWeatherMap take in the query string are masked in logged URLs (`app/http_logging.py`), and request logs carry the path only.
+- **Checked on 2026-10-31:** gitleaks found nothing in the 167 commits of every branch; the only env files ever committed are the two `.env.example`; no Google, OpenAI, HERE or OpenWeatherMap key pattern appears anywhere in the history, and the test fixtures hold no keys.
+
+If a secret lands in a commit anyway, treat it as compromised: rotate the key first, then clean the history.
