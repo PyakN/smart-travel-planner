@@ -45,6 +45,9 @@ SEED_PLACES: list[tuple[int, str, str, str, float, float, str | None, dict[str, 
     ),
     (5, "lisbon", "Museu Calouste Gulbenkian", "museum", 38.7372, -9.1545, None, {}),
     (6, "porto", "Museu de Serralves", "museum", 41.1597, -8.6598, None, {}),
+    # One sight mapped in two pieces that both link it, as OSM does with bridges and walls.
+    (7, "porto", "Ponte Luís I", "landmark", 41.1399, -8.6094, "Q900201", {}),
+    (8, "porto", "Ponte Luís I, upper deck", "landmark", 41.1402, -8.6092, "Q900201", {}),
     # A compact fictional town with plenty of places, for tests that need spare candidates
     # (replacing stops). Its city is registered in CITIES only by the tests that use it.
     (101, "testville", "Testville Cathedral", "religious", 45.0000, 7.0000, "Q900001", {}),
@@ -154,6 +157,18 @@ SEED_PLACES: list[tuple[int, str, str, str, float, float, str | None, dict[str, 
     ),
     (123, "testville", "Far Café", "cafe", 45.0300, 7.0060, None, {"amenity": "cafe"}),
 ]
+# Fame: Wikipedia languages per Wikidata item (normally from app.ingest.enrich); the real
+# counts for Lisbon. Places without an item have none.
+SEED_FAME: dict[str, int] = {
+    "Q1130427": 31,  # Praça do Comércio
+    "Q753226": 30,  # Castelo de São Jorge
+    "Q213402": 56,  # Torre de Belém
+    "Q900201": 20,
+    "Q900001": 9,
+    "Q900002": 9,
+    "Q900004": 9,
+    "Q900013": 9,
+}
 # Stop-card details (normally from OSM tags and app.ingest.enrich), by place name.
 SEED_DETAILS: dict[str, dict[str, str]] = {
     "Castelo de São Jorge": {
@@ -185,6 +200,7 @@ async def _seed() -> None:
                     geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
                     tags={"name": name, **extra_tags},
                     wikidata=wikidata,
+                    wikipedia_languages=SEED_FAME.get(wikidata or "", 0),
                     # As app.ingest has them: from the tags.
                     **{k: extra_tags.get(k) for k in ("opening_hours", "website")}
                     | SEED_DETAILS.get(name, {}),

@@ -1,5 +1,7 @@
 """Choosing places for the days' hours: how many go before and after 20:00, and in daylight."""
 
+from dataclasses import replace
+
 from app.catalog import VisitHours
 from app.optimizer.planner import DayWindow
 from app.repositories.candidates import Candidate
@@ -163,6 +165,8 @@ def test_rain_swaps_keep_the_time_of_day() -> None:
 def test_pools_merge_into_one_ranking() -> None:
     a, b, c = place(1, "day", score=3.0), place(2, "night", score=5.0), place(3, "any", score=1.0)
     assert ids(merge_ranked([a, c], [b, a])) == [2, 1, 3]
+    # A place in several pools is as the first has it: the main pool knows the famous ones.
+    assert merge_ranked([replace(a, famous=True)], [a])[0].famous
 
 
 def test_food_and_drink_requests_get_a_note() -> None:

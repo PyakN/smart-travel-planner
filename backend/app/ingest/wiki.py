@@ -1,9 +1,10 @@
-"""Photos and short descriptions for places: Wikidata, Wikimedia Commons, English Wikipedia.
+"""Photos, short descriptions and fame for places: Wikidata, Wikimedia Commons, Wikipedia.
 
 A place links to Wikidata through its OSM `wikidata` tag. Wikidata gives the main image
-(P18, a Commons file), a one-line English description and the English Wikipedia article;
-Commons gives a thumbnail with its author and licence; Wikipedia gives the article intro.
-OSM `wikimedia_commons` / `image` / `wikipedia` tags fill in when Wikidata has nothing.
+(P18, a Commons file), a one-line English description, the English Wikipedia article and
+how many Wikipedia languages have an article about it (its fame); Commons gives a thumbnail
+with its author and licence; Wikipedia gives the article intro. OSM `wikimedia_commons` /
+`image` / `wikipedia` tags fill in when Wikidata has nothing.
 """
 
 import asyncio
@@ -41,6 +42,7 @@ class WikidataInfo:
     image: str | None  # Commons file name without "File:", e.g. "Teatro da Trindade 2017.jpg"
     description: str | None  # Wikidata's one-line English description
     article: str | None  # English Wikipedia title
+    wikipedias: int  # Wikipedia languages with an article about it
 
 
 @dataclass(frozen=True)
@@ -84,12 +86,20 @@ def _file_name(title: str) -> str:
 
 
 def sparql_query(qids: Sequence[str]) -> str:
+    """The Wikipedias are counted in a subquery, so several images or descriptions of an
+    item do not multiply its count."""
     values = " ".join(f"wd:{q}" for q in qids if QID.match(q))
-    return f"""SELECT ?item ?image ?description ?article WHERE {{
+    return f"""SELECT ?item ?image ?description ?article ?wikipedias WHERE {{
   VALUES ?item {{ {values} }}
   OPTIONAL {{ ?item wdt:P18 ?image }}
   OPTIONAL {{ ?item schema:description ?description FILTER(LANG(?description) = "en") }}
   OPTIONAL {{ ?article schema:about ?item ; schema:isPartOf <https://en.wikipedia.org/> }}
+  OPTIONAL {{
+    SELECT ?item (COUNT(?page) AS ?wikipedias) WHERE {{
+      VALUES ?item {{ {values} }}
+      ?page schema:about ?item ; schema:isPartOf/wikibase:wikiGroup "wikipedia" .
+    }} GROUP BY ?item
+  }}
 }}"""
 
 
@@ -99,7 +109,7 @@ def parse_sparql(payload: Mapping[str, Any]) -> dict[str, WikidataInfo]:
     for binding in payload["results"]["bindings"]:
         qid = binding["item"]["value"].rsplit("/", 1)[-1]
         fields = found.setdefault(qid, {})
-        for key in ("image", "description", "article"):
+        for key in ("image", "description", "article", "wikipedias"):
             if key in binding and key not in fields:
                 fields[key] = binding[key]["value"]
     return {
@@ -107,6 +117,7 @@ def parse_sparql(payload: Mapping[str, Any]) -> dict[str, WikidataInfo]:
             image=_file_name(unquote(f["image"].rsplit("/", 1)[-1])) if "image" in f else None,
             description=f.get("description"),
             article=unquote(f["article"].rsplit("/", 1)[-1]) if "article" in f else None,
+            wikipedias=int(f.get("wikipedias", 0)),  # unbound: in no Wikipedia
         )
         for qid, f in found.items()
     }
@@ -283,6 +294,13 @@ def article_title(tags: Mapping[str, str], info: WikidataInfo | None) -> str | N
         return _title(info.article)
     wikipedia = tags.get("wikipedia", "")
     return _title(wikipedia[3:]) if wikipedia.startswith("en:") else None
+
+
+def wikipedia_languages(tags: Mapping[str, str], info: WikidataInfo | None) -> int:
+    """How many Wikipedias cover a place: Wikidata's count, else 1 for an OSM `wikipedia`
+    tag (a few places link an article but no Wikidata item)."""
+    count = info.wikipedias if info else 0
+    return max(count, 1) if tags.get("wikipedia") else count
 
 
 def description(

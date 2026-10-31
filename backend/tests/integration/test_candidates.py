@@ -1,4 +1,5 @@
 import asyncio
+import math
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from typing import Any
@@ -10,7 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.catalog import CATEGORY_SLUGS
 from app.db.models import Category
 from app.optimizer.geometry import LatLon
-from app.repositories.candidates import Candidate, find_candidates, get_candidates
+from app.repositories.candidates import (
+    FAME_FULL_LANGUAGES,
+    WEIGHT_FAME,
+    WEIGHT_KEYWORD,
+    Candidate,
+    find_candidates,
+    get_candidates,
+)
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
@@ -35,10 +43,14 @@ def test_catalog_matches_seeded_categories(db_session: SessionFactory) -> None:
     assert tuple(asyncio.run(run())) == CATEGORY_SLUGS
 
 
-def test_notable_places_rank_first(db_session: SessionFactory) -> None:
+def test_famous_places_rank_first(db_session: SessionFactory) -> None:
     found = candidates(db_session)
-    assert names(found)[0] == "Torre de Belém"  # wikidata + wikipedia
-    assert names(found)[-1] in {"Miradouro de Santa Luzia", "Museu Calouste Gulbenkian"}
+    assert names(found)[:3] == [
+        "Torre de Belém",  # in 56 Wikipedias
+        "Praça do Comércio",  # 31
+        "Castelo de São Jorge",  # 30
+    ]
+    assert set(names(found)[3:]) == {"Miradouro de Santa Luzia", "Museu Calouste Gulbenkian"}
     assert "Museu de Serralves" not in names(found)  # Porto
 
 
@@ -50,11 +62,16 @@ def test_candidates_say_whether_they_are_outdoors(db_session: SessionFactory) ->
 
 
 def test_interest_boost(db_session: SessionFactory) -> None:
-    assert names(candidates(db_session, interests=["viewpoint"]))[:2] == [
-        "Torre de Belém",
+    # Of places as famous (in no Wikipedia), those of the traveller's interests come first;
+    # Lisbon's famous sights still come before both.
+    assert names(candidates(db_session, interests=["viewpoint"]))[3:] == [
+        "Miradouro de Santa Luzia",
+        "Museu Calouste Gulbenkian",
+    ]
+    assert names(candidates(db_session, interests=["museum"]))[3:] == [
+        "Museu Calouste Gulbenkian",
         "Miradouro de Santa Luzia",
     ]
-    assert names(candidates(db_session, interests=["museum"]))[1] == "Museu Calouste Gulbenkian"
 
 
 def test_keyword_is_accent_insensitive_and_matches_english_name(
@@ -62,7 +79,7 @@ def test_keyword_is_accent_insensitive_and_matches_english_name(
 ) -> None:
     for keyword in ("belem", "BELEM TOWER", "Castelo de Sao Jorge"):
         top = candidates(db_session, keywords=[keyword])[0]
-        assert top.score >= 4, keyword
+        assert top.score >= WEIGHT_KEYWORD, keyword
     assert candidates(db_session, keywords=["sao jorge"])[0].name == "Castelo de São Jorge"
 
 
@@ -74,7 +91,7 @@ def test_avoid_excludes_category_unless_named(db_session: SessionFactory) -> Non
 
 
 def test_like_wildcards_in_keywords_are_literal(db_session: SessionFactory) -> None:
-    assert all(c.score < 4 for c in candidates(db_session, keywords=["%", "_"]))
+    assert all(c.score < WEIGHT_KEYWORD for c in candidates(db_session, keywords=["%", "_"]))
 
 
 def test_hint_uses_english_name(db_session: SessionFactory) -> None:
@@ -95,25 +112,54 @@ PRACA = LatLon(38.7075, -9.1364)
 
 
 def test_places_near_an_anchor_rank_first(db_session: SessionFactory) -> None:
-    # Without anchors: Torre de Belém (Wikidata + Wikipedia), then the other notable places.
+    # Without anchors: Torre de Belém (the most famous), then Praça and the castle.
     found = candidates(db_session, anchors=[PRACA], proximity_radius_m=2500)
     assert names(found) == [
         "Praça do Comércio",  # at the anchor
         "Castelo de São Jorge",  # 0.8 km
-        "Torre de Belém",  # 7 km: no boost, still the most notable
-        "Miradouro de Santa Luzia",  # 0.7 km, not notable
+        "Torre de Belém",  # 7 km: no boost, still the most famous
+        "Miradouro de Santa Luzia",  # 0.7 km, in no Wikipedia
         "Museu Calouste Gulbenkian",  # 3.5 km: no boost
     ]
     assert found[0].distance_m == pytest.approx(0, abs=0.01)
-    assert found[2].score == 3.0  # notability only
+    fame = WEIGHT_FAME * math.log1p(56) / math.log1p(FAME_FULL_LANGUAGES)
+    assert found[2].score == pytest.approx(fame)  # fame only
     assert all(c.distance_m is None for c in candidates(db_session))
 
     # A nearby match for the traveller's interests beats a famous place far away.
     viewpoints = candidates(db_session, anchors=[PRACA], interests=["viewpoint"])
-    assert names(viewpoints)[:3] == [
+    assert names(viewpoints)[:4] == [
         "Praça do Comércio",
-        "Miradouro de Santa Luzia",
         "Castelo de São Jorge",
+        "Miradouro de Santa Luzia",
+        "Torre de Belém",
+    ]
+
+
+def test_one_place_per_wikidata_item(db_session: SessionFactory) -> None:
+    def porto(**kwargs: Any) -> list[str]:
+        async def run() -> list[Candidate]:
+            async with db_session() as session:
+                return await find_candidates(session, city="porto", **kwargs)
+
+        return names(asyncio.run(run()))
+
+    # The bridge's two pieces share its fame; the best ranked of them stands for it.
+    assert porto() == ["Ponte Luís I", "Museu de Serralves"]
+    assert porto(keywords=["upper deck"]) == ["Ponte Luís I, upper deck", "Museu de Serralves"]
+
+
+def test_famous_places_join_however_they_rank(db_session: SessionFactory) -> None:
+    luzia = {"keywords": ["luzia"], "limit": 1}
+    assert names(candidates(db_session, **luzia)) == ["Miradouro de Santa Luzia"]
+    found = candidates(db_session, **luzia, famous=2)
+    assert names(found) == ["Miradouro de Santa Luzia", "Torre de Belém", "Praça do Comércio"]
+    assert [c.famous for c in found] == [False, True, True]
+    assert [c.wikipedia_languages for c in found] == [0, 56, 31]
+    # Never an avoided one: the most famous of the rest.
+    assert names(candidates(db_session, **luzia, famous=2, avoid=["landmark"])) == [
+        "Miradouro de Santa Luzia",
+        "Museu Calouste Gulbenkian",
     ]
 
 
