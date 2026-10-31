@@ -326,7 +326,14 @@ pytest                             # all tests (integration tests need Docker)
 pytest -m "not integration"        # unit tests only
 
 pre-commit run --all-files         # run every hook manually
+
+cd frontend
+npm test                           # unit tests (vitest)
+npx playwright install chromium    # once
+npm run test:e2e                   # end-to-end tests in a browser (needs the database)
 ```
+
+The end-to-end tests run the real frontend and API on a database of their own, with a scripted LLM: see [frontend/README.md](frontend/README.md#end-to-end-tests).
 
 ## Secrets
 
