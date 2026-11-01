@@ -8,10 +8,14 @@ services:
     plan: free
     # Next to the Neon database (aws eu-central-1). Cannot be changed later.
     region: frankfurt
-    # Changes outside backend/ do not redeploy the API.
-    rootDir: backend
+    # From the repository root, with no rootDir: Render's docs disagree on whether these
+    # paths are taken from the root directory or the repository root once one is set.
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
+    # Changes outside backend/ do not redeploy the API.
+    buildFilter:
+      paths:
+        - backend/**
     healthCheckPath: /health
     # Deploy a commit once its CI checks have passed on GitHub.
     autoDeployTrigger: checksPass
