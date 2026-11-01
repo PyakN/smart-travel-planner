@@ -244,7 +244,7 @@ Stop cards and venue cards are white with a 1px `line` border, a 12px radius and
 44px tall, white, 1px `field` border, 8px radius, 16px text on phones and 15px on desktop. Focus is a 2px ink outline with a 2px offset, the same ring every focusable element uses. Labels sit above their fields. Hints sit below in 13px Ink 2. Errors sit below in stop red, named with the fix.
 
 ### Map
-- **Paper:** OpenStreetMap tiles in greyscale (a CSS filter on the tile pane), so the provider and its attribution stay unchanged.
+- **Paper:** the basemap in greyscale (a CSS filter on the tile pane): Mapbox Streets with a token, OpenStreetMap's tiles without one. The provider's logo and attribution stay unchanged and in colour: Mapbox's logo bottom left, below the proof card, with the attribution wrapping beside it on narrow maps.
 - **Routes:** the selected day in its line colour over a white casing, solid on foot and dotted on a ride. Other days are `field` grey, and clicking one selects it.
 - **Markers:** stop roundels (a yellow ring when the stop is hovered in the list), the hotel as an ink square with a bed, places to eat as ink roundels, drinks as evening violet, and the search point as an ink pin with a yellow centre.
 - **Search area:** a dashed ink circle with a 45% white fill that lightens the map under it, drawn below the route so the route stays saturated.

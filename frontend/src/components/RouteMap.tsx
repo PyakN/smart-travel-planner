@@ -21,6 +21,7 @@ import {
 import { cityBounds } from "@/lib/cities";
 import { categoryLabel, dayColor, rideName } from "@/lib/format";
 import { iconSvg } from "@/lib/icons";
+import { mapboxFeedbackLink, tileSource } from "@/lib/tiles";
 import type { City, LonLat, PlanResponse, RouteSegment, StartPoint, Venue } from "@/lib/types";
 import { openingLabel, venueIcon, venueTypeLabel } from "@/lib/venues";
 
@@ -31,14 +32,14 @@ const INACTIVE = "#8c959e";
 // The white casing under every line, as on a transit diagram.
 const CASING = "#ffffff";
 
-// Standard OpenStreetMap tiles: free with attribution, fine for development and light use
-// (https://operations.osmfoundation.org/policies/tiles/). Point NEXT_PUBLIC_TILE_URL at a
-// provider with an API key for real traffic.
-const TILE_URL =
-  process.env.NEXT_PUBLIC_TILE_URL ?? "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-const TILE_ATTRIBUTION =
-  process.env.NEXT_PUBLIC_TILE_ATTRIBUTION ??
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+// Mapbox tiles with a token, else OpenStreetMap's (src/lib/tiles.ts). Named one by one:
+// Next.js inlines only the NEXT_PUBLIC_* variables it sees written out.
+const TILES = tileSource({
+  tileUrl: process.env.NEXT_PUBLIC_TILE_URL,
+  tileAttribution: process.env.NEXT_PUBLIC_TILE_ATTRIBUTION,
+  mapboxToken: process.env.NEXT_PUBLIC_MAPBOX_TOKEN,
+  mapboxStyle: process.env.NEXT_PUBLIC_MAPBOX_STYLE,
+});
 
 export interface RouteMapProps {
   plan: PlanResponse | null;
@@ -158,6 +159,51 @@ function FitToSearch({ lat, lon, radius_m }: { lat: number; lon: number; radius_
   return null;
 }
 
+/**
+ * What Mapbox asks of maps drawn with its tiles: its logo (bottom left, outside the tile pane,
+ * so never greyed with the tiles) and an "Improve this map" link that opens its feedback form
+ * at the place on the map (https://docs.mapbox.com/help/dive-deeper/attribution/).
+ */
+function MapboxCredits({ zoomOffset }: { zoomOffset: number }) {
+  const map = useMap();
+  useEffect(() => {
+    const logo = new L.Control({ position: "bottomleft" });
+    logo.onAdd = () => {
+      const link = L.DomUtil.create("a", "mapbox-logo");
+      link.href = "https://www.mapbox.com/";
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.setAttribute("aria-label", "Mapbox");
+      return link;
+    };
+    logo.addTo(map);
+    // The attribution keeps clear of the logo's corner (globals.css).
+    map.getContainer().classList.add("has-mapbox-logo");
+    return () => {
+      logo.remove();
+      map.getContainer().classList.remove("has-mapbox-logo");
+    };
+  }, [map]);
+  useEffect(() => {
+    let shown = "";
+    const update = () => {
+      const center = map.getCenter();
+      const link = mapboxFeedbackLink(center.lng, center.lat, map.getZoom() + zoomOffset);
+      if (link === shown) return;
+      if (shown) map.attributionControl.removeAttribution(shown);
+      map.attributionControl.addAttribution(link);
+      shown = link;
+    };
+    update();
+    map.on("moveend", update);
+    return () => {
+      map.off("moveend", update);
+      map.attributionControl.removeAttribution(shown);
+    };
+  }, [map, zoomOffset]);
+  return null;
+}
+
 function PickStart({ enabled, onPick }: { enabled: boolean; onPick: RouteMapProps["onPick"] }) {
   useMapEvents({
     click(event) {
@@ -217,7 +263,14 @@ export default function RouteMap({
       className={`h-full w-full ${picking ? "cursor-crosshair" : ""}`}
       scrollWheelZoom
     >
-      <TileLayer attribution={TILE_ATTRIBUTION} url={TILE_URL} />
+      <TileLayer
+        attribution={TILES.attribution}
+        url={TILES.url}
+        tileSize={TILES.tileSize}
+        zoomOffset={TILES.zoomOffset}
+        minZoom={TILES.minZoom}
+      />
+      {TILES.mapbox && <MapboxCredits zoomOffset={TILES.zoomOffset} />}
       <PickStart enabled={picking} onPick={onPick} />
       {!plan && !search && city && <FitToCity city={city} />}
       {plan && active && !search && (
