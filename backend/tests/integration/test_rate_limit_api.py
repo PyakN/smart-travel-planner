@@ -7,10 +7,12 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import get_ai_limiter
 from app.rate_limit import Limit, RateLimiter
+from tests.fakes import FakeProvider
 
 
 @pytest.fixture
-def two_per_minute(client: TestClient) -> Iterator[TestClient]:
+def two_per_minute(client: TestClient, llm: FakeProvider) -> Iterator[TestClient]:
+    # With an LLM configured, whatever .env holds: without one the endpoints answer 503.
     limiter = RateLimiter([Limit(2, 60)])
     client.app.dependency_overrides[get_ai_limiter] = lambda: limiter  # type: ignore[attr-defined]
     yield client
