@@ -1,0 +1,10 @@
+# The areas the self-hosted OSRM routes in: each city's bbox (backend/app/ingest/cities.py)
+# with at least 0.05° more on every side (3-5 km: hotels and pins just outside it), cut out of
+# the Geofabrik regions it lies in. A city across two regions gets a line for each.
+# backend/tests/test_osrm_areas.py checks that every city is covered.
+#
+# city      Geofabrik region             west,south,east,north
+lisbon      europe/portugal              -9.28,38.64,-9.03,38.85
+berlin      europe/germany/berlin        13.03,52.28,13.82,52.73
+berlin      europe/germany/brandenburg   13.03,52.28,13.82,52.73
+barcelona   europe/spain/cataluna        2.00,41.26,2.28,41.52

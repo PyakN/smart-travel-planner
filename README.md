@@ -12,6 +12,7 @@ Stack: FastAPI · PostgreSQL + PostGIS · Next.js + Leaflet. Roadmap: [PROJECT_P
 ```
 backend/    FastAPI app (Python 3.12+)
 frontend/   Next.js app with a Leaflet map
+osrm/       Self-hosted walking routes (an OSRM image for the cities' areas)
 docs/       Notes and benchmarks
 ```
 
@@ -183,7 +184,7 @@ python evals/selection_eval.py     # live eval against the real LLM + DB (costs 
 
 `app/optimizer/` turns the selected places into days and walking order:
 
-- **Distances:** an OSRM foot routing matrix, falling back to haversine × 1.3. Set `ROUTING_PROVIDER` to choose.
+- **Distances:** an OSRM foot routing matrix, falling back to haversine × 1.3. Set `ROUTING_PROVIDER` to choose. `OSRM_BASE_URL` is the public FOSSGIS server by default, which took about 10 s for most 25-point tables when measured (its 10 s timeout then falls back to straight lines). The self-hosted one in `osrm/` answers them in 50–300 ms: `docker compose --profile osrm up -d` (the first build downloads ~900 MB from Geofabrik and takes ~15 min), then `OSRM_BASE_URL=http://localhost:5000`. It knows only the areas in `osrm/areas.txt` (each city's bbox plus 3–5 km; a test keeps them in step with the cities), and a point that OSRM moves more than 1 km to reach a street falls back to haversine, rather than being measured from somewhere else.
 - **Order within a day:** a TSP solver (nearest neighbour + 2-opt + Or-opt).
 - **Split into days:** several strategies are tried and the shortest wins, with every day kept within the pace's time budget.
 - **Schedule:** arrival and departure times for each stop.
