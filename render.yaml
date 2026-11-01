@@ -1,0 +1,44 @@
+# Render Blueprint for the API (README: Deployment > Render and Vercel). In Render:
+# New > Blueprint, then this repository. The values marked `sync: false` are asked for
+# once, when the service is created; change them later under the service's Environment.
+services:
+  - type: web
+    name: travel-planner-api
+    runtime: docker
+    plan: free
+    # Next to the Neon database (aws eu-central-1). Cannot be changed later.
+    region: frankfurt
+    # Changes outside backend/ do not redeploy the API.
+    rootDir: backend
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    # Deploy a commit once its CI checks have passed on GitHub.
+    autoDeployTrigger: checksPass
+    envVars:
+      # postgresql+asyncpg://USER:PASSWORD@HOST/DBNAME?ssl=require (the direct host)
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: HERE_API_KEY
+        sync: false
+      - key: OPENWEATHER_API_KEY
+        sync: false
+      # The same value as the frontend's ORIGIN_SECRET on Vercel (backend/app/origin.py).
+      - key: ORIGIN_SECRET
+        sync: false
+      - key: LLM_PROVIDER
+        value: gemini
+      # Free instances have no pre-deploy step: the image migrates as it starts.
+      - key: MIGRATE_ON_START
+        value: "true"
+      # The site is served over HTTPS by Vercel, which proxies /api here.
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      # Render's own proxy sits in front: the client is the first X-Forwarded-For address,
+      # the visitor's, as Vercel sets it. ORIGIN_SECRET keeps out requests that skip Vercel.
+      - key: FORWARDED_ALLOW_IPS
+        value: "*"
+      - key: LOG_FORMAT
+        value: json
