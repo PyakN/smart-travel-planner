@@ -297,6 +297,9 @@ class PlanEdit(BaseModel):
     )
     added: list[PlaceRef] = Field(description="Replacements, or places the traveller added")
     next: PlaceRef | None = Field(default=None, description="The stop the traveller visits next")
+    after: PlaceRef | None = Field(
+        default=None, description="The stop it follows; None: it comes first"
+    )
     adjustments: list[Adjustment] = Field(
         default_factory=list, description="Last-resort changes to other stops"
     )

@@ -61,6 +61,11 @@ class DayEdit(BaseModel):
     next: int | None = Field(
         default=None, description="Visit this place next: a stop of the day, or a place to add"
     )
+    after: int | None = Field(
+        default=None,
+        description="A stop of the day to visit `next` right after: the stops planned up to "
+        "it keep their order. By default `next` comes first, after the visited stops",
+    )
     start: Location | None = Field(
         default=None,
         description="Where the traveller is: the rest of the day is planned from there, from "
@@ -87,6 +92,12 @@ class DayEdit(BaseModel):
             raise ValueError("a place cannot be removed and added at once")
         if self.next in self.remove:
             raise ValueError("the next stop cannot be removed")
+        if self.after is not None and self.next is None:
+            raise ValueError("after is for the next stop")
+        if self.after is not None and self.after == self.next:
+            raise ValueError("the next stop cannot follow itself")
+        if self.after in self.remove:
+            raise ValueError("the stop the next one follows cannot be removed")
         if self.stay_min is not None and not (self.add or self.next is not None):
             raise ValueError("stay_min is for added places and the next stop")
         return self
