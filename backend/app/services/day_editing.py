@@ -244,7 +244,7 @@ async def edit_day(
             provider=distances,
             start=StartPoint(start.lat, start.lon, start.round_trip) if start else None,
             origin=origin,
-            first=edit.next,
+            first=[edit.next] if edit.next is not None else [],
             protected=[s.id for s in added],
             modes=plan.modes,
             transit=transit,
