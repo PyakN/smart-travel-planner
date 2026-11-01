@@ -56,6 +56,10 @@ PLACES: list[tuple[str, str, float, float, int, dict[str, str]]] = [
     ("Miradouro de Santa Luzia", "viewpoint", 38.7116, -9.1301, 5, {}),
     ("Miradouro de São Pedro de Alcântara", "viewpoint", 38.7155, -9.1444, 4, {}),
     ("Miradouro da Senhora do Monte", "viewpoint", 38.7192, -9.1327, 3, {}),
+    # Places to eat, which plans never suggest: for the venue search, one within 2 km of
+    # each sight.
+    ("Tasca do Largo", "restaurant", 38.7150, -9.1290, 0, {"opening_hours": "Mo-Su 12:00-23:00"}),
+    ("Café do Jardim", "cafe", 38.7250, -9.1560, 0, {"opening_hours": "Mo-Su 08:00-20:00"}),
 ]
 
 

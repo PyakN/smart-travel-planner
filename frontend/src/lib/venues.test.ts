@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { PlannedDay, PlannedStop } from "./types";
 import {
+  type SearchPoint,
   cuisineLabel,
   defaultSearchPoint,
   dayUnderWay,
   dietLabels,
   openingLabel,
+  placements,
   stayOptions,
   venueIcon,
   venueTypeLabel,
@@ -56,27 +58,33 @@ describe("openingLabel", () => {
   });
 });
 
-function stop(place_id: number, name: string, lat: number): PlannedStop {
-  return { place_id, name, lat, lon: -9.14 } as PlannedStop;
+function stop(place_id: number, name: string, lat: number, leave = "12:00"): PlannedStop {
+  return { place_id, name, lat, lon: -9.14, leave } as PlannedStop;
 }
 
 const DAY = {
   day: 1,
-  stops: [stop(1, "Rossio", 38.71), stop(2, "Castelo", 38.713), stop(3, "Alfama", 38.711)],
+  stops: [
+    stop(1, "Rossio", 38.71, "10:30"),
+    stop(2, "Castelo", 38.713, "12:15"),
+    stop(3, "Alfama", 38.711, "14:00"),
+  ],
   date: "2026-11-02",
   start: "09:30",
   end: "21:30",
 } as PlannedDay;
 
-describe("defaultSearchPoint", () => {
-  const visit = (place_id: number) => ({ place_id, name: "", visited_at: "" });
+const visit = (place_id: number) => ({ place_id, name: "", visited_at: "" });
 
+describe("defaultSearchPoint", () => {
   it("is the stop visited last, in the order they were ticked", () => {
     const visits = [visit(3), visit(1), visit(99)]; // 99: another day's stop
     expect(defaultSearchPoint(DAY, visits, null)).toEqual({
       lat: 38.71,
       lon: -9.14,
       label: "Rossio, last visited",
+      stop: 1,
+      here: true,
     });
   });
 
@@ -86,8 +94,90 @@ describe("defaultSearchPoint", () => {
       lat: 38.7,
       lon: -9.13,
       label: "your start point",
+      here: true,
     });
-    expect(defaultSearchPoint(DAY, [], null)?.label).toBe("Rossio, the first stop");
+    expect(defaultSearchPoint(DAY, [], null)).toMatchObject({
+      label: "Rossio, the first stop",
+      stop: 1,
+    });
+    expect(defaultSearchPoint(DAY, [], null)?.here).toBeUndefined();
+  });
+});
+
+describe("placements", () => {
+  const near = (lat: number, more: Partial<SearchPoint> = {}): SearchPoint => ({
+    lat,
+    lon: -9.14,
+    label: "",
+    ...more,
+  });
+
+  it("puts a place found around a stop of a day ahead right after it", () => {
+    const { options, chosen } = placements(DAY, [], null, near(38.713, { stop: 2 }), false);
+    expect(options.map((o) => o.label)).toEqual([
+      "First, as the day begins · 09:30",
+      "After Rossio · 10:30",
+      "After Castelo · 12:15",
+      "After Alfama · 14:00",
+    ]);
+    expect(chosen).toMatchObject({
+      key: "2",
+      after: { place_id: 2 },
+      fromHere: false,
+      setOffMin: 12 * 60 + 15,
+    });
+    expect(chosen.effect).toBe(
+      "Day 1 stays as planned up to Castelo, then this place; the rest of the day is planned again from it.",
+    );
+  });
+
+  it("is next from where the traveller is on a day under way", () => {
+    const point = defaultSearchPoint(DAY, [visit(1)], null);
+    const { options, chosen } = placements(DAY, [visit(1)], null, point, true);
+    expect(options.map((o) => o.label)).toEqual([
+      "Next, from where you are now",
+      "After Castelo",
+      "After Alfama",
+    ]);
+    expect(chosen).toMatchObject({ key: "here", after: null, fromHere: true, setOffMin: null });
+    expect(options[1]).toMatchObject({ after: { place_id: 2 }, fromHere: true });
+  });
+
+  it("goes after a stop of a day under way that the traveller is not at", () => {
+    // The search from the free evening, around the day's last stop.
+    const { chosen } = placements(DAY, [visit(1)], null, near(38.711, { stop: 3 }), true);
+    expect(chosen).toMatchObject({ key: "3", fromHere: false, setOffMin: 14 * 60 });
+  });
+
+  it("follows the visited stops when the search is around one of them on a day ahead", () => {
+    const point = defaultSearchPoint(DAY, [visit(1)], null);
+    const { chosen } = placements(DAY, [visit(1)], null, point, false);
+    expect(chosen).toMatchObject({
+      key: "first",
+      label: "Next, after the stops you visited · 10:30",
+      setOffMin: 10 * 60 + 30,
+    });
+  });
+
+  it("goes after the stop nearest a pin, or first when the start point is nearer", () => {
+    const pin = { label: "the pin on the map", here: true };
+    expect(placements(DAY, [], null, near(38.7112, pin), false).chosen.key).toBe("3");
+    const hotel = { lat: 38.7, lon: -9.14, round_trip: true };
+    expect(placements(DAY, [], hotel, near(38.701, pin), false).chosen.key).toBe("first");
+    expect(placements(DAY, [], null, near(38.701, pin), false).chosen.key).toBe("1");
+    const start = defaultSearchPoint(DAY, [], hotel);
+    expect(placements(DAY, [], hotel, start, false).chosen.key).toBe("first");
+  });
+
+  it("reads times after midnight as the next morning", () => {
+    const overnight = {
+      ...DAY,
+      start: "16:00",
+      end: "03:00",
+      stops: [stop(1, "Bairro Alto", 38.71, "23:40"), stop(2, "Cais", 38.707, "01:30")],
+    };
+    const { options } = placements(overnight, [], null, null, false);
+    expect(options.map((o) => o.setOffMin)).toEqual([16 * 60, 23 * 60 + 40, 25 * 60 + 30]);
   });
 });
 

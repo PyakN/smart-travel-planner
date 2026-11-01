@@ -36,6 +36,33 @@ test("signs up, saves a plan to my trips and ticks a stop visited", async ({ pag
   await expect(saved.getByRole("button", { name: "Visited", exact: true })).toHaveCount(1);
 });
 
+test("adds a place to eat as the next stop after the one searched around", async ({ page }) => {
+  await page.goto("/signup");
+  await signUp(page, "Cai");
+  await expect(page.getByRole("navigation", { name: "Account" })).toContainText("Cai");
+  // Tomorrow's day: the search is around its first stop, before the trip begins.
+  const plan = await planTrip(page, "A day in Lisbon");
+  await plan.getByRole("button", { name: "Save to my trips" }).click();
+  await expect(page).toHaveURL(/\?trip=\d+/);
+  const [first] = await stopNames(plan).allTextContents();
+
+  await plan.getByRole("button", { name: "Find places to eat", exact: true }).click();
+  const search = page.getByRole("region", { name: "Places to eat and drink" });
+  await expect(search.getByText(`Near ${first}, the first stop`)).toBeVisible();
+  await search.getByLabel("Within").selectOption("2000");
+  const card = search.getByRole("article").first();
+  const venue = (await card.getByRole("heading").textContent()) ?? "";
+  await card.getByRole("button", { name: "Add to route" }).click();
+  await expect(card.getByLabel("Visit").locator("option:checked")).toContainText(`After ${first}`);
+  await card.getByRole("button", { name: "Add to day 1" }).click();
+
+  // The draft has it right after the first stop, not at the end of the day.
+  await expect(page.getByText(`Day 1: added ${venue} (after ${first}).`)).toBeVisible();
+  await expect(stopNames(plan).nth(1)).toHaveText(venue);
+  await expect(stopNames(plan).first()).toHaveText(first);
+  expect(await stopNames(plan).count()).toBeGreaterThan(2);
+});
+
 test("asks to log in before saving, then saves", async ({ page }) => {
   const plan = await planTrip(page, "A day in Lisbon");
   await plan.getByRole("button", { name: "Save to my trips" }).click();
