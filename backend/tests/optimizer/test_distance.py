@@ -82,6 +82,36 @@ def test_osrm_failures_fall_back_to_haversine(response: httpx.Response) -> None:
     assert result.matrix == haversine_matrix(POINTS)
 
 
+def snapped(*metres: float) -> list[dict[str, float]]:
+    return [{"distance": m} for m in metres]
+
+
+def test_osrm_points_snapped_nearby_are_used() -> None:
+    body = {"code": "Ok", "distances": [[0, 900], [900, 0]], "sources": snapped(12.5, 640)}
+    result = asyncio.run(osrm(lambda request: httpx.Response(200, json=body)).matrix(POINTS[:2]))
+    assert result.source == "osrm"
+    assert result.matrix[0][1] == 900
+
+
+def test_osrm_point_snapped_far_away_falls_back() -> None:
+    # A self-hosted server without this area moves the point to its nearest street, far off.
+    body = {"code": "Ok", "distances": [[0, 90], [90, 0]], "sources": snapped(12.5, 25_000)}
+    result = asyncio.run(osrm(lambda request: httpx.Response(200, json=body)).matrix(POINTS[:2]))
+    assert result.source == "haversine"
+    assert result.matrix == haversine_matrix(POINTS[:2])
+
+
+def test_osrm_geometry_snapped_far_away_is_straight() -> None:
+    line = [[-9.1364, 38.7075], [-9.1335, 38.7139]]
+    body = {
+        "code": "Ok",
+        "routes": [{"geometry": {"coordinates": line}}],
+        "waypoints": snapped(3, 1_500),
+    }
+    provider = osrm(lambda request: httpx.Response(200, json=body))
+    assert asyncio.run(provider.geometry(POINTS[:2])) == POINTS[:2]
+
+
 def test_osrm_network_error_falls_back() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("down", request=request)

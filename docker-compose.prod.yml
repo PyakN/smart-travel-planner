@@ -1,0 +1,116 @@
+# The whole app on one host. Settings come from .env, as in development; see the README's
+# Deployment section.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+#   browser -> edge (Caddy: TLS, X-Forwarded-For) -> /api/*: backend (uvicorn) -> db, osrm
+#                                                 -> the rest: frontend (Next.js)
+name: travel-planner
+
+x-api: &api
+  build: ./backend
+  image: travel-planner-api
+  env_file:
+    - path: .env
+      required: false
+  environment: &api-environment
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-planner}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-travel_planner}
+    OSRM_BASE_URL: http://osrm:5000
+  networks: [app]
+
+services:
+  edge:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      app:
+        # The one address the API takes X-Forwarded-For from (backend: FORWARDED_ALLOW_IPS).
+        ipv4_address: 10.201.0.10
+    depends_on: [backend, frontend]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # A public Mapbox token for the map tiles; without one the map uses OpenStreetMap's.
+        NEXT_PUBLIC_MAPBOX_TOKEN: ${MAPBOX_MAP_KEY:-}
+        NEXT_PUBLIC_MAPBOX_STYLE: ${MAPBOX_STYLE:-}
+    image: travel-planner-web
+    restart: unless-stopped
+    networks: [app]
+
+  backend:
+    <<: *api
+    restart: unless-stopped
+    environment:
+      <<: *api-environment
+      FORWARDED_ALLOW_IPS: 10.201.0.10
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      # true once SITE_ADDRESS is a domain served over HTTPS.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      osrm:
+        condition: service_started
+
+  # Brings the schema up to date, then exits; the API starts after it.
+  migrate:
+    <<: *api
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  osrm:
+    build: ./osrm
+    image: travel-planner-osrm
+    restart: unless-stopped
+    networks: [app]
+
+  db:
+    image: postgis/postgis:17-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-planner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-travel_planner}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [app]
+
+networks:
+  app:
+    ipam:
+      config:
+        - subnet: 10.201.0.0/24
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

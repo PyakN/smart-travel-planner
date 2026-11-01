@@ -171,6 +171,24 @@
   color: var(--color-ink);
 }
 
+/* Mapbox's logo, which maps drawn with its tiles must show uncovered (RouteMap's
+   MapboxCredits): below the proof card, and with the attribution wrapping beside it on
+   narrow maps rather than running over it. */
+.mapbox-logo {
+  display: block;
+  width: 88px;
+  height: 23px;
+  background: url("/mapbox-logo.svg") no-repeat;
+}
+
+.leaflet-bottom .mapbox-logo.leaflet-control {
+  margin-bottom: 8px;
+}
+
+.has-mapbox-logo .leaflet-bottom.leaflet-right {
+  left: 108px;
+}
+
 .leaflet-bar.leaflet-control {
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-control);

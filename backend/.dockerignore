@@ -1,0 +1,12 @@
+# Only pyproject.toml, alembic.ini, migrations/ and app/ go into the image.
+.venv/
+**/__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+data/
+tests/
+evals/
+.env
+.env.*

@@ -12,6 +12,8 @@ Stack: FastAPI · PostgreSQL + PostGIS · Next.js + Leaflet. Roadmap: [PROJECT_P
 ```
 backend/    FastAPI app (Python 3.12+)
 frontend/   Next.js app with a Leaflet map
+osrm/       Self-hosted walking routes (an OSRM image for the cities' areas)
+deploy/     The production stack's edge (Caddyfile); the stack is docker-compose.prod.yml
 docs/       Notes and benchmarks
 ```
 
@@ -183,7 +185,7 @@ python evals/selection_eval.py     # live eval against the real LLM + DB (costs 
 
 `app/optimizer/` turns the selected places into days and walking order:
 
-- **Distances:** an OSRM foot routing matrix, falling back to haversine × 1.3. Set `ROUTING_PROVIDER` to choose.
+- **Distances:** an OSRM foot routing matrix, falling back to haversine × 1.3. Set `ROUTING_PROVIDER` to choose. `OSRM_BASE_URL` is the public FOSSGIS server by default, which took about 10 s for most 25-point tables when measured (its 10 s timeout then falls back to straight lines). The self-hosted one in `osrm/` answers them in 50–300 ms: `docker compose --profile osrm up -d` (the first build downloads ~900 MB from Geofabrik and takes ~15 min), then `OSRM_BASE_URL=http://localhost:5000`. It knows only the areas in `osrm/areas.txt` (each city's bbox plus 3–5 km; a test keeps them in step with the cities), and a point that OSRM moves more than 1 km to reach a street falls back to haversine, rather than being measured from somewhere else.
 - **Order within a day:** a TSP solver (nearest neighbour + 2-opt + Or-opt).
 - **Split into days:** several strategies are tried and the shortest wins, with every day kept within the pace's time budget.
 - **Schedule:** arrival and departure times for each stop.
@@ -302,7 +304,7 @@ The endpoints that call the LLM (`POST /plan`, `POST /plans/{id}/replace`, `POST
 - **Small requests:** the text is at most 1,000 characters, a trip at most 7 days and 10 must-visit places.
 - **Nothing to steer:** the LLM only fills in a schema, a parsed request or a list of ids from the candidates with a short note each (validated by Pydantic, unknown ids dropped), so it cannot be used as a general chatbot, and a request that tries to instruct it can at most change which candidates it picks and how the notes read.
 
-Behind a proxy, the client's address comes from `X-Forwarded-For`, which uvicorn trusts only from `--forwarded-allow-ips` (127.0.0.1 by default: the Next.js proxy on the same host). Next.js passes on a header the browser sent, so in production the edge in front of it must set the header itself; the token budget holds either way.
+Behind a proxy, the client's address comes from `X-Forwarded-For`, which uvicorn trusts only from `FORWARDED_ALLOW_IPS` (127.0.0.1 by default). The Next.js proxy cannot name the client: it forwards the header the browser sent, unchanged, or none. So in production an edge sets the header and sends `/api/*` straight to the API, which trusts that edge only (see [Deployment](#deployment)); the token budget holds either way.
 
 ### When the LLM is down
 
@@ -334,6 +336,34 @@ npm run test:e2e                   # end-to-end tests in a browser (needs the da
 ```
 
 The end-to-end tests run the real frontend and API on a database of their own, with a scripted LLM: see [frontend/README.md](frontend/README.md#end-to-end-tests).
+
+## Deployment
+
+The whole app runs on one host with Docker Compose (`docker-compose.prod.yml`), in six containers. Only the edge publishes ports:
+
+```
+browser -> edge (Caddy: TLS, X-Forwarded-For) -> /api/*: backend (uvicorn) -> db (PostGIS), osrm (walking routes)
+                                              -> the rest: frontend (Next.js)
+```
+
+```bash
+cp .env.example .env    # POSTGRES_PASSWORD (letters and digits: it goes into a URL), API keys, MAPBOX_MAP_KEY
+docker compose -f docker-compose.prod.yml up -d --build   # the first build takes ~15 min (OSRM data)
+
+# Places: import them in the stack...
+docker compose -f docker-compose.prod.yml run --rm backend python -m app.ingest lisbon
+docker compose -f docker-compose.prod.yml run --rm backend python -m app.ingest.enrich lisbon
+# ...or copy them from the development database (the migrations create the categories)
+docker exec travel-planner-db pg_dump -U planner -d travel_planner --data-only -Fc -t places > places.dump
+docker compose -f docker-compose.prod.yml exec -T db pg_restore -U planner -d travel_planner --data-only --disable-triggers < places.dump
+
+docker compose -f docker-compose.prod.yml logs -f backend   # JSON logs with request ids
+```
+
+- **Images:** `backend/Dockerfile` (python:3.12-slim, non-root; the `migrate` service runs `alembic upgrade head` with it before the API starts, and the importers run with it too), `frontend/Dockerfile` (a standalone Next.js server on node:24-alpine) and `osrm/Dockerfile` (see [Route optimizer](#route-optimizer)). Each also builds and runs alone; its header shows how.
+- **HTTPS:** set `SITE_ADDRESS` to the domain name that points at the host, with ports 80 and 443 open: Caddy gets and renews the certificate. Then set `SESSION_COOKIE_SECURE=true`. The default, `:80`, serves plain HTTP (`HTTP_PORT` and `HTTPS_PORT` move the published ports).
+- **Map tiles:** `MAPBOX_MAP_KEY`, a public Mapbox token, goes into the frontend build as `NEXT_PUBLIC_MAPBOX_TOKEN`, so changing it needs `--build`. Restrict the token to the site's URLs in the Mapbox account: every visitor's browser sees it. Without it, the map uses the public OpenStreetMap tiles, which are not meant for real traffic.
+- **Client addresses** (for the [per-client limits](#rate-limits-and-llm-abuse)): Caddy sets `X-Forwarded-For` to the address a request came from, ignoring any the client sent, and sends `/api/*` straight to uvicorn. uvicorn takes that header from Caddy's fixed address only (`FORWARDED_ALLOW_IPS=10.201.0.10`). Checked on the stack: a request claiming `X-Forwarded-For: 6.6.6.6` is logged with its real address, and of six plan requests each claiming another address, the sixth gets a 429. Behind a load balancer or CDN, list its addresses in Caddy's `trusted_proxies`. The limits live in memory per process, so the API runs as one process.
 
 ## Secrets
 

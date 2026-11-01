@@ -7,7 +7,9 @@ apart by their address. Kept in memory: per process and forgotten on restart, li
 token budget and the log-in limit.
 
 Behind a proxy the address is the proxy's, unless uvicorn trusts it to name the client
-(`--forwarded-allow-ips`, 127.0.0.1 by default: the Next.js proxy on the same host).
+(FORWARDED_ALLOW_IPS, 127.0.0.1 by default). The Next.js proxy cannot: it passes on whatever
+X-Forwarded-For the browser sent. In production the edge sets the header and is the one
+address trusted (deploy/Caddyfile, docker-compose.prod.yml).
 """
 
 import math

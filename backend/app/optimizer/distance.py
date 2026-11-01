@@ -19,6 +19,11 @@ DistanceSource = Literal["osrm", "haversine"]
 # straight-line distance, so the fallback scales haversine to stay comparable.
 DETOUR_FACTOR = 1.3
 
+# OSRM moves every point to its nearest street, however far that is. A self-hosted server
+# knows only the cities' areas (osrm/areas.txt), so a point beyond them would be measured
+# from a street kilometres away: past this distance its answer is not used.
+MAX_SNAP_M = 1000.0
+
 
 @dataclass(frozen=True)
 class DistanceResult:
@@ -107,6 +112,11 @@ class OsrmProvider:
         body: dict[str, Any] = response.json()
         if body.get("code") != "Ok":
             raise ValueError(f"OSRM returned {body.get('code')}")
+        # Where each point was snapped to: `sources` for a table, `waypoints` for a route.
+        waypoints = body.get("sources") or body.get("waypoints") or []
+        snaps = [w.get("distance") or 0.0 for w in waypoints]
+        if snaps and max(snaps) > MAX_SNAP_M:
+            raise ValueError(f"OSRM snapped a point {max(snaps):.0f} m away, outside its map")
         return body
 
     async def _fetch(self, points: Sequence[LatLon]) -> Matrix:
