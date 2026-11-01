@@ -24,6 +24,7 @@ RUN python -c "import tomllib; deps = tomllib.load(open('pyproject.toml', 'rb'))
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
+COPY start.sh ./
 RUN python -m compileall -q app migrations \
     && useradd --system --uid 10001 --no-create-home app \
     && mkdir data \
@@ -31,7 +32,8 @@ RUN python -m compileall -q app migrations \
 USER app
 
 EXPOSE 8000
-# Client addresses: uvicorn reads X-Forwarded-For only from FORWARDED_ALLOW_IPS (127.0.0.1
-# unless set), which must name the proxy in front. Keep-alive outlasts the proxy's idle
-# connections (60 s in deploy/Caddyfile), so it never reuses one that uvicorn just closed.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "75"]
+# uvicorn on $PORT (8000 by default), after the migrations with MIGRATE_ON_START=true
+# (start.sh). Client addresses: uvicorn reads X-Forwarded-For only from FORWARDED_ALLOW_IPS
+# (127.0.0.1 unless set), which must name the proxy in front. Keep-alive (75 s) outlasts
+# the proxy's idle connections (60 s in deploy/Caddyfile), so it never reuses a closed one.
+CMD ["sh", "start.sh"]
