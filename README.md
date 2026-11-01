@@ -365,6 +365,29 @@ docker compose -f docker-compose.prod.yml logs -f backend   # JSON logs with req
 - **Map tiles:** `MAPBOX_MAP_KEY`, a public Mapbox token, goes into the frontend build as `NEXT_PUBLIC_MAPBOX_TOKEN`, so changing it needs `--build`. Restrict the token to the site's URLs in the Mapbox account: every visitor's browser sees it. Without it, the map uses the public OpenStreetMap tiles, which are not meant for real traffic.
 - **Client addresses** (for the [per-client limits](#rate-limits-and-llm-abuse)): Caddy sets `X-Forwarded-For` to the address a request came from, ignoring any the client sent, and sends `/api/*` straight to uvicorn. uvicorn takes that header from Caddy's fixed address only (`FORWARDED_ALLOW_IPS=10.201.0.10`). Checked on the stack: a request claiming `X-Forwarded-For: 6.6.6.6` is logged with its real address, and of six plan requests each claiming another address, the sixth gets a 429. Behind a load balancer or CDN, list its addresses in Caddy's `trusted_proxies`. The limits live in memory per process, so the API runs as one process.
 
+### Render and Vercel
+
+The other way to deploy: the frontend on Vercel, the API on Render, the database on Neon.
+
+```
+browser -> Vercel (Next.js; /api/* proxied with X-Forwarded-For and X-Origin-Secret) -> Render (API) -> Neon (PostGIS)
+```
+
+1. **Database, once:** the migrations and the places, from this machine. The Neon URL is the direct host (not `-pooler`), as `postgresql+asyncpg://USER:PASSWORD@HOST/DBNAME?ssl=require` for the app; `pg_restore` takes the plain `postgresql://…?sslmode=require` form.
+   ```bash
+   cd backend
+   DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@HOST/DBNAME?ssl=require" alembic upgrade head
+   docker exec travel-planner-db pg_dump -U planner -d travel_planner --data-only -Fc -t places > places.dump
+   docker exec -i travel-planner-db pg_restore --data-only --no-owner -d "postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require" < places.dump
+   ```
+2. **API on Render:** New > Blueprint with this repository. `render.yaml` sets up a Docker service on the free plan in Frankfurt (next to Neon's `eu-central-1`), checked at `/health`, deployed once a commit's CI passes. It asks for `DATABASE_URL`, the API keys and `ORIGIN_SECRET` (`python -c "import secrets; print(secrets.token_hex(32))"`). The image runs the migrations as it starts (`MIGRATE_ON_START`) and listens on Render's `PORT`.
+3. **Frontend on Vercel** (root directory `frontend`): `BACKEND_URL` (the API's URL as Render shows it), `ORIGIN_SECRET` (the same value) and `NEXT_PUBLIC_MAPBOX_TOKEN`. Redeploy after changing them: `BACKEND_URL` and `NEXT_PUBLIC_*` are fixed at build time.
+4. **Check:** the API's `/health` answers `ok`, its `/cities` answers 403 (it only answers the website), and the site plans a trip.
+
+- **Client addresses:** Vercel sets `X-Forwarded-For` to the visitor's address and Render's proxy adds its own after it, so the API takes the first one (`FORWARDED_ALLOW_IPS=*`). A caller who skips Vercel could claim any address there, so with `ORIGIN_SECRET` set the API answers only requests that carry it in `X-Origin-Secret`, which `frontend/src/proxy.ts` adds (403 otherwise; `/health` stays open for Render's checks).
+- **Neon suspends** after a few idle minutes and closes the API's connections: each one is checked before use (`pool_pre_ping`), so the next request does not fail.
+- **Free plans:** Render stops the API after 15 idle minutes and takes about a minute to start it (Vercel waits up to 120 s); the limits, the daily token budget and the caches live in memory and start afresh then. Walking distances come from the public OSRM server unless `OSRM_BASE_URL` points at a self-hosted one; a free Render instance cannot build it (it needs ~1.2 GB of RAM).
+
 ## Secrets
 
 Never commit `.env`. Only `.env.example` lives in git.

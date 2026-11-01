@@ -11,6 +11,7 @@ from app.llm.base import LLMError
 from app.llm.factory import create_llm_service
 from app.logs import add_request_context, configure_logging
 from app.optimizer.factory import create_distance_provider, create_transit_provider
+from app.origin import OriginGuard
 from app.rate_limit import Limit, RateLimiter
 from app.services.accounts import LoginLimiter
 from app.services.weather_service import create_weather_provider
@@ -48,8 +49,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await engine.dispose()
 
 
+def origin_secret() -> str | None:
+    secret = get_settings().origin_secret
+    return secret.get_secret_value() if secret else None
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Smart AI Travel Planner", version="0.1.0", lifespan=lifespan)
+    # Inside the request context (added last, so outermost): refused requests are logged.
+    app.add_middleware(OriginGuard, secret=origin_secret)
     add_request_context(app)
     app.include_router(health.router)
     app.include_router(cities.router)

@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # replaces (app.rate_limit). 0 turns a limit off.
     ai_requests_per_minute: int = 5
     ai_requests_per_day: int = 100
+    # Set on a host the API can be reached at directly (Render): only requests carrying it,
+    # which the frontend's proxy adds, are answered (app.origin). The same value goes to
+    # the frontend's ORIGIN_SECRET.
+    origin_secret: SecretStr | None = None
 
     # Walking distances: OSRM foot routing (public FOSSGIS server by default), with a
     # haversine fallback when it is unavailable.

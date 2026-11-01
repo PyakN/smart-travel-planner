@@ -54,6 +54,7 @@ Pages never reach the internet (map tiles and photos are blocked). Needs the dat
 | `src/components/SiteHeader.tsx`      | Header on every page: My trips, log in / sign up, or the user's name and Log out                                       |
 | `src/components/AuthForm.tsx`        | Log-in and sign-up form (`/login`, `/signup`); back to `?next=` afterwards                                             |
 | `src/components/TripList.tsx`        | My trips (`/trips`): open, rename, delete; delete the account                                                          |
+| `src/proxy.ts`                       | Adds `ORIGIN_SECRET` to the `/api` requests, so a deployed API answers only the website                                |
 | `src/lib/api.ts`                     | Typed client for plans, places, `/auth` and `/trips`, with readable errors                                             |
 | `src/lib/types.ts`                   | Mirrors `backend/app/schemas/` (plan, place, account, saved_trip)                                                      |
 | `src/lib/navigation.ts`              | Same-site `?next=` links for logging in                                                                                |

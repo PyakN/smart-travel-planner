@@ -12,6 +12,8 @@ import { defineConfig, devices } from "@playwright/test";
 const CI = Boolean(process.env.CI);
 const API_PORT = 8100;
 const WEB_PORT = 3100;
+// As deployed: the API answers only requests the frontend's proxy forwards (src/proxy.ts).
+const ORIGIN_SECRET = "e2e-origin-secret";
 const backend = path.resolve(__dirname, "../backend");
 const venvPython = path.join(
   backend,
@@ -43,6 +45,7 @@ export default defineConfig({
     {
       command: `"${python}" -m tests.e2e.server --port ${API_PORT}`,
       cwd: backend,
+      env: { ORIGIN_SECRET },
       url: `http://127.0.0.1:${API_PORT}/health`,
       reuseExistingServer: !CI,
       timeout: 60_000,
@@ -50,7 +53,11 @@ export default defineConfig({
     {
       // A build of its own: the proxy's target is fixed when it builds.
       command: `npm run build && npm run start -- --port ${WEB_PORT}`,
-      env: { BACKEND_URL: `http://127.0.0.1:${API_PORT}`, NEXT_DIST_DIR: ".next-e2e" },
+      env: {
+        BACKEND_URL: `http://127.0.0.1:${API_PORT}`,
+        NEXT_DIST_DIR: ".next-e2e",
+        ORIGIN_SECRET,
+      },
       url: `http://localhost:${WEB_PORT}`,
       reuseExistingServer: !CI,
       timeout: 300_000,
