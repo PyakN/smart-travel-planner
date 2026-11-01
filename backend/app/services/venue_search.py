@@ -1,7 +1,8 @@
 """Places to eat and drink near a point (GET /venues): food (restaurants, fast food, cafés,
 ice cream, pastry shops) or drinks (bars, pubs, clubs), with what OpenStreetMap knows of
 them: cuisine, diets, outdoor seating and opening hours, read to tell whether each is open
-now and when the traveller gets there. OSM has no ratings or prices.
+now (or when the traveller sets off, for a day ahead) and when they get there. OSM has no
+ratings or prices.
 
 Closest first, by the minute of walking; among venues as close, the ones with the most
 complete data come first, as they are the ones a traveller can judge.
@@ -10,7 +11,7 @@ complete data come first, as they are the ones a traveller can judge.
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import get_args
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -116,7 +117,10 @@ def walk_minutes(distance_m: float) -> int:
 
 
 def describe_venue(place: NearbyPlace, now: datetime) -> VenueOut:
+    """`now`: when the traveller sets off for it; without a time zone, the city's time."""
     city = CITIES.get(place.city)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=city.tz if city else UTC)
     hours = read_hours(place.opening_hours, city, place.lat, place.lon) if city else None
     walk = walk_minutes(place.distance_m)
     change = next_change(hours, now)

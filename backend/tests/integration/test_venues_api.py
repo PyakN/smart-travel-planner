@@ -157,6 +157,19 @@ def test_open_when_you_get_there(venues_at: Any) -> None:
     assert "Veggie Garden" not in names(open_then)
 
 
+def test_open_when_you_set_off_on_a_day_ahead(venues_at: Any) -> None:
+    # At lunchtime the traveller looks at the next day, leaving a stop at 14:59 there.
+    page = venues_at(at="2026-11-03T14:59", kind="food")
+    garden = next(v for v in page["items"] if v["name"] == "Veggie Garden")
+    assert (garden["open_now"], garden["open_on_arrival"], garden["changes_at"]) == (
+        "open",
+        "closed",
+        "15:00",
+    )
+    assert "Veggie Garden" in names(venues_at(open_now=True))
+    assert "Veggie Garden" not in names(venues_at(at="2026-11-03T14:59", open_now=True))
+
+
 @pytest.mark.parametrize(
     "params",
     [
@@ -165,6 +178,7 @@ def test_open_when_you_get_there(venues_at: Any) -> None:
         {"kind": "coffee"},
         {"limit": 0},
         {"lat": 95},
+        {"at": "tomorrow"},
     ],
 )
 def test_invalid_searches(client: TestClient, params: dict[str, Any]) -> None:
