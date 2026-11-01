@@ -1,0 +1,25 @@
+# The edge of the production stack (docker-compose.prod.yml), the only service with
+# published ports. With a domain name as SITE_ADDRESS it gets and renews a TLS certificate
+# itself; the default, :80, serves plain HTTP.
+#
+# Client addresses: Caddy sets X-Forwarded-For to the address the request came from and
+# drops any the client sent (no trusted_proxies here), and the API trusts that header from
+# this container only (FORWARDED_ALLOW_IPS). The per-client limits rely on both. Behind a
+# load balancer or CDN, list its addresses in a global `servers { trusted_proxies ... }`.
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	# The API without its /api prefix, as the Next.js proxy forwards it in development.
+	handle_path /api/* {
+		reverse_proxy backend:8000 {
+			transport http {
+				# Below uvicorn's keep-alive (75 s): never reuse a connection it has closed.
+				keepalive 60s
+			}
+		}
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+}
