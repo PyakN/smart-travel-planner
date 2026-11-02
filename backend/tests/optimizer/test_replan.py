@@ -164,6 +164,21 @@ def test_first_stops_stay_first_and_are_never_dropped_when_the_day_runs_long() -
     assert result.over and not {s.id for s in result.over} & set(first)
 
 
+def test_a_whole_order_is_kept_however_long_or_late() -> None:
+    # The traveller puts every stop in an order of their own: a zigzag of hour-long stops
+    # from 15:00, then a viewpoint long after sunset. Nothing is reordered or dropped, and
+    # the visit that runs late is reported.
+    origin = Origin(HOTEL.lat, HOTEL.lon, minute=15 * H)
+    viewpoint = stop(0, east=1, stay=None, category="viewpoint", hours="daylight")
+    stops = [stop(i, east=(-1) ** i * i, stay=60) for i in range(1, 7)]
+    order = [s.id for s in [*stops, viewpoint]]
+    result = replan([], [viewpoint, *stops], origin=origin, first=order)
+    assert ids(result) == order
+    assert result.over == result.closed == []
+    assert result.late == [viewpoint]
+    assert result.end_min > DAY.end_min + REPLAN_GRACE_MIN
+
+
 def test_the_day_may_run_to_its_end_whatever_the_pace() -> None:
     # Nine hour-long stops are over 9 h: more than a moderate pace's 8 h, so a new plan
     # drops some, but they end before 21:30, so the re-planned day keeps them all.

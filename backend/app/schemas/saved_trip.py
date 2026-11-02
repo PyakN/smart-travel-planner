@@ -39,6 +39,8 @@ class TripUpdate(BaseModel):
 
 
 MAX_EDIT_PLACES = 20
+# Stops in a day's order: more than any day holds.
+MAX_ORDER = 50
 
 
 class Location(BaseModel):
@@ -78,16 +80,34 @@ class DayEdit(BaseModel):
         description="Minutes to stay at the added places and the next stop; by default, the "
         "usual visit of their kind",
     )
+    order: list[int] | None = Field(
+        default=None,
+        max_length=MAX_ORDER,
+        description="Every stop of the day that is not visited (nor removed), and the places "
+        "added, in the order to visit them, after the visited stops: the day keeps this order "
+        "(nothing is reordered or dropped; the draft warns when it runs late)",
+    )
 
     @field_validator("remove", "add")
     @classmethod
     def _unique(cls, values: list[int]) -> list[int]:
         return list(dict.fromkeys(values))
 
+    @field_validator("order")
+    @classmethod
+    def _once_each(cls, order: list[int] | None) -> list[int] | None:
+        if order is not None and len(set(order)) < len(order):
+            raise ValueError("each stop comes once in the order")
+        return order
+
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        if not (self.remove or self.add or self.next is not None or self.start):
-            raise ValueError("give stops to remove, places to add, a next stop or a start")
+        if not (
+            self.remove or self.add or self.next is not None or self.start or self.order is not None
+        ):
+            raise ValueError(
+                "give stops to remove, places to add, a next stop, a start or an order"
+            )
         if set(self.remove) & set(self.add):
             raise ValueError("a place cannot be removed and added at once")
         if self.next in self.remove:
@@ -100,6 +120,10 @@ class DayEdit(BaseModel):
             raise ValueError("the stop the next one follows cannot be removed")
         if self.stay_min is not None and not (self.add or self.next is not None):
             raise ValueError("stay_min is for added places and the next stop")
+        if self.order is not None and self.next is not None:
+            raise ValueError("an order says which stop is next: give one or the other")
+        if self.order is not None and set(self.order) & set(self.remove):
+            raise ValueError("a removed stop cannot be in the order")
         return self
 
 

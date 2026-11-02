@@ -290,7 +290,8 @@ class DroppedStop(PlaceRef):
 
 class PlanEdit(BaseModel):
     """How a version was made from the one before: AI replacements ("replace") or a day edit
-    of a saved trip ("edit": stops removed, places added, a next stop, a new start)."""
+    of a saved trip ("edit": stops removed, places added, a next stop, a new start, an order
+    of the traveller's own)."""
 
     day: int
     kind: Literal["replace", "edit"] = "replace"
@@ -304,6 +305,10 @@ class PlanEdit(BaseModel):
     next: PlaceRef | None = Field(default=None, description="The stop the traveller visits next")
     after: PlaceRef | None = Field(
         default=None, description="The stop it follows; None: it comes first"
+    )
+    order: list[PlaceRef] = Field(
+        default_factory=list,
+        description="The order the traveller put the stops in (day edits); empty: the optimizer's",
     )
     adjustments: list[Adjustment] = Field(
         default_factory=list, description="Last-resort changes to other stops"

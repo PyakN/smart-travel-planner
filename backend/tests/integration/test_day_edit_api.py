@@ -86,6 +86,7 @@ def test_remove_and_add_make_a_draft(
         "added": [{"place_id": park, "name": "River Park"}],
         "next": None,
         "after": None,
+        "order": [],
         "adjustments": [],
         "dropped": [],
         "warnings": [],
@@ -141,6 +142,45 @@ def test_visited_stops_stay_first_as_they_were(
     assert refused.json()["detail"] == f"{third['name']}: visited places stay on the trip."
     refused = edit(visitor, trip, next=first["place_id"])
     assert refused.json()["detail"] == f"{first['name']} is visited already."
+
+
+def test_stops_in_an_order_of_the_travellers_own(
+    visitor: TestClient, place_ids: dict[str, int], trip: dict[str, Any]
+) -> None:
+    # A zigzag: from the cathedral up to the viewpoint, back down to the square, the tower.
+    order = [
+        place_ids[n]
+        for n in ("Testville Cathedral", "Hilltop Viewpoint", "Old Town Square", "Clock Tower")
+    ]
+    draft = drafted(visitor, trip, order=order)
+    assert [s["place_id"] for s in stops(draft)] == order
+    assert draft["edit"]["order"] == [
+        {"place_id": i, "name": s["name"]} for i, s in zip(order, stops(draft), strict=True)
+    ]
+    assert draft["edit"]["dropped"] == []
+
+    # The draft says what the order costs, against the optimizer's.
+    total = draft["days"][0]["distance_m"]
+    extra = total - trip["plan"]["days"][0]["distance_m"]
+    assert extra >= 100
+    assert draft["edit"]["warnings"] == [
+        f"This order is {extra / 1000:.1f} km longer than the planned one "
+        f"({total / 1000:.1f} km in all)."
+    ]
+
+
+def test_an_order_is_of_the_stops_not_visited(
+    visitor: TestClient, place_ids: dict[str, int], trip: dict[str, Any]
+) -> None:
+    square = place_ids["Old Town Square"]
+    visit(visitor, trip, square)
+    rest = [place_ids[n] for n in ("Hilltop Viewpoint", "Clock Tower", "Testville Cathedral")]
+    draft = drafted(visitor, trip, order=rest)
+    assert [s["place_id"] for s in stops(draft)] == [square, *rest]
+
+    refused = edit(visitor, trip, order=[*rest[:1], square, *rest[1:]])
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "Old Town Square: visited places stay first."
 
 
 def test_next_stop_from_where_the_traveller_is_now(
@@ -273,6 +313,19 @@ def test_edits_of_weather_aware_days_keep_the_forecast(
             {"add": ["River Park"], "next": "River Park", "after": "Fish Market"},
             "The next stop can only follow a stop of day 1.",
         ),
+        (
+            {"order": ["Clock Tower", "Old Town Square", "Testville Cathedral"]},
+            "The order does not match the stops of day 1 you have not visited: the trip may "
+            "have changed. Open it again.",
+        ),
+        (
+            {"order": ["Clock Tower", "Old Town Square", "River Park", "Testville Cathedral"]},
+            "The order does not match the stops of day 1 you have not visited: the trip may "
+            "have changed. Open it again.",
+        ),
+        ({"order": [*FIRST_DAY, "Clock Tower"]}, None),
+        ({"order": FIRST_DAY, "next": "Clock Tower"}, None),
+        ({"order": FIRST_DAY, "remove": ["Clock Tower"]}, None),
     ],
     ids=[
         "not-on-the-day",
@@ -289,6 +342,11 @@ def test_edits_of_weather_aware_days_keep_the_forecast(
         "after-itself",
         "after-a-removed-stop",
         "after-a-stop-of-no-day",
+        "order-without-a-stop",
+        "order-with-another-place",
+        "order-with-a-stop-twice",
+        "order-and-next",
+        "order-with-a-removed-stop",
     ],
 )
 def test_invalid_edits(
