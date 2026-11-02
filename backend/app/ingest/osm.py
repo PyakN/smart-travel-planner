@@ -8,7 +8,7 @@ from typing import Any, cast
 
 import httpx
 
-from app.catalog import VENUE_CATEGORIES
+from app.catalog import VENUE_CATEGORIES, open_building
 from app.geo import BBox, haversine_m
 
 OVERPASS_URLS = (
@@ -134,6 +134,9 @@ async def fetch_elements(query: str, client: httpx.AsyncClient) -> list[dict[str
 def categorize(tags: dict[str, str]) -> str | None:
     for key, values, category in CATEGORY_RULES:
         if tags.get(key) in values:
+            # Artworks are statues and murals, but for buildings that open to visitors.
+            if key == "tourism" and category == "monument" and open_building(tags):
+                return "landmark"
             return category
     return None
 
