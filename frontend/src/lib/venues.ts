@@ -1,4 +1,11 @@
-import { clockMinutes, clockTime, dayLength, formatDistance, formatDuration } from "./format";
+import {
+  addDays,
+  clockMinutes,
+  clockTime,
+  dayLength,
+  formatDistance,
+  formatDuration,
+} from "./format";
 import type { IconName } from "./icons";
 import type {
   OpenState,
@@ -157,6 +164,8 @@ export interface Placement {
   /** When the traveller sets off for it as the day is planned, in minutes since the day's
    * midnight; null: now, or not known. */
   setOffMin: number | null;
+  /** When that is: "when you leave Castelo", "as the day begins", "now". */
+  setOff: string;
   /** What adding it does to the day, for the traveller to read first. */
   effect: string;
 }
@@ -209,6 +218,7 @@ export function placements(
       after: null,
       fromHere,
       setOffMin: null,
+      setOff: "now",
       effect: `It becomes your next stop: day ${day.day} is planned again from here, now.`,
     };
   } else {
@@ -223,6 +233,7 @@ export function placements(
       after: null,
       fromHere,
       setOffMin,
+      setOff: last ? "after the stops you visited" : "as the day begins",
       effect: last
         ? `It comes right after the stops you visited; ${rest}`
         : `It becomes the first stop of day ${day.day}; ${rest}`,
@@ -238,6 +249,7 @@ export function placements(
         after: stop,
         fromHere,
         setOffMin,
+        setOff: fromHere ? "now" : `when you leave ${stop.name}`,
         effect: fromHere
           ? `From here, now: the stops up to ${stop.name}, then this place; ${rest}`
           : `Day ${day.day} stays as planned up to ${stop.name}, then this place; ${rest}`,
@@ -262,6 +274,22 @@ export function placements(
     if (d < best) [nearest, best] = [option, d];
   }
   return { options, chosen: nearest };
+}
+
+/**
+ * When to tell whether venues are open, for a place put at `placement`: the city's
+ * "YYYY-MM-DDTHH:MM" when the traveller sets off for it, or null for now (it is next from
+ * here, that time has passed, or the plan has no dates).
+ */
+export function setOffMoment(
+  day: Pick<PlannedDay, "date">,
+  placement: Pick<Placement, "setOffMin">,
+  now: { date: string; minutes: number },
+): string | null {
+  const minute = placement.setOffMin;
+  if (!day.date || minute === null) return null;
+  if (minute <= daysBetween(day.date, now.date) * MINUTES_PER_DAY + now.minutes) return null;
+  return `${addDays(day.date, Math.floor(minute / MINUTES_PER_DAY))}T${clockTime(minute)}`;
 }
 
 const STAYS = [15, 30, 45, 60, 75, 90, 120, 150, 180];

@@ -9,6 +9,7 @@ import {
   dietLabels,
   openingLabel,
   placements,
+  setOffMoment,
   stayOptions,
   venueIcon,
   venueTypeLabel,
@@ -178,6 +179,37 @@ describe("placements", () => {
     };
     const { options } = placements(overnight, [], null, null, false);
     expect(options.map((o) => o.setOffMin)).toEqual([16 * 60, 23 * 60 + 40, 25 * 60 + 30]);
+  });
+});
+
+describe("setOffMoment", () => {
+  const before = { date: "2026-11-01", minutes: 20 * 60 };
+
+  it("is when the traveller sets off on a day ahead, in the city's time", () => {
+    expect(setOffMoment(DAY, { setOffMin: 12 * 60 + 15 }, before)).toBe("2026-11-02T12:15");
+    expect(setOffMoment(DAY, { setOffMin: 25 * 60 + 30 }, before)).toBe("2026-11-03T01:30");
+  });
+
+  it("is now once that time has passed, from where the traveller is, or without dates", () => {
+    const noon = { date: "2026-11-02", minutes: 12 * 60 };
+    expect(setOffMoment(DAY, { setOffMin: 12 * 60 + 15 }, noon)).toBe("2026-11-02T12:15");
+    expect(setOffMoment(DAY, { setOffMin: 11 * 60 }, noon)).toBeNull();
+    expect(setOffMoment(DAY, { setOffMin: null }, before)).toBeNull();
+    expect(setOffMoment({ date: null }, { setOffMin: 600 }, before)).toBeNull();
+  });
+
+  it("goes with what the placement says of that time", () => {
+    const ahead = placements(DAY, [], null, null, false).options;
+    expect(ahead.map((o) => o.setOff)).toEqual([
+      "as the day begins",
+      "when you leave Rossio",
+      "when you leave Castelo",
+      "when you leave Alfama",
+    ]);
+    const visited = placements(DAY, [visit(1)], null, null, false).chosen;
+    expect(visited.setOff).toBe("after the stops you visited");
+    const here = defaultSearchPoint(DAY, [visit(1)], null);
+    expect(placements(DAY, [visit(1)], null, here, true).chosen.setOff).toBe("now");
   });
 });
 

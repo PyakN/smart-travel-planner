@@ -67,6 +67,7 @@ import {
   dayUnderWay,
   defaultSearchPoint,
   placements,
+  setOffMoment,
 } from "@/lib/venues";
 
 // Leaflet touches `window`, so the map only renders in the browser.
@@ -578,11 +579,15 @@ export default function Planner() {
 
   // A place to eat is the next stop: on a day under way, from where the traveller is now;
   // else right after the stop the search is around (the traveller may choose another).
-  const liveSearch = searchDay ? dayUnderWay(searchDay, cityNow(planTimeZone)) : false;
+  const planNow = cityNow(planTimeZone);
+  const liveSearch = searchDay ? dayUnderWay(searchDay, planNow) : false;
   const venuePlacements =
     trip && searchDay
       ? placements(searchDay, trip.visits, shown?.start ?? null, searchPoint, liveSearch)
       : null;
+  // Venues are open or closed when the traveller would set off for them, on a day ahead too.
+  const venueAt =
+    searchDay && venuePlacements ? setOffMoment(searchDay, venuePlacements.chosen, planNow) : null;
 
   /** Re-plan the search's day with a venue (no AI): a draft that opens on the route. */
   async function addVenue(venue: Venue, stayMin: number, placement: Placement) {
@@ -715,6 +720,7 @@ export default function Planner() {
               planned={plannedDays}
               onBack={closeVenues}
               placements={venuePlacements}
+              at={venueAt}
               onAdd={addVenue}
               adding={editingDay}
               error={editError}

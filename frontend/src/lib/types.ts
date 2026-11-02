@@ -449,4 +449,6 @@ export interface VenueQuery {
   open_now?: boolean;
   outdoor_seating?: boolean;
   limit?: number;
+  /** When you set off from the point, in the city's time ("YYYY-MM-DDTHH:MM"); default: now. */
+  at?: string | null;
 }

@@ -250,4 +250,15 @@ describe("searchVenues", () => {
     const [url] = fetchImpl.mock.calls[0] as unknown as [string];
     expect(url).toBe("/api/venues?lat=38.71&lon=-9.14&radius_m=500&vegetarian=true");
   });
+
+  it("asks for the time the traveller sets off, when it is not now", async () => {
+    const fetchImpl = fakeFetch(200, { items: [], total: 0, cuisines: [] });
+    await searchVenues({ lat: 38.71, lon: -9.14, at: "2026-11-03T12:15" }, {}, fetchImpl);
+    await searchVenues({ lat: 38.71, lon: -9.14, at: null }, {}, fetchImpl);
+    const urls = fetchImpl.mock.calls.map((call) => (call as unknown as [string])[0]);
+    expect(urls).toEqual([
+      "/api/venues?lat=38.71&lon=-9.14&at=2026-11-03T12%3A15",
+      "/api/venues?lat=38.71&lon=-9.14",
+    ]);
+  });
 });

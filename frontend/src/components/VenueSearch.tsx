@@ -49,6 +49,9 @@ export interface VenueSearchProps {
   onBack: () => void;
   /** Where in the day a venue can go, and where it goes by default: the next stop. */
   placements: Placements;
+  /** When the traveller sets off for it by default, in the city's time ("YYYY-MM-DDTHH:MM"):
+   * venues are open or closed then. Null: now. */
+  at: string | null;
   /** Add a venue to the day for a stay of `stayMin` at `placement`, as a draft; resolves to
    * whether it did. */
   onAdd: (venue: Venue, stayMin: number, placement: Placement) => Promise<boolean>;
@@ -291,6 +294,7 @@ export default function VenueSearch({
   planned,
   onBack,
   placements,
+  at,
   onAdd,
   adding,
   error,
@@ -313,8 +317,10 @@ export default function VenueSearch({
   const [choosing, setChoosing] = useState<number | null>(null);
 
   const query = point
-    ? { lat: point.lat, lon: point.lon, radius_m: radius, ...filters, limit }
+    ? { lat: point.lat, lon: point.lon, radius_m: radius, ...filters, limit, at }
     : null;
+  // "HH:MM" of `at`: the venues' hours are judged then.
+  const setOffTime = at?.slice(11) ?? null;
   const key = JSON.stringify(query);
   useEffect(() => {
     if (!query) return;
@@ -427,6 +433,16 @@ export default function VenueSearch({
             {locateError}
           </p>
         )}
+        {setOffTime && (
+          <p className="flex items-start gap-2 text-small text-ink-2">
+            <Icon name="clock" size={16} className="mt-px text-ink-3" />
+            <span>
+              Open or closed as of{" "}
+              <span className="font-bold text-ink tabular-nums">{setOffTime}</span>,{" "}
+              {placements.chosen.setOff}.
+            </span>
+          </p>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -484,7 +500,7 @@ export default function VenueSearch({
               checked={filters[toggle]}
               onChange={(event) => change({ [toggle]: event.target.checked })}
             >
-              {label}
+              {toggle === "open_now" && setOffTime ? `Open at ${setOffTime}` : label}
             </Checkbox>
           ))}
         </div>

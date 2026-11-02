@@ -49,6 +49,9 @@ test("adds a place to eat as the next stop after the one searched around", async
   await plan.getByRole("button", { name: "Find places to eat", exact: true }).click();
   const search = page.getByRole("region", { name: "Places to eat and drink" });
   await expect(search.getByText(`Near ${first}, the first stop`)).toBeVisible();
+  // Open or closed when the traveller leaves it tomorrow, not now.
+  await expect(search.getByText(`, when you leave ${first}.`)).toBeVisible();
+  await expect(search.getByRole("checkbox", { name: /^Open at \d\d:\d\d$/ })).toBeVisible();
   await search.getByLabel("Within").selectOption("2000");
   const card = search.getByRole("article").first();
   const venue = (await card.getByRole("heading").textContent()) ?? "";
