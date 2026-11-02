@@ -1,8 +1,9 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.api.deps import (
     AI_RATE_LIMIT,
@@ -15,6 +16,7 @@ from app.api.deps import (
 )
 from app.schemas.plan import PlanRequest, PlanResponse, ReplaceRequest
 from app.services.day_hours import DailyHours
+from app.services.gpx_export import GPX_MEDIA_TYPE, gpx_filename, plan_gpx
 from app.services.place_selection import PlanningError
 from app.services.plan_editing import replace_stops
 from app.services.trip_planner import get_plan, plan_trip
@@ -110,3 +112,31 @@ async def read_plan(plan_id: int, session: SessionDep) -> PlanResponse:
     if plan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "plan not found")
     return plan
+
+
+@router.get(
+    "/plans/{plan_id}/gpx",
+    response_class=Response,
+    responses={
+        status.HTTP_200_OK: {
+            "content": {GPX_MEDIA_TYPE: {}},
+            "description": "A GPX 1.1 file: the stops as waypoints, each day as a track",
+        }
+    },
+)
+async def export_plan_gpx(
+    plan_id: int,
+    session: SessionDep,
+    day: Annotated[int | None, Query(ge=1, description="Only this day; default: all")] = None,
+) -> Response:
+    """The plan as a GPX file for GPS and map apps (Organic Maps, OsmAnd, Komoot, Garmin)."""
+    plan = await get_plan(session, plan_id)
+    if plan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "plan not found")
+    if day is not None and all(d.day != day for d in plan.days):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Day {day} is not in this plan.")
+    return Response(
+        plan_gpx(plan, day),
+        media_type=GPX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{gpx_filename(plan, day)}"'},
+    )
