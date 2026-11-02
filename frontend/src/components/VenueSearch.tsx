@@ -11,6 +11,8 @@ import { searchVenues } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import type { PlannedDay, Venue, VenueKind, VenuePage } from "@/lib/types";
 import {
+  type Placement,
+  type Placements,
   RADIUS_OPTIONS,
   type SearchPoint,
   cuisineLabel,
@@ -45,10 +47,14 @@ export interface VenueSearchProps {
   /** Places on the trip already, and their day. */
   planned: ReadonlyMap<number, number>;
   onBack: () => void;
-  /** The day is under way: an added place is the next stop, from the search point now. */
-  live: boolean;
-  /** Add a venue to the day for a stay of `stayMin`, as a draft; resolves to whether it did. */
-  onAdd: (venue: Venue, stayMin: number) => Promise<boolean>;
+  /** Where in the day a venue can go, and where it goes by default: the next stop. */
+  placements: Placements;
+  /** When the traveller sets off for it by default, in the city's time ("YYYY-MM-DDTHH:MM"):
+   * venues are open or closed then. Null: now. */
+  at: string | null;
+  /** Add a venue to the day for a stay of `stayMin` at `placement`, as a draft; resolves to
+   * whether it did. */
+  onAdd: (venue: Venue, stayMin: number, placement: Placement) => Promise<boolean>;
   /** The day is being planned again with a venue. */
   adding: boolean;
   /** Why adding a venue failed. */
@@ -92,34 +98,37 @@ const OPEN_STYLES = {
   unknown: { text: "text-ink-2", dot: "bg-line-strong" },
 };
 
-/** How long to stay, and the button that adds the venue to the day. */
+/** How long to stay and when, and the button that adds the venue to the day. */
 function AddToRoute({
   venue,
   day,
-  live,
+  placements,
   onAdd,
   onCancel,
   adding,
 }: {
   venue: Venue;
   day: number;
-  live: boolean;
-  onAdd: (stayMin: number) => void;
+  placements: Placements;
+  onAdd: (stayMin: number, placement: Placement) => void;
   onCancel: () => void;
   adding: boolean;
 }) {
   const stayId = useId();
+  const placementId = useId();
   const [stay, setStay] = useState(venue.stay_min);
+  const [key, setKey] = useState(placements.chosen.key);
+  const placement = placements.options.find((o) => o.key === key) ?? placements.chosen;
   return (
     <div className="mt-3 animate-rise space-y-3 rounded-control bg-canvas p-3 text-small text-ink-2">
-      <label htmlFor={stayId} className="flex items-center gap-2.5 font-bold text-ink">
-        Stay for
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2.5 gap-y-2 font-bold text-ink">
+        <label htmlFor={stayId}>Stay for</label>
         <select
           id={stayId}
           value={stay}
           onChange={(event) => setStay(Number(event.target.value))}
           disabled={adding}
-          className={SELECT}
+          className={cn(SELECT, "justify-self-start")}
         >
           {stayOptions(venue.stay_min).map((option) => (
             <option key={option.minutes} value={option.minutes}>
@@ -127,16 +136,34 @@ function AddToRoute({
             </option>
           ))}
         </select>
-      </label>
-      <p>
-        {live
-          ? `It becomes your next stop: day ${day} is planned again from here, now.`
-          : `Day ${day} is planned again with it, when it suits the day (restaurants and bars in the evening).`}{" "}
-        You see the changes before they are saved.
-      </p>
+        <label htmlFor={placementId}>Visit</label>
+        <select
+          id={placementId}
+          value={placement.key}
+          onChange={(event) => setKey(event.target.value)}
+          disabled={adding}
+          className={cn(SELECT, "w-full")}
+        >
+          {placements.options.map((option) => (
+            <option key={option.key} value={option.key}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <p>{placement.effect} You see the changes before they are saved.</p>
       <div className="flex items-center gap-2">
-        <Button variant="primary" onClick={() => onAdd(stay)} disabled={adding} className="flex-1">
-          {adding ? "Planning the day…" : live ? "Go here next" : `Add to day ${day}`}
+        <Button
+          variant="primary"
+          onClick={() => onAdd(stay, placement)}
+          disabled={adding}
+          className="flex-1"
+        >
+          {adding
+            ? "Planning the day…"
+            : placement.key === "here"
+              ? "Go here next"
+              : `Add to day ${day}`}
         </Button>
         <Button variant="quiet" onClick={onCancel} disabled={adding}>
           Cancel
@@ -266,7 +293,8 @@ export default function VenueSearch({
   onHover,
   planned,
   onBack,
-  live,
+  placements,
+  at,
   onAdd,
   adding,
   error,
@@ -289,8 +317,10 @@ export default function VenueSearch({
   const [choosing, setChoosing] = useState<number | null>(null);
 
   const query = point
-    ? { lat: point.lat, lon: point.lon, radius_m: radius, ...filters, limit }
+    ? { lat: point.lat, lon: point.lon, radius_m: radius, ...filters, limit, at }
     : null;
+  // "HH:MM" of `at`: the venues' hours are judged then.
+  const setOffTime = at?.slice(11) ?? null;
   const key = JSON.stringify(query);
   useEffect(() => {
     if (!query) return;
@@ -337,6 +367,7 @@ export default function VenueSearch({
           lat: position.coords.latitude,
           lon: position.coords.longitude,
           label: "your location",
+          here: true,
         });
       },
       () => {
@@ -402,6 +433,16 @@ export default function VenueSearch({
             {locateError}
           </p>
         )}
+        {setOffTime && (
+          <p className="flex items-start gap-2 text-small text-ink-2">
+            <Icon name="clock" size={16} className="mt-px text-ink-3" />
+            <span>
+              Open or closed as of{" "}
+              <span className="font-bold text-ink tabular-nums">{setOffTime}</span>,{" "}
+              {placements.chosen.setOff}.
+            </span>
+          </p>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -459,7 +500,7 @@ export default function VenueSearch({
               checked={filters[toggle]}
               onChange={(event) => change({ [toggle]: event.target.checked })}
             >
-              {label}
+              {toggle === "open_now" && setOffTime ? `Open at ${setOffTime}` : label}
             </Checkbox>
           ))}
         </div>
@@ -495,8 +536,8 @@ export default function VenueSearch({
                   <AddToRoute
                     venue={venue}
                     day={day.day}
-                    live={live}
-                    onAdd={(stay) => onAdd(venue, stay)}
+                    placements={placements}
+                    onAdd={(stay, placement) => onAdd(venue, stay, placement)}
                     onCancel={() => setChoosing(null)}
                     adding={adding}
                   />

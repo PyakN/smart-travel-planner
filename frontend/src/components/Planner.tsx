@@ -60,7 +60,15 @@ import type {
   Venue,
   VenueKind,
 } from "@/lib/types";
-import { DEFAULT_RADIUS_M, type SearchPoint, dayUnderWay, defaultSearchPoint } from "@/lib/venues";
+import {
+  DEFAULT_RADIUS_M,
+  type Placement,
+  type SearchPoint,
+  dayUnderWay,
+  defaultSearchPoint,
+  placements,
+  setOffMoment,
+} from "@/lib/venues";
 
 // Leaflet touches `window`, so the map only renders in the browser.
 const RouteMap = dynamic(() => import("@/components/RouteMap"), {
@@ -531,7 +539,12 @@ export default function Planner() {
     setSelectedDay(day);
     setVenueKind(kind);
     setVenuePoint(
-      near && { lat: near.lat, lon: near.lon, label: `${near.name}, the day's last stop` },
+      near && {
+        lat: near.lat,
+        lon: near.lon,
+        label: `${near.name}, the day's last stop`,
+        stop: near.place_id,
+      },
     );
     setVenues([]);
     setHighlightedVenue(null);
@@ -564,22 +577,30 @@ export default function Planner() {
     return () => window.removeEventListener("keydown", onKey);
   }, [searching]);
 
-  // On a day under way, a place to eat is the next stop, from where the traveller is now;
-  // otherwise the day takes it when it suits (restaurants and bars in the evening).
-  const liveSearch = searchDay ? dayUnderWay(searchDay, cityNow(planTimeZone)) : false;
+  // A place to eat is the next stop: on a day under way, from where the traveller is now;
+  // else right after the stop the search is around (the traveller may choose another).
+  const planNow = cityNow(planTimeZone);
+  const liveSearch = searchDay ? dayUnderWay(searchDay, planNow) : false;
+  const venuePlacements =
+    trip && searchDay
+      ? placements(searchDay, trip.visits, shown?.start ?? null, searchPoint, liveSearch)
+      : null;
+  // Venues are open or closed when the traveller would set off for them, on a day ahead too.
+  const venueAt =
+    searchDay && venuePlacements ? setOffMoment(searchDay, venuePlacements.chosen, planNow) : null;
 
   /** Re-plan the search's day with a venue (no AI): a draft that opens on the route. */
-  async function addVenue(venue: Venue, stayMin: number) {
+  async function addVenue(venue: Venue, stayMin: number, placement: Placement) {
     if (!searchDay) return false;
-    const change: Omit<DayEditRequest, "day"> =
-      liveSearch && searchPoint
-        ? {
-            add: [venue.id],
-            next: venue.id,
-            start: { lat: searchPoint.lat, lon: searchPoint.lon },
-            stay_min: stayMin,
-          }
-        : { add: [venue.id], stay_min: stayMin };
+    const change: Omit<DayEditRequest, "day"> = {
+      add: [venue.id],
+      next: venue.id,
+      after: placement.after?.place_id ?? null,
+      stay_min: stayMin,
+    };
+    if (placement.fromHere && searchPoint) {
+      change.start = { lat: searchPoint.lat, lon: searchPoint.lon };
+    }
     const added = await editDay(searchDay.day, change);
     if (added) closeVenues();
     return added;
@@ -650,7 +671,7 @@ export default function Planner() {
           picking={pickingNow}
           onPick={(lat, lon) => {
             if (picking === "venues") {
-              setVenuePoint({ lat, lon, label: "the pin on the map" });
+              setVenuePoint({ lat, lon, label: "the pin on the map", here: true });
             } else {
               setStart({ lat, lon, round_trip: start?.round_trip ?? false });
             }
@@ -682,7 +703,7 @@ export default function Planner() {
         ref={sidebar}
         className="order-2 min-h-0 flex-1 overflow-y-auto bg-surface lg:order-1 lg:w-[480px] lg:flex-none lg:border-r lg:border-line"
       >
-        {searching && searchDay ? (
+        {searching && searchDay && venuePlacements ? (
           <div className="px-5 pt-6 pb-8 lg:px-8 lg:pt-8">
             <VenueSearch
               day={searchDay}
@@ -698,7 +719,8 @@ export default function Planner() {
               onHover={setHighlightedVenue}
               planned={plannedDays}
               onBack={closeVenues}
-              live={liveSearch}
+              placements={venuePlacements}
+              at={venueAt}
               onAdd={addVenue}
               adding={editingDay}
               error={editError}

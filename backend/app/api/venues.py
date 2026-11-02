@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -46,9 +47,18 @@ def venue_filters(
 
 @router.get("/venues")
 async def find_venues(
-    session: SessionDep, now: NowDep, filters: Annotated[VenueFilters, Depends(venue_filters)]
+    session: SessionDep,
+    now: NowDep,
+    filters: Annotated[VenueFilters, Depends(venue_filters)],
+    at: Annotated[
+        datetime | None,
+        Query(
+            description="When you set off from the point, in the city's time without an "
+            'offset (e.g. "2026-11-05T13:10"): a later stop of a day ahead. Default: now'
+        ),
+    ] = None,
 ) -> VenuePage:
     """Places to eat and drink near a point (data from OpenStreetMap), closest first, then
-    the ones with the most complete data. Each says whether it is open now and when you get
-    there, from its opening hours; hours that cannot be read are unknown."""
-    return await search_venues(session, filters, now)
+    the ones with the most complete data. Each says whether it is open now (or `at`) and
+    when you get there, from its opening hours; hours that cannot be read are unknown."""
+    return await search_venues(session, filters, at or now)

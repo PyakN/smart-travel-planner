@@ -221,6 +221,7 @@ describe("edit descriptions", () => {
     removed: [],
     added: [],
     next: null,
+    after: null,
     adjustments: [],
     dropped: [],
     warnings: [],
@@ -252,6 +253,12 @@ describe("edit descriptions", () => {
     );
     expect(describeEdit({ ...edit, added: [], next: ref(4, "D") })).toBe(
       "Day 1: took out A; D next.",
+    );
+    expect(describeEdit({ ...edit, next: ref(3, "C"), after: ref(5, "E") })).toBe(
+      "Day 1: took out A; added B, C (after E).",
+    );
+    expect(describeEdit({ ...edit, added: [], next: ref(4, "D"), after: ref(5, "E") })).toBe(
+      "Day 1: took out A; D after E.",
     );
     expect(describeEdit({ ...EDIT, kind: "edit" })).toBe(
       "Day 1: planned the rest of the day again.",

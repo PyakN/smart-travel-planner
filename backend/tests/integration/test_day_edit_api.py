@@ -85,6 +85,7 @@ def test_remove_and_add_make_a_draft(
         "removed": [{"place_id": tower, "name": "Clock Tower"}],
         "added": [{"place_id": park, "name": "River Park"}],
         "next": None,
+        "after": None,
         "adjustments": [],
         "dropped": [],
         "warnings": [],
@@ -265,6 +266,13 @@ def test_edits_of_weather_aware_days_keep_the_forecast(
         ({"remove": ["Clock Tower"], "next": "Clock Tower"}, None),
         ({"remove": ["Clock Tower"], "stay_min": 30}, None),
         ({"add": ["River Park"], "stay_min": 2}, None),
+        ({"add": ["River Park"], "after": "Clock Tower"}, None),
+        ({"next": "Clock Tower", "after": "Clock Tower"}, None),
+        ({"remove": ["Clock Tower"], "next": "Old Town Square", "after": "Clock Tower"}, None),
+        (
+            {"add": ["River Park"], "next": "River Park", "after": "Fish Market"},
+            "The next stop can only follow a stop of day 1.",
+        ),
     ],
     ids=[
         "not-on-the-day",
@@ -277,6 +285,10 @@ def test_edits_of_weather_aware_days_keep_the_forecast(
         "remove-the-next",
         "stay-without-a-place",
         "too-short-a-stay",
+        "after-without-a-next-stop",
+        "after-itself",
+        "after-a-removed-stop",
+        "after-a-stop-of-no-day",
     ],
 )
 def test_invalid_edits(
@@ -346,6 +358,39 @@ def test_eat_and_drink_on_the_way(
     assert {s["place_id"] for s in day[4:]} == set(planned[2:])
     assert later["edit"]["dropped"] == [] and later["edit"]["warnings"] == []
     assert visitor.patch(f"/trips/{trip['id']}", json={"plan_id": later["id"]}).is_success
+
+
+def test_a_place_to_eat_right_after_a_stop_of_a_day_ahead(
+    visitor: TestClient, llm: FakeProvider, place_ids: dict[str, int]
+) -> None:
+    # Days before the trip, the traveller finds a bar near the second stop. Only added, it
+    # waits for the evening, when bars open; as the next stop after the second, it is there.
+    trip = saved_trip(visitor, llm, place_ids, FIRST_DAY, start=HOTEL, start_date=MONDAY)
+    at(visitor, datetime(2026, 10, 30, 15, 0, tzinfo=UTC))
+    planned = stops(trip["plan"])
+    bar = place_ids["Harbour Bar"]
+    evening = stops(drafted(visitor, trip, add=[bar], stay_min=45))
+    assert evening[-1]["place_id"] == bar and evening[-1]["arrive"] >= "20:00"
+
+    second = planned[1]
+    draft = drafted(visitor, trip, add=[bar], next=bar, after=second["place_id"], stay_min=45)
+    day = stops(draft)
+    assert [s["place_id"] for s in day[:3]] == [planned[0]["place_id"], second["place_id"], bar]
+    assert [s["arrive"] for s in day[:2]] == [s["arrive"] for s in planned[:2]]  # as planned
+    assert day[2]["wait_min"] == 0
+    arrive = minutes(day[1]["leave"]) + day[2]["travel_min"]
+    assert abs(minutes(day[2]["arrive"]) - arrive) <= 1
+    assert {s["place_id"] for s in day[3:]} == {s["place_id"] for s in planned[2:]}
+    assert draft["edit"]["next"] == {"place_id": bar, "name": "Harbour Bar"}
+    assert draft["edit"]["after"] == {"place_id": second["place_id"], "name": second["name"]}
+    assert draft["edit"]["dropped"] == [] and draft["edit"]["warnings"] == []
+
+    # After a visited stop, the next one follows all the visited stops.
+    visit(visitor, trip, planned[2]["place_id"])
+    visit(visitor, trip, planned[0]["place_id"])
+    draft = drafted(visitor, trip, add=[bar], next=bar, after=planned[0]["place_id"])
+    first, third = planned[0]["place_id"], planned[2]["place_id"]
+    assert [s["place_id"] for s in stops(draft)[:3]] == [first, third, bar]
 
 
 def test_the_opening_hours_of_places_you_choose(

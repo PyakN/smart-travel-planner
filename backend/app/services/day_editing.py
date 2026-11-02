@@ -9,13 +9,15 @@ what it drops, and why.
 - Visited stops stay first, in their planned order.
 - The rest of the day is planned from `start` (the traveller's location), from now on when
   the day is under way; else from where the visited stops end, or as the day begins.
-- `next` comes first after the visited stops; the others are reordered from it. It is
-  visited when the traveller gets there: a place to eat or drink is not held to the hours
-  its kind usually keeps (dinner and bars from 20:00), nor to its own opening hours.
+- `next` comes first after the visited stops, or right after `after`, a stop of the day:
+  then the stops planned up to it keep their order before it. The others are reordered
+  from it. It is visited when the traveller gets there: a place to eat or drink is not held
+  to the hours its kind usually keeps (dinner and bars from 20:00), nor to its own opening
+  hours.
 - The day keeps its end: back at the hotel on round trips, else wherever its last stop is.
 - The day may run until the end of its hours plus REPLAN_GRACE_MIN, whatever the pace.
   Stops drop only beyond that, or when they would be reached closed or dark: least
-  important first, and never visited, must-visit, added or next stops.
+  important first, and never visited, must-visit, added or next stops, nor those before it.
 - Other stops keep their own opening hours (OSM `opening_hours`) on the day's date. Those
   of the places the traveller chose are also checked against their visits: the draft warns
   when one is closed by then, or closes during it.
@@ -166,6 +168,8 @@ async def edit_day(
             raise PlanningError(f"Place {place_id} is not in {city.name}.")
     if edit.next is not None and edit.next in visited:
         raise PlanningError(f"{on_day[edit.next].name} is visited already.")
+    if edit.after is not None and edit.after not in on_day:
+        raise PlanningError(f"The next stop can only follow a stop of day {day}.")
 
     params = saved.params
     ranking = {pid: i for i, pid in enumerate(params.get("ranking", []))}
@@ -230,6 +234,17 @@ async def edit_day(
     if not (done_stops or kept or added):
         raise PlanningError(f"Keep at least one stop on day {day}.")
 
+    # The stops planned up to `after` keep their order before the next stop. Visited stops
+    # come first anyway: after one of them, the next stop follows them all.
+    lead: list[int] = []
+    if edit.after is not None and edit.after not in visited:
+        for s in target.stops:
+            if s.place_id in visited or s.place_id in removing or s.place_id == edit.next:
+                continue
+            lead.append(s.place_id)
+            if s.place_id == edit.after:
+                break
+
     origin = None
     if edit.start is not None:
         origin = Origin(edit.start.lat, edit.start.lon, minute_now(target, window, city, now))
@@ -244,7 +259,7 @@ async def edit_day(
             provider=distances,
             start=StartPoint(start.lat, start.lon, start.round_trip) if start else None,
             origin=origin,
-            first=edit.next,
+            first=[*lead, edit.next] if edit.next is not None else [],
             protected=[s.id for s in added],
             modes=plan.modes,
             transit=transit,
@@ -298,6 +313,9 @@ async def edit_day(
         removed=[PlaceRef(place_id=i, name=on_day[i].name) for i in edit.remove],
         added=[PlaceRef(place_id=c, name=names[c]) for c in adding],
         next=PlaceRef(place_id=edit.next, name=names[edit.next]) if edit.next is not None else None,
+        after=PlaceRef(place_id=edit.after, name=names[edit.after])
+        if edit.after is not None
+        else None,
         dropped=dropped,
         warnings=warnings,
     )

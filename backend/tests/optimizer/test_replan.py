@@ -51,7 +51,7 @@ def replan(
     *,
     start: StartPoint | None = HOTEL,
     origin: Origin | None = None,
-    first: int | None = None,
+    first: Sequence[int] = (),
     protected: Collection[int] = (),
     window: DayWindow = DAY,
 ) -> DayReplan:
@@ -125,9 +125,21 @@ def test_an_origin_without_a_time_begins_where_the_visited_stops_end() -> None:
 
 def test_the_next_stop_comes_first_then_the_rest_is_reordered_from_it() -> None:
     rest = [stop(0, east=1), stop(1, east=2), stop(2, east=6), stop(3, east=4)]
-    result = replan([], rest, first=102)
+    result = replan([], rest, first=[102])
     assert ids(result) == [102, 103, 101, 100]  # out to it, then back towards the hotel
     assert result.day.visits[0].leg is not None
+
+
+def test_several_first_stops_keep_their_order_then_the_rest_follows_the_last() -> None:
+    # The day as planned up to a stop, then a place to eat right after it: the far stop
+    # first although the near one is on the way, and the rest reordered from the café.
+    rest = [stop(0, east=1), stop(1, east=6), stop(2, east=4), stop(3, east=5), stop(4, east=2)]
+    cafe = stop(5, east=7, stay=30, category="cafe")
+    result = replan([], [*rest, cafe], first=[101, 100, cafe.id])
+    assert ids(result) == [101, 100, cafe.id, 103, 102, 104]
+    assert result.day.visits[2].arrive_min == pytest.approx(
+        result.day.visits[1].leave_min + walk_min(rest[0], cafe), abs=1
+    )
 
 
 def test_the_next_stop_stays_first_when_the_hours_reorder_the_day() -> None:
@@ -136,9 +148,20 @@ def test_the_next_stop_stays_first_when_the_hours_reorder_the_day() -> None:
     origin = Origin(HOTEL.lat, HOTEL.lon, minute=17 * H)
     museum = stop(0, east=2, stay=None, category="museum", hours="day")
     viewpoint = stop(1, east=1, stay=None, category="viewpoint", hours="daylight")
-    result = replan([], [museum, viewpoint], origin=origin, first=museum.id)
+    result = replan([], [museum, viewpoint], origin=origin, first=[museum.id])
     assert ids(result) == [museum.id]
     assert result.closed == [viewpoint]
+
+
+def test_first_stops_stay_first_and_are_never_dropped_when_the_day_runs_long() -> None:
+    # Hour-long stops from 15:00: not all fit. The first two stay, in their order, although
+    # they matter least; the stops dropped are of the rest.
+    origin = Origin(HOTEL.lat, HOTEL.lon, minute=15 * H)
+    stops = [stop(i, east=i % 4, north=i // 4, stay=60) for i in range(9)]
+    first = [stops[8].id, stops[7].id]
+    result = replan([], stops, origin=origin, first=first)
+    assert ids(result)[:2] == first
+    assert result.over and not {s.id for s in result.over} & set(first)
 
 
 def test_the_day_may_run_to_its_end_whatever_the_pace() -> None:
@@ -171,7 +194,7 @@ def test_must_visit_protected_and_next_stops_are_never_dropped() -> None:
     stops = [stop(i, east=i % 4, north=i // 4, stay=60) for i in range(13)]
     stops[11] = stop(11, east=3, north=2, stay=60, required=True)
     least = stops[12].id
-    result = replan([], stops, protected=[least], first=stops[10].id)
+    result = replan([], stops, protected=[least], first=[stops[10].id])
     kept = set(ids(result))
     assert {stops[10].id, stops[11].id, least} <= kept
     assert result.over and all(s.priority < 10 for s in result.over)
@@ -230,4 +253,4 @@ def test_no_time_left() -> None:
     with pytest.raises(NothingFitsError):
         replan([], [stop(0)], origin=late)
     with pytest.raises(ValueError, match="first stop"):
-        replan([stop(0)], [stop(1)], first=100)
+        replan([stop(0)], [stop(1)], first=[100])

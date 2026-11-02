@@ -94,6 +94,7 @@ def test_replace_one_stop(client: TestClient, llm: FakeProvider, place_ids: dict
         "removed": [],
         "added": [{"place_id": park, "name": "River Park"}],
         "next": None,
+        "after": None,
         "adjustments": [],
         "dropped": [],
         "warnings": [],

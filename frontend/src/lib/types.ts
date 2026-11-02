@@ -250,6 +250,8 @@ export interface PlanEdit {
   added: PlaceRef[];
   /** The stop the traveller visits next (day edits). */
   next: PlaceRef | null;
+  /** The stop the next one follows; null: it comes first, after any visited stops. */
+  after: PlaceRef | null;
   /** Last-resort changes to stops the traveller did not tick. */
   adjustments: Adjustment[];
   /** Planned stops the change leaves out: shown before a draft is saved. */
@@ -357,6 +359,9 @@ export interface DayEditRequest {
   add?: number[];
   /** Visit this place next: a stop of the day, or a place to add. */
   next?: number | null;
+  /** A stop of the day to visit `next` right after: the stops planned up to it keep their
+   * order. By default `next` comes first, after the visited stops. */
+  after?: number | null;
   /** Where the traveller is: the rest of the day is planned from there (from now, today). */
   start?: { lat: number; lon: number } | null;
   /** Minutes to stay at the added places and the next stop; by default, by kind of place. */
@@ -444,4 +449,6 @@ export interface VenueQuery {
   open_now?: boolean;
   outdoor_seating?: boolean;
   limit?: number;
+  /** When you set off from the point, in the city's time ("YYYY-MM-DDTHH:MM"); default: now. */
+  at?: string | null;
 }

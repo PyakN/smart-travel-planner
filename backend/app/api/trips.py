@@ -171,11 +171,11 @@ async def edit_trip_day(
     settings: SettingsDep,
     now: NowDep,
 ) -> PlanResponse:
-    """Change one day of a trip: take stops out, add places, choose the next stop, or plan
-    the rest of the day from where you are (no AI). Visited stops stay first. Answers with a
-    draft: a new version of the plan (`parent_id`: the trip's current one) that the trip
-    uses once it is saved (PATCH with its `plan_id`). `edit.dropped` lists the planned
-    stops it leaves out, and why."""
+    """Change one day of a trip: take stops out, add places, choose the next stop (and the
+    stop it follows), or plan the rest of the day from where you are (no AI). Visited stops
+    stay first. Answers with a draft: a new version of the plan (`parent_id`: the trip's
+    current one) that the trip uses once it is saved (PATCH with its `plan_id`).
+    `edit.dropped` lists the planned stops it leaves out, and why."""
     trip = await _trip(session, user, trip_id)
     plan = await _plan(session, trip)
     visits = await saved_trips.trip_visits(session, trip)

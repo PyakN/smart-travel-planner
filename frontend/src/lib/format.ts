@@ -199,14 +199,15 @@ function names(places: { name: string }[]): string {
 export function describeEdit(edit: PlanEdit): string {
   if (edit.kind === "edit") {
     const next = edit.next;
+    const when = edit.after ? `after ${edit.after.name}` : "next";
     const added = edit.added.map((p) =>
-      p.place_id === next?.place_id ? `${p.name} (next)` : p.name,
+      p.place_id === next?.place_id ? `${p.name} (${when})` : p.name,
     );
     const parts = [];
     if (edit.removed.length > 0) parts.push(`took out ${names(edit.removed)}`);
     if (added.length > 0) parts.push(`added ${added.join(", ")}`);
     if (next && !edit.added.some((p) => p.place_id === next.place_id)) {
-      parts.push(`${next.name} next`);
+      parts.push(`${next.name} ${when}`);
     }
     return `Day ${edit.day}: ${parts.join("; ") || "planned the rest of the day again"}.`;
   }

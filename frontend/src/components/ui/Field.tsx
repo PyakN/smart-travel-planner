@@ -6,12 +6,14 @@ import { cn } from "./cn";
 export const INPUT =
   "h-11 w-full rounded-control border border-field bg-surface px-3 text-base text-ink transition-colors placeholder:text-ink-3 enabled:hover:border-ink-3 focus-visible:border-ink disabled:cursor-not-allowed disabled:bg-canvas disabled:text-ink-3 lg:text-body";
 
-/** Compact inputs for times, dates and selects that sit inside a row. */
-export const INPUT_COMPACT =
-  "h-10 rounded-control border border-field bg-surface px-2.5 text-base text-ink tabular-nums transition-colors enabled:hover:border-ink-3 focus-visible:border-ink disabled:cursor-not-allowed disabled:bg-canvas disabled:text-ink-3 lg:text-sm";
+const COMPACT =
+  "h-10 rounded-control border border-field bg-surface text-base text-ink tabular-nums transition-colors enabled:hover:border-ink-3 focus-visible:border-ink disabled:cursor-not-allowed disabled:bg-canvas disabled:text-ink-3 lg:text-sm";
 
-/** A native select with the app's chevron. */
-export const SELECT = cn(INPUT_COMPACT, "select");
+/** Compact inputs for times, dates and selects that sit inside a row. */
+export const INPUT_COMPACT = cn(COMPACT, "px-2.5");
+
+/** A native select with the app's chevron: long options stop short of it. */
+export const SELECT = cn(COMPACT, "select pr-9 pl-2.5");
 
 export function Label({
   htmlFor,

@@ -106,6 +106,14 @@ def test_opening_and_closing_within_a_day() -> None:
     assert unread.opening_hours == "Segunda a sexta 12:00-15:00"  # shown as mapped
 
 
+def test_a_time_without_a_zone_is_the_citys() -> None:
+    # 14:30 in Berlin (UTC+1 in winter) is lunch; 14:30 UTC would be 15:30 there.
+    lunch = replace(place(opening_hours="Mo-Su 12:00-15:00"), city="berlin")
+    described = describe_venue(lunch, datetime(2026, 10, 29, 14, 30))
+    assert (described.open_now, described.changes_at) == ("open", "15:00")
+    assert describe_venue(lunch, datetime(2026, 10, 29, 14, 30, tzinfo=UTC)).open_now == "closed"
+
+
 def test_unknown_cities_have_unknown_hours() -> None:
     elsewhere = describe_venue(replace(place(opening_hours="24/7"), city="atlantis"), NOW)
     assert elsewhere.open_now == "unknown"
