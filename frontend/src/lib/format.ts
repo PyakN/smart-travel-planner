@@ -209,6 +209,7 @@ export function describeEdit(edit: PlanEdit): string {
     if (next && !edit.added.some((p) => p.place_id === next.place_id)) {
       parts.push(`${next.name} ${when}`);
     }
+    if (edit.order.length > 0) parts.push("the stops in your order");
     return `Day ${edit.day}: ${parts.join("; ") || "planned the rest of the day again"}.`;
   }
   const replaced = `Day ${edit.day}: replaced ${names(edit.replaced)}`;

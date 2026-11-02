@@ -222,6 +222,7 @@ describe("edit descriptions", () => {
     added: [],
     next: null,
     after: null,
+    order: [],
     adjustments: [],
     dropped: [],
     warnings: [],
@@ -262,6 +263,14 @@ describe("edit descriptions", () => {
     );
     expect(describeEdit({ ...EDIT, kind: "edit" })).toBe(
       "Day 1: planned the rest of the day again.",
+    );
+  });
+
+  it("says when a day edit put the stops in the traveller's order", () => {
+    const order = [ref(2, "B"), ref(1, "A")];
+    expect(describeEdit({ ...EDIT, kind: "edit", order })).toBe("Day 1: the stops in your order.");
+    expect(describeEdit({ ...EDIT, kind: "edit", order, removed: [ref(3, "C")] })).toBe(
+      "Day 1: took out C; the stops in your order.",
     );
   });
 

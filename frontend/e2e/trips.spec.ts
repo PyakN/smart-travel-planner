@@ -75,3 +75,48 @@ test("asks to log in before saving, then saves", async ({ page }) => {
   await expect(page).toHaveURL(/\?trip=\d+/, { timeout: 30_000 });
   await expect(page.getByRole("link", { name: "In My trips" })).toBeVisible();
 });
+
+test("moves stops of a saved day by dragging and with the keyboard", async ({ page }) => {
+  await page.goto("/signup");
+  await signUp(page, "Dee");
+  await expect(page.getByRole("navigation", { name: "Account" })).toContainText("Dee");
+  const plan = await planTrip(page, "A day in Lisbon");
+  await plan.getByRole("button", { name: "Save to my trips" }).click();
+  await expect(page).toHaveURL(/\?trip=\d+/);
+  const [a, b, c, ...rest] = await stopNames(plan).allTextContents();
+  const count = 3 + rest.length;
+  const handle = (name: string) => plan.getByRole("button", { name: new RegExp(`^Move ${name},`) });
+
+  // The first stop dragged by its number below the second.
+  await handle(a).evaluate((element) => element.scrollIntoView({ block: "start" }));
+  const from = await handle(a).boundingBox();
+  const to = await handle(b).boundingBox();
+  if (!from || !to) throw new Error("the stops' numbers are not on screen");
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2 + 40, { steps: 12 });
+  await page.mouse.up();
+  const draft = page.getByRole("region", { name: "Draft" });
+  await expect(draft.getByText("Day 1: the stops in your order.")).toBeVisible();
+  await expect(stopNames(plan)).toHaveText([b, a, c, ...rest]);
+
+  // In the draft, the keyboard moves the first stop down two places.
+  await expect(handle(b)).toHaveAccessibleName(`Move ${b}, stop 1 of ${count}`);
+  await handle(b).focus();
+  await page.keyboard.press("Space");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Space");
+  await expect(stopNames(plan)).toHaveText([a, c, b, ...rest]);
+
+  // Saved, the trip keeps the order.
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(draft).toHaveCount(0);
+  await page.reload();
+  await expect(stopNames(page.getByRole("region", { name: "Trip plan" }))).toHaveText([
+    a,
+    c,
+    b,
+    ...rest,
+  ]);
+});
