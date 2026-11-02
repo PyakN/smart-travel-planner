@@ -18,6 +18,7 @@ import ExportPanel from "@/components/ExportPanel";
 import { PlaceChip } from "@/components/MustVisitPicker";
 import PlaceSearch from "@/components/PlaceSearch";
 import StopCard from "@/components/StopCard";
+import { useReorder } from "@/components/useReorder";
 import { Button, buttonClass } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { Hint, Label } from "@/components/ui/Field";
@@ -53,7 +54,9 @@ import {
   weatherIcon,
 } from "@/lib/format";
 import type { IconName } from "@/lib/icons";
+import { newOrder, onlyReordered, visitedLead } from "@/lib/reorder";
 import type {
+  DayEditRequest,
   DroppedStop,
   PlaceRef,
   PlanEdit,
@@ -80,10 +83,9 @@ export interface PlanResultProps {
   onDiscardDraft: () => void;
   /** Saving a draft, or undoing a change of the trip. */
   applying: boolean;
-  /** Change a day of the saved trip (take stops out, add places) into a draft; resolves to
-   * whether it did. Null for a plan not saved. */
-  onEditDay:
-    ((day: number, change: { remove: number[]; add: number[] }) => Promise<boolean>) | null;
+  /** Change a day of the saved trip (take stops out, add places, put the stops in an order)
+   * into a draft; resolves to whether it did. Null for a plan not saved. */
+  onEditDay: ((day: number, change: Omit<DayEditRequest, "day">) => Promise<boolean>) | null;
   /** The day edit is being planned. */
   editingDay: boolean;
   /** Search places to eat and drink for a day of the saved trip, around a stop (or where
@@ -565,6 +567,8 @@ function DayStops({
   onToggleRemoved,
   onHoverStop,
   onFindVenues,
+  onReorder,
+  planning,
 }: {
   day: PlannedDay;
   selected: number[];
@@ -582,119 +586,189 @@ function DayStops({
   onHoverStop: PlanResultProps["onHoverStop"];
   /** Search places to eat and drink near the day's last stop; null when it cannot. */
   onFindVenues: ((near: PlannedStop) => void) | null;
+  /** Plan the day with its stops not visited in this order; null when they cannot move. */
+  onReorder: ((order: number[]) => Promise<boolean>) | null;
+  /** A change of the day is being planned. */
+  planning: boolean;
 }) {
   const color = dayColor(day.day);
   const lastStop = day.stops.at(-1);
   const freeEvening = freeEveningLabel(day);
+  const done = visited ?? new Set<number>();
+  const movable = onReorder !== null && day.stops.filter((s) => !done.has(s.place_id)).length > 1;
+  const instructionsId = useId();
+  const [announcement, setAnnouncement] = useState("");
+  const reorder = useReorder({
+    count: day.stops.length,
+    min: visitedLead(day.stops, done),
+    onDrop: (from, to) => {
+      const order = newOrder(day.stops, done, from, to);
+      return order && onReorder ? onReorder(order) : undefined;
+    },
+    announce: setAnnouncement,
+    name: (i) => day.stops[i].name,
+  });
   return (
-    <ol className="motion-safe:animate-reveal-down">
-      {day.stops.map((stop, i) => {
-        const travel = travelLabel(stop);
-        const freeTime = freeTimeLabel(stop);
-        const departure = departureLabel(stop);
-        const isVisited = visited?.has(stop.place_id) ?? false;
-        const lineBefore = i > 0 || travel !== null || freeTime !== null || departure !== null;
-        const lineAfter = i < day.stops.length - 1;
-        return (
-          <li key={stop.place_id}>
-            {departure && (
-              <LineNote
-                icon="pin"
-                className="font-bold text-ink"
-                line={<Line color={color} style={{ top: "50%", bottom: -1 }} />}
-              >
-                {departure}
-              </LineNote>
-            )}
-            {freeTime && (
-              <LineNote icon="coffee" line={<Line color={color} style={JOINED} />}>
-                {freeTime}
-              </LineNote>
-            )}
-            {travel && (
-              <LineNote
-                icon={stop.travel_mode === "transit" ? "transit" : "walk"}
-                line={<Line color={color} dotted={stop.travel_mode === "transit"} style={JOINED} />}
-              >
-                <p>{travel}</p>
-                {stop.rides.length > 0 && <Rides rides={stop.rides} color={color} />}
-              </LineNote>
-            )}
-            <div className={ROW}>
-              <div className="hidden pt-[11px] text-right leading-none sm:block">
-                <span className="block font-display text-[15px] font-semibold text-ink tabular-nums">
-                  {stop.arrive}
-                </span>
-                <span className="mt-1 block font-display text-[13px] text-ink-3 tabular-nums">
-                  {stop.leave}
-                </span>
-              </div>
-              <div className="relative flex justify-center">
-                {lineBefore && (
-                  <Line
-                    color={color}
-                    style={{ top: -1, height: `calc(${ROUNDEL_CENTRE} + 1px)` }}
-                  />
-                )}
-                {lineAfter && <Line color={color} style={{ top: ROUNDEL_CENTRE, bottom: -1 }} />}
-                <Roundel
-                  color={isVisited ? VISITED : color}
-                  className="relative mt-2 transition-colors"
+    <div>
+      <ol
+        aria-busy={planning}
+        className={cn(
+          "motion-safe:animate-reveal-down",
+          reorder.active && "select-none",
+          planning && reorder.active && "opacity-70 transition-opacity",
+        )}
+      >
+        {day.stops.map((stop, i) => {
+          const travel = travelLabel(stop);
+          const freeTime = freeTimeLabel(stop);
+          const departure = departureLabel(stop);
+          const isVisited = visited?.has(stop.place_id) ?? false;
+          const lineBefore = i > 0 || travel !== null || freeTime !== null || departure !== null;
+          const lineAfter = i < day.stops.length - 1;
+          const moving = reorder.rowStyle(i);
+          return (
+            <li
+              key={stop.place_id}
+              ref={reorder.row(i)}
+              style={moving.style}
+              className={cn(
+                moving.gliding && "motion-safe:transition-transform motion-safe:duration-200",
+              )}
+            >
+              {departure && (
+                <LineNote
+                  icon="pin"
+                  className="font-bold text-ink"
+                  line={<Line color={color} style={{ top: "50%", bottom: -1 }} />}
                 >
-                  {isVisited ? (
-                    <Icon name="check" size={16} strokeWidth={2.6} label="Visited" />
-                  ) : (
-                    i + 1
+                  {departure}
+                </LineNote>
+              )}
+              {freeTime && (
+                <LineNote icon="coffee" line={<Line color={color} style={JOINED} />}>
+                  {freeTime}
+                </LineNote>
+              )}
+              {travel && (
+                <LineNote
+                  icon={stop.travel_mode === "transit" ? "transit" : "walk"}
+                  line={
+                    <Line color={color} dotted={stop.travel_mode === "transit"} style={JOINED} />
+                  }
+                >
+                  <p>{travel}</p>
+                  {stop.rides.length > 0 && <Rides rides={stop.rides} color={color} />}
+                </LineNote>
+              )}
+              <div className={ROW}>
+                <div className="hidden pt-[11px] text-right leading-none sm:block">
+                  <span className="block font-display text-[15px] font-semibold text-ink tabular-nums">
+                    {stop.arrive}
+                  </span>
+                  <span className="mt-1 block font-display text-[13px] text-ink-3 tabular-nums">
+                    {stop.leave}
+                  </span>
+                </div>
+                <div className="relative flex justify-center">
+                  {lineBefore && (
+                    <Line
+                      color={color}
+                      style={{ top: -1, height: `calc(${ROUNDEL_CENTRE} + 1px)` }}
+                    />
                   )}
-                </Roundel>
+                  {lineAfter && <Line color={color} style={{ top: ROUNDEL_CENTRE, bottom: -1 }} />}
+                  {movable && !isVisited ? (
+                    // The roundel is the handle: a 44px target around it.
+                    <button
+                      type="button"
+                      {...reorder.handle(i)}
+                      disabled={planning}
+                      aria-label={`Move ${stop.name}, stop ${i + 1} of ${day.stops.length}`}
+                      aria-describedby={instructionsId}
+                      title="Drag to move this stop"
+                      className="group relative -mx-2 cursor-grab touch-none self-start rounded-full p-2 select-none active:cursor-grabbing disabled:cursor-default"
+                    >
+                      <Roundel
+                        color={color}
+                        className={cn(
+                          "motion-safe:transition-transform group-enabled:group-hover:scale-110",
+                          reorder.moving === i && "scale-110",
+                        )}
+                      >
+                        {i + 1}
+                      </Roundel>
+                    </button>
+                  ) : (
+                    <Roundel
+                      color={isVisited ? VISITED : color}
+                      className="relative mt-2 transition-colors"
+                    >
+                      {isVisited ? (
+                        <Icon name="check" size={16} strokeWidth={2.6} label="Visited" />
+                      ) : (
+                        i + 1
+                      )}
+                    </Roundel>
+                  )}
+                </div>
+                <div className="min-w-0 pb-1">
+                  <StopCard
+                    stop={stop}
+                    color={color}
+                    selected={selected.includes(stop.place_id)}
+                    onToggleSelected={() => onToggle(stop.place_id)}
+                    selectionDisabled={locked}
+                    isNew={fresh.has(stop.place_id)}
+                    visited={visited && isVisited}
+                    visitLocked={visitLocked}
+                    onToggleVisited={() => onToggleVisited(stop.place_id, !isVisited)}
+                    editing={editing}
+                    removed={removed.includes(stop.place_id)}
+                    onToggleRemoved={() => onToggleRemoved(stop.place_id)}
+                    onHover={onHoverStop}
+                    lifted={moving.lifted}
+                  />
+                </div>
               </div>
-              <div className="min-w-0 pb-1">
-                <StopCard
-                  stop={stop}
-                  color={color}
-                  selected={selected.includes(stop.place_id)}
-                  onToggleSelected={() => onToggle(stop.place_id)}
-                  selectionDisabled={locked}
-                  isNew={fresh.has(stop.place_id)}
-                  visited={visited && isVisited}
-                  visitLocked={visitLocked}
-                  onToggleVisited={() => onToggleVisited(stop.place_id, !isVisited)}
-                  editing={editing}
-                  removed={removed.includes(stop.place_id)}
-                  onToggleRemoved={() => onToggleRemoved(stop.place_id)}
-                  onHover={onHoverStop}
-                />
-              </div>
-            </div>
+            </li>
+          );
+        })}
+        {freeEvening && (
+          <li>
+            <LineNote
+              icon="moon"
+              className="text-evening"
+              line={
+                <span className="absolute inset-x-0 top-2.5 flex justify-center" aria-hidden>
+                  <span className="size-2.5 rounded-full border-2 border-evening bg-surface" />
+                </span>
+              }
+            >
+              <p className="font-bold">{freeEvening}</p>
+              {onFindVenues && lastStop && (
+                <button
+                  type="button"
+                  onClick={() => onFindVenues(lastStop)}
+                  className="inline-flex items-center gap-1.5 font-bold text-ink underline-offset-3 hover:underline"
+                >
+                  <Icon name="utensils" size={15} />
+                  Find places to eat &amp; drink
+                </button>
+              )}
+            </LineNote>
           </li>
-        );
-      })}
-      {freeEvening && (
-        <li>
-          <LineNote
-            icon="moon"
-            className="text-evening"
-            line={
-              <span className="absolute inset-x-0 top-2.5 flex justify-center" aria-hidden>
-                <span className="size-2.5 rounded-full border-2 border-evening bg-surface" />
-              </span>
-            }
-          >
-            <p className="font-bold">{freeEvening}</p>
-            {onFindVenues && lastStop && (
-              <button
-                type="button"
-                onClick={() => onFindVenues(lastStop)}
-                className="inline-flex items-center gap-1.5 font-bold text-ink underline-offset-3 hover:underline"
-              >
-                <Icon name="utensils" size={15} />
-                Find places to eat &amp; drink
-              </button>
-            )}
-          </LineNote>
-        </li>
+        )}
+      </ol>
+      {movable && (
+        <p id={instructionsId} className="sr-only">
+          Drag the stop&apos;s number up or down. Or press Space, move it with the arrow keys, and
+          press Space again to drop it.
+        </p>
       )}
-    </ol>
+      <p aria-live="assertive" className="sr-only">
+        {announcement}
+      </p>
+    </div>
   );
 }
 
@@ -834,6 +908,15 @@ export default function PlanResult({
   const editing = edit !== null && edit.key === selectionKey ? edit : null;
   const planned = new Set(plan.days.flatMap((d) => d.stops.map((s) => s.place_id)));
   const canEdit = onEditDay !== null && !draft && !replacing && !applying;
+  // Stops move by dragging on a saved day, and again in a draft that only moved them.
+  const reordered = draft && onlyReordered(plan.edit, day.day);
+  const canReorder =
+    onEditDay !== null &&
+    (!draft || reordered) &&
+    !replacing &&
+    !applying &&
+    !editing &&
+    selected.length === 0;
   const changeEdit = (change: Partial<{ remove: number[]; add: PlaceRef[] }>) =>
     setEdit({ key: selectionKey, remove: [], add: [], ...editing, ...change });
 
@@ -977,12 +1060,18 @@ export default function PlanResult({
               </div>
             )}
           </div>
-          {(editing || !draft) && (
-            <p className="flex items-center gap-1.5 text-meta text-ink-3">
-              <Icon name={editing ? "pencil" : "swap"} size={14} />
+          {(editing || !draft || reordered) && (
+            <p role="status" className="flex items-center gap-1.5 text-meta text-ink-3">
+              <Icon name={editing ? "pencil" : canReorder ? "grip" : "swap"} size={14} />
               {editing
                 ? "Take stops out or add places, then apply."
-                : "Tick stops to replace them with new places."}
+                : editingDay
+                  ? "Planning the day in your order…"
+                  : reordered
+                    ? "Drag a stop by its number to move it again."
+                    : canReorder
+                      ? "Tick stops to replace them, or drag one by its number to move it."
+                      : "Tick stops to replace them with new places."}
             </p>
           )}
           <DayStops
@@ -1011,6 +1100,8 @@ export default function PlanResult({
                 ? (near) => onFindVenues(day.day, null, near)
                 : null
             }
+            onReorder={canReorder && onEditDay ? (order) => onEditDay(day.day, { order }) : null}
+            planning={editingDay}
           />
           {editing && (
             <AddPlaces

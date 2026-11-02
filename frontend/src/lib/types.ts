@@ -254,6 +254,8 @@ export interface PlanEdit {
   next: PlaceRef | null;
   /** The stop the next one follows; null: it comes first, after any visited stops. */
   after: PlaceRef | null;
+  /** The order the traveller put the stops in (day edits); empty: the optimizer's. */
+  order: PlaceRef[];
   /** Last-resort changes to stops the traveller did not tick. */
   adjustments: Adjustment[];
   /** Planned stops the change leaves out: shown before a draft is saved. */
@@ -368,6 +370,9 @@ export interface DayEditRequest {
   start?: { lat: number; lon: number } | null;
   /** Minutes to stay at the added places and the next stop; by default, by kind of place. */
   stay_min?: number | null;
+  /** Every stop of the day not visited (and the places added), in the order to visit them:
+   * the day keeps it, nothing reordered or dropped. Not with `next`. */
+  order?: number[] | null;
 }
 
 export interface TripUpdate {

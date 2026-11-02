@@ -14,6 +14,9 @@ what it drops, and why.
   from it. It is visited when the traveller gets there: a place to eat or drink is not held
   to the hours its kind usually keeps (dinner and bars from 20:00), nor to its own opening
   hours.
+- `order`, the traveller's own (stops moved by hand), is kept as it is after the visited
+  stops: nothing is reordered or dropped, and the draft says what it costs: a day that runs
+  late, visits past closing time or dark, and the extra way compared with the plan's order.
 - The day keeps its end: back at the hotel on round trips, else wherever its last stop is.
 - The day may run until the end of its hours plus REPLAN_GRACE_MIN, whatever the pace.
   Stops drop only beyond that, or when they would be reached closed or dark: least
@@ -70,6 +73,9 @@ from app.services.trip_planner import (
     window_of,
 )
 from app.services.weather_service import WeatherProvider, hhmm, outdoor_conditions
+
+# A traveller's own order that adds less than this to the day's way is not worth a word.
+MIN_EXTRA_M = 100
 
 
 def _names(stops: Sequence[PlannedStop]) -> str:
@@ -233,6 +239,13 @@ async def edit_day(
     ]
     if not (done_stops or kept or added):
         raise PlanningError(f"Keep at least one stop on day {day}.")
+    if edit.order is not None and set(edit.order) != {s.id for s in [*kept, *added]}:
+        if done := [on_day[i] for i in edit.order if i in visited]:
+            raise PlanningError(f"{_names(done)}: visited places stay first.")
+        raise PlanningError(
+            f"The order does not match the stops of day {day} you have not visited: the trip "
+            "may have changed. Open it again."
+        )
 
     # The stops planned up to `after` keep their order before the next stop. Visited stops
     # come first anyway: after one of them, the next stop follows them all.
@@ -259,7 +272,7 @@ async def edit_day(
             provider=distances,
             start=StartPoint(start.lat, start.lon, start.round_trip) if start else None,
             origin=origin,
-            first=[*lead, edit.next] if edit.next is not None else [],
+            first=[*lead, edit.next] if edit.next is not None else list(edit.order or []),
             protected=[s.id for s in added],
             modes=plan.modes,
             transit=transit,
@@ -299,13 +312,20 @@ async def edit_day(
     ]
     warnings = []
     if result.end_min > window.end_min + REPLAN_GRACE_MIN:
+        cause = "this order takes" if edit.order is not None else "the places you chose take"
         warnings.append(
             f"Day {day} ends at {hhmm(result.end_min)} instead of {hhmm(window.end_min)}: "
-            "the places you chose take that long."
+            f"{cause} that long."
         )
     warnings += [
         f"{names[s.id]} closes, or it gets dark, before the visit ends." for s in result.late
     ]
+    extra_m = edited.distance_m - target.distance_m
+    if edit.order is not None and not (edit.remove or adding) and extra_m >= MIN_EXTRA_M:
+        warnings.append(
+            f"This order is {extra_m / 1000:.1f} km longer than the planned one "
+            f"({edited.distance_m / 1000:.1f} km in all)."
+        )
     warnings += opening_warnings(current.visits, chosen, names, details, target.date, city)
     change = PlanEdit(
         day=day,
@@ -316,6 +336,7 @@ async def edit_day(
         after=PlaceRef(place_id=edit.after, name=names[edit.after])
         if edit.after is not None
         else None,
+        order=[PlaceRef(place_id=i, name=names[i]) for i in edit.order or []],
         dropped=dropped,
         warnings=warnings,
     )

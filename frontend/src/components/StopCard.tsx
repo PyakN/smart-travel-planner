@@ -37,6 +37,8 @@ export interface StopCardProps {
   removed: boolean;
   onToggleRemoved: () => void;
   onHover: (placeId: number | null) => void;
+  /** Picked up to move it to another place in the day: it floats above the others. */
+  lifted?: boolean;
 }
 
 // About two lines of the card's text column; longer descriptions get a More button.
@@ -93,6 +95,7 @@ export default function StopCard({
   removed,
   onToggleRemoved,
   onHover,
+  lifted = false,
 }: StopCardProps) {
   const [expanded, setExpanded] = useState(false);
   const tags = [
@@ -123,7 +126,8 @@ export default function StopCard({
       onMouseEnter={() => onHover(stop.place_id)}
       onMouseLeave={() => onHover(null)}
       className={cn(
-        "rounded-panel border p-3 transition-[border-color,background-color,opacity] duration-200",
+        "rounded-panel border p-3 transition-[border-color,background-color,opacity,box-shadow] duration-200",
+        lifted && "shadow-float",
         removed
           ? "border-dashed border-line-strong bg-surface opacity-55"
           : selected
