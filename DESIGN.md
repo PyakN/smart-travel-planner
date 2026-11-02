@@ -204,12 +204,12 @@ Two families, clearly distinct. **Barlow Semi Condensed** carries the signage vo
 Flat by default. Hairline borders do the separating, and only floating layers cast shadows.
 
 ### Shadow Vocabulary
-- `float`: `0 12px 32px -12px rgb(20 32 43 / 0.28), 0 2px 6px rgb(20 32 43 / 0.08)`, for map overlay cards, popovers, autocomplete lists and dialogs.
+- `float`: `0 12px 32px -12px rgb(20 32 43 / 0.28), 0 2px 6px rgb(20 32 43 / 0.08)`, for map overlay cards, popovers, autocomplete lists, dialogs and a stop being moved.
 - `bar`: `0 -8px 24px -12px rgb(20 32 43 / 0.18)`, for the sticky action bars at the bottom of the sidebar.
 - Map markers: `0 1px 3px rgb(20 32 43 / 0.35)`.
 
 ### Named Rules
-- **Cards don't float.** In-flow cards have a border, never a shadow.
+- **Cards don't float.** In-flow cards have a border, never a shadow, but for a stop lifted to move it, while it moves.
 
 ## Shapes
 
@@ -259,7 +259,7 @@ The day as a transit line, as set out in the Overview. Each row has, in order:
 - the roundel: 28px, the day colour, white numeral, with a 2px white ring;
 - the stop card.
 
-Travel legs sit on the rail between stops ("Walk 12 min · 900 m", ride badges in the line's own colour). Free time, departures and the free evening are rail annotations with their own icons, not cards. Each time a day or a plan version comes on screen, the list is revealed from the top down (520ms, ease-out-expo), so the line reads as drawing itself. Under reduced motion it renders complete. Visited stops turn their roundel `go` green with a check.
+Travel legs sit on the rail between stops ("Walk 12 min · 900 m", ride badges in the line's own colour). Free time, departures and the free evening are rail annotations with their own icons, not cards. Each time a day or a plan version comes on screen, the list is revealed from the top down (520ms, ease-out-expo), so the line reads as drawing itself. Under reduced motion it renders complete. Visited stops turn their roundel `go` green with a check. On a saved trip, the roundel of a stop not visited is its drag handle (a 44px target; it grows a little on hover): the stop lifts with the `float` shadow, the only time an in-flow card floats, and the stops it passes slide aside (200ms) to show where it will land. Dropped, it settles into its slot while the day is planned in that order. Space, the arrow keys and Escape do the same from the keyboard, spoken as it goes.
 
 ### Motion
 One authored moment per surface: the proof card's two routes on the empty planner, and the itinerary's top-down reveal when a plan arrives. Action bars and dialogs rise 6px as they appear (260ms). Under reduced motion, entrances and reveals land at once, while colour changes and the switch thumb still show state.

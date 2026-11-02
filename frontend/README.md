@@ -26,7 +26,7 @@ npm run test:e2e     # Playwright end-to-end tests (see below)
 
 ## End-to-end tests
 
-`e2e/*.spec.ts` drive the real app in Chromium, at desktop (1440 px) and phone (Pixel 7) sizes: plan a trip, switch days and reopen its share link; a plan made without the AI; the warning for a request that names another city; replace a stop and undo it; sign up, save a plan, tick a stop visited and reopen it from My trips; log in before saving.
+`e2e/*.spec.ts` drive the real app in Chromium, at desktop (1440 px) and phone (Pixel 7) sizes: plan a trip, switch days and reopen its share link; a plan made without the AI; the warning for a request that names another city; replace a stop and undo it; sign up, save a plan, tick a stop visited and reopen it from My trips; move a saved day's stops by dragging and with the keyboard, then save the order; log in before saving.
 
 `npm run test:e2e` starts both servers itself (`playwright.config.ts`):
 
