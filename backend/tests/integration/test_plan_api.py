@@ -125,6 +125,23 @@ def test_hotel_round_trip(client: TestClient, llm: FakeProvider, place_ids: dict
     hotel = [ROSSIO["lon"], ROSSIO["lat"]]
     assert day["segments"][0]["geometry"][0] == day["segments"][-1]["geometry"][-1] == hotel
     assert day["stops"][0]["distance_from_previous_m"] > 0
+    # The way back is drawn as it goes: an estimated ride is a straight line.
+    assert day["return_mode"] == day["segments"][-1]["mode"]
+
+
+def test_how_a_round_trip_gets_back(
+    client: TestClient, llm: FakeProvider, place_ids: dict[str, int]
+) -> None:
+    belem = {"lat": 38.6970, "lon": -9.2060}  # 6 km west of the stops
+    queue_relaxed_day(llm, place_ids)
+    [day] = post_plan(client, start={**belem, "round_trip": True}).json()["days"]
+    assert day["return_mode"] == "transit"
+    queue_relaxed_day(llm, place_ids)
+    [walked] = post_plan(client, start={**belem, "round_trip": True}, modes=["walk"]).json()["days"]
+    assert walked["return_mode"] == "walk"
+    queue_relaxed_day(llm, place_ids)
+    [one_way] = post_plan(client, start=belem).json()["days"]
+    assert one_way["return_mode"] is None
 
 
 def test_must_visit_and_walking_only(

@@ -257,6 +257,11 @@ class PlannedDay(BaseModel):
         description="HH:MM: when the day's stops are done and a free evening begins, on days "
         "whose hours run past 20:00 and go on at least an hour after the last stop",
     )
+    return_mode: TravelMode | None = Field(
+        default=None,
+        description="How the day gets back to the start point on round trips; None without "
+        "a way back (and on plans saved before days said so)",
+    )
 
 
 class PlaceRef(BaseModel):

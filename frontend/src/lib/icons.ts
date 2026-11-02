@@ -36,6 +36,7 @@ const ICONS = {
   "chevron-down": '<path d="M6 9l6 6 6-6"/>',
   trash:
     '<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12.5A1.5 1.5 0 0 0 8.5 21h7a1.5 1.5 0 0 0 1.5-1.5L18 7"/><path d="M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/>',
+  download: '<path d="M12 4v11M7 10.5l5 5 5-5"/><path d="M5 19.5h14"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
   sunset:
     '<path d="M3 18h18M7 21h10"/><path d="M7.5 18a4.5 4.5 0 0 1 9 0"/><path d="M12 3v6M9 6l3 3 3-3"/>',

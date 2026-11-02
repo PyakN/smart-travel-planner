@@ -10,6 +10,7 @@ import {
   getMe,
   getPlan,
   getTrip,
+  gpxUrl,
   listCities,
   listTrips,
   logIn,
@@ -76,6 +77,13 @@ describe("getPlan", () => {
     await getPlan(3, fetchImpl);
     const [url] = fetchImpl.mock.calls[0] as unknown as [string];
     expect(url).toBe("/api/plans/3");
+  });
+});
+
+describe("gpxUrl", () => {
+  it("downloads every day, or one", () => {
+    expect(gpxUrl(3)).toBe("/api/plans/3/gpx");
+    expect(gpxUrl(3, 2)).toBe("/api/plans/3/gpx?day=2");
   });
 });
 
