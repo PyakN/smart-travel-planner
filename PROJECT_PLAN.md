@@ -203,7 +203,7 @@ A traveller saves a trip, ticks off places during the day and changes the rest o
 - [ ] CI/CD (GitHub Actions)
 - [ ] Hosting: Render (API), Neon (PostGIS), Vercel (frontend). The frontend is on Vercel. Ready for the API: a Blueprint (`render.yaml`: free plan in Frankfurt next to Neon, deploys once CI passes), migrations as the image starts (no pre-deploy step on the free plan), an origin secret so that the API answers only the website (Vercel's proxy adds it; otherwise a caller skipping Vercel could claim any `X-Forwarded-For`), and connections checked before use (Neon closes them when it suspends). Rehearsed locally with the Render settings against Neon, read-only
 - [ ] Secrets via hosting environment variables
-- [ ] Demo link and screenshots in the README
+- [x] Demo link and screenshots in the README: https://smart-travel-planner-liard.vercel.app, a sample 2-day Lisbon plan, and three screenshots of the live site (`docs/screenshots/`: the planner, a day with walks and rides, a day on a phone)
 
 ## Phase 9. Post-MVP
 - [ ] Export (GPX, Google Maps link)

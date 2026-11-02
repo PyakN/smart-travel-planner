@@ -7,6 +7,17 @@ A travel planner with a two-layer architecture:
 
 Stack: FastAPI · PostgreSQL + PostGIS · Next.js + Leaflet. Roadmap: [PROJECT_PLAN.md](PROJECT_PLAN.md). Dev rules: [CLAUDE.md](CLAUDE.md).
 
+## Demo
+
+**Live:** https://smart-travel-planner-liard.vercel.app, for example [a 2-day plan of Lisbon](https://smart-travel-planner-liard.vercel.app/?plan=18). The API runs on a free plan that sleeps when idle, so the first request after a quiet spell can take about a minute ([Render and Vercel](#render-and-vercel)).
+
+![Day 2 of the plan: Torre de Belém, the Padrão dos Descobrimentos, the Jerónimos and the MAAT on foot, then rides to the Museu Nacional de Arte Antiga and the Gulbenkian](docs/screenshots/plan.webp)
+
+<p>
+  <img src="docs/screenshots/planner.webp" alt="The planner: choose a city, describe the trip in your own words, and a benchmark of the optimizer's route against the AI's own order" height="400">
+  <img src="docs/screenshots/phone.webp" alt="Day 1 on a phone: the castle, the Baixa and Alfama on foot" height="400">
+</p>
+
 ## Layout
 
 ```
