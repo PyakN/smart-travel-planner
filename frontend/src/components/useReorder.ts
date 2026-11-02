@@ -58,8 +58,9 @@ export interface ReorderOptions {
   count: number;
   /** The first slot a row may move to. */
   min: number;
-  /** A row moved from `from` to `to`; the rows stay in their new order until it settles. */
-  onDrop: (from: number, to: number) => Promise<unknown> | void;
+  /** A row moved from `from` to `to` (with the keyboard: its handle should keep the focus);
+   * the rows stay in their new order until it settles. */
+  onDrop: (from: number, to: number, keyboard: boolean) => Promise<unknown> | void;
   /** Spoken as the row moves: "Sé: stop 3 of 5." */
   announce: (message: string) => void;
   /** A row's name, for what is spoken. */
@@ -88,7 +89,7 @@ export function useReorder({ count, min, onDrop, announce, name }: ReorderOption
     return { scroller, scrollTop, spans };
   }
 
-  function drop(from: number, to: number, spans: Span[]) {
+  function drop(from: number, to: number, spans: Span[], keyboard: boolean) {
     if (to === from) {
       setDrag(null);
       return;
@@ -96,7 +97,7 @@ export function useReorder({ count, min, onDrop, announce, name }: ReorderOption
     setDrag({ from, to, dy: null, dropped: true, spans });
     announce(`${name(from)} moved to stop ${to + 1}. Planning the day in this order.`);
     // A new plan replaces the list; if none comes, the rows go back.
-    void Promise.resolve(onDrop(from, to)).finally(() => setDrag(null));
+    void Promise.resolve(onDrop(from, to, keyboard)).finally(() => setDrag(null));
   }
   // The window's listeners call the latest drop.
   const dropRef = useRef(drop);
@@ -142,7 +143,7 @@ export function useReorder({ count, min, onDrop, announce, name }: ReorderOption
     const end = (event: globalThis.PointerEvent) => {
       if (event.pointerId !== p.pointerId) return;
       stop();
-      if (p.started && event.type === "pointerup") dropRef.current(p.from, p.to, p.spans);
+      if (p.started && event.type === "pointerup") dropRef.current(p.from, p.to, p.spans, false);
       else setDrag(null);
     };
     const escape = (event: globalThis.KeyboardEvent) => {
@@ -208,7 +209,7 @@ export function useReorder({ count, min, onDrop, announce, name }: ReorderOption
       announce(`${name(index)}: stop ${to + 1} of ${count}.`);
     } else if (pick) {
       event.preventDefault();
-      drop(drag.from, drag.to, drag.spans);
+      drop(drag.from, drag.to, drag.spans, true);
     } else if (key === "Escape") {
       event.preventDefault();
       setDrag(null);

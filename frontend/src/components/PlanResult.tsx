@@ -569,6 +569,8 @@ function DayStops({
   onFindVenues,
   onReorder,
   planning,
+  focusStop,
+  onFocused,
 }: {
   day: PlannedDay;
   selected: number[];
@@ -586,10 +588,14 @@ function DayStops({
   onHoverStop: PlanResultProps["onHoverStop"];
   /** Search places to eat and drink near the day's last stop; null when it cannot. */
   onFindVenues: ((near: PlannedStop) => void) | null;
-  /** Plan the day with its stops not visited in this order; null when they cannot move. */
-  onReorder: ((order: number[]) => Promise<boolean>) | null;
+  /** Plan the day with its stops not visited in this order (`focus`: the stop whose handle
+   * keeps the focus); null when they cannot move. */
+  onReorder: ((order: number[], focus: number | null) => Promise<boolean>) | null;
   /** A change of the day is being planned. */
   planning: boolean;
+  /** The stop moved with the keyboard last: its handle takes the focus, once. */
+  focusStop: number | null;
+  onFocused: () => void;
 }) {
   const color = dayColor(day.day);
   const lastStop = day.stops.at(-1);
@@ -601,16 +607,26 @@ function DayStops({
   const reorder = useReorder({
     count: day.stops.length,
     min: visitedLead(day.stops, done),
-    onDrop: (from, to) => {
+    onDrop: (from, to, keyboard) => {
       const order = newOrder(day.stops, done, from, to);
-      return order && onReorder ? onReorder(order) : undefined;
+      const focus = keyboard ? day.stops[from].place_id : null;
+      return order && onReorder ? onReorder(order, focus) : undefined;
     },
     announce: setAnnouncement,
     name: (i) => day.stops[i].name,
   });
+  // The list comes back as a new plan: the handle moved with the keyboard keeps the focus.
+  const list = useRef<HTMLOListElement>(null);
+  const focused = useEffectEvent(onFocused);
+  useEffect(() => {
+    if (focusStop === null) return;
+    list.current?.querySelector<HTMLElement>(`[data-stop="${focusStop}"]`)?.focus();
+    focused();
+  }, [focusStop]);
   return (
     <div>
       <ol
+        ref={list}
         aria-busy={planning}
         className={cn(
           "motion-safe:animate-reveal-down",
@@ -682,6 +698,7 @@ function DayStops({
                     <button
                       type="button"
                       {...reorder.handle(i)}
+                      data-stop={stop.place_id}
                       disabled={planning}
                       aria-label={`Move ${stop.name}, stop ${i + 1} of ${day.stops.length}`}
                       aria-describedby={instructionsId}
@@ -923,6 +940,7 @@ export default function PlanResult({
   const panelId = `${ids}-panel`;
   const tabId = (n: number) => `${ids}-day-${n}`;
   const [exportOpen, setExportOpen] = useState(false);
+  const [focusStop, setFocusStop] = useState<number | null>(null);
   const exportId = `${ids}-export`;
 
   return (
@@ -1100,8 +1118,17 @@ export default function PlanResult({
                 ? (near) => onFindVenues(day.day, null, near)
                 : null
             }
-            onReorder={canReorder && onEditDay ? (order) => onEditDay(day.day, { order }) : null}
+            onReorder={
+              canReorder && onEditDay
+                ? (order, focus) => {
+                    setFocusStop(focus);
+                    return onEditDay(day.day, { order });
+                  }
+                : null
+            }
             planning={editingDay}
+            focusStop={editingDay ? null : focusStop}
+            onFocused={() => setFocusStop(null)}
           />
           {editing && (
             <AddPlaces
