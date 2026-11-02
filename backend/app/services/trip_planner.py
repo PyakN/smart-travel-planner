@@ -275,6 +275,7 @@ def planned_day(
         sunrise=hhmm(window.sunrise_min) if window.sunrise_min is not None else None,
         sunset=hhmm(window.sunset_min) if window.sunset_min is not None else None,
         free_from=free_evening(day),
+        return_mode=day.return_leg.mode if day.return_leg else None,
     )
 
 
