@@ -1,6 +1,8 @@
 """Schemas the LLM fills in. Kept free of numeric constraints (not every provider's
 structured output supports them); values are normalized by validators instead."""
 
+import html
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -13,6 +15,14 @@ STOPS_PER_DAY: dict[Pace, int] = {"relaxed": 4, "moderate": 6, "intense": 8}
 MAX_DAYS = 7
 MAX_KEYWORDS = 8
 MAX_REQUEST_CHARS = 1000
+
+# Complete character references only: "&eacute;" or "&#233;", never the "&not" of "&nothing".
+_CHAR_REFERENCE = re.compile(r"&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]*);", re.IGNORECASE)
+
+
+def plain_text(text: str) -> str:
+    """`text` with HTML character references decoded: models sometimes write "Bel&eacute;m"."""
+    return _CHAR_REFERENCE.sub(lambda m: html.unescape(m[0]), text)
 
 
 class TripRequest(BaseModel):
@@ -42,13 +52,23 @@ class TripRequest(BaseModel):
     @field_validator("keywords")
     @classmethod
     def _clean_keywords(cls, keywords: list[str]) -> list[str]:
-        cleaned = [k.strip()[:50] for k in keywords if k.strip()]
+        cleaned = [plain_text(k).strip()[:50] for k in keywords if k.strip()]
         return list(dict.fromkeys(cleaned))[:MAX_KEYWORDS]
+
+    @field_validator("notes")
+    @classmethod
+    def _plain_notes(cls, notes: str) -> str:
+        return plain_text(notes)
 
 
 class PlaceNote(BaseModel):
     place_id: int
     note: str = Field(description="Why this place suits this traveller, at most 20 words")
+
+    @field_validator("note")
+    @classmethod
+    def _plain_note(cls, note: str) -> str:
+        return plain_text(note)
 
 
 class PlaceSelection(BaseModel):
@@ -57,3 +77,8 @@ class PlaceSelection(BaseModel):
         default_factory=list, description="One note per chosen place and per must-visit place"
     )
     rationale: str = Field(description="One or two sentences on why this mix fits the request")
+
+    @field_validator("rationale")
+    @classmethod
+    def _plain_rationale(cls, rationale: str) -> str:
+        return plain_text(rationale)
