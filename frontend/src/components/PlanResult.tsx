@@ -14,6 +14,7 @@ import {
 import { createPortal } from "react-dom";
 
 import DayWeather from "@/components/DayWeather";
+import ExportPanel from "@/components/ExportPanel";
 import { PlaceChip } from "@/components/MustVisitPicker";
 import PlaceSearch from "@/components/PlaceSearch";
 import StopCard from "@/components/StopCard";
@@ -838,6 +839,8 @@ export default function PlanResult({
 
   const panelId = `${ids}-panel`;
   const tabId = (n: number) => `${ids}-day-${n}`;
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportId = `${ids}-export`;
 
   return (
     <section className="space-y-6" aria-label="Trip plan">
@@ -883,7 +886,17 @@ export default function PlanResult({
         <div className="flex flex-wrap gap-2">
           <SaveButton trip={trip} onSave={onSave} saving={saving} />
           <ShareButton planId={plan.id} />
+          <Button
+            size="md"
+            icon="download"
+            aria-expanded={exportOpen}
+            aria-controls={exportId}
+            onClick={() => setExportOpen((open) => !open)}
+          >
+            Export
+          </Button>
         </div>
+        {exportOpen && <ExportPanel id={exportId} plan={plan} day={day} visited={visited} />}
         {saveError && (
           <p role="alert" className="text-small font-bold text-stop">
             {saveError}

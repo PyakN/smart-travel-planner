@@ -71,6 +71,11 @@ export function getPlan(id: number, fetchImpl: typeof fetch = fetch) {
   return request<PlanResponse>(`/plans/${id}`, { method: "GET" }, fetchImpl);
 }
 
+/** Where to download a plan as a GPX file: every day, or only `day`. */
+export function gpxUrl(planId: number, day: number | null = null): string {
+  return `${API_BASE}/plans/${planId}/gpx${day === null ? "" : `?day=${day}`}`;
+}
+
 /** Replaces stops of one day; resolves to a new plan version. */
 export function replaceStops(
   planId: number,

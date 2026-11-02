@@ -215,6 +215,8 @@ export interface PlannedDay {
   sunset: string | null;
   /** "HH:MM": when the stops are done and a free evening begins; null without one. */
   free_from: string | null;
+  /** How the day gets back to the start point on round trips; null without a way back. */
+  return_mode: TravelMode | null;
 }
 
 export interface TripRequest {
