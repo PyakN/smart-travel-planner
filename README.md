@@ -85,8 +85,9 @@ uvicorn app.main:app --reload      # http://localhost:8000/docs for interactive 
 | `GET /places` | Search: `q` (name contains, accents ignored), `city`, `category` (repeatable), `bbox=west,south,east,north`, or `lat`+`lon`+`radius_m` (sorted by distance); `limit` / `offset` |
 | `GET /places/{id}` | One place |
 | `GET /categories` | Categories with place counts (optional `city`) |
-| `POST /plan` | **Plan a trip from text**: `{"text", "city"?: slug, "start"?: {"lat", "lon", "round_trip"}, "must_visit"?: [place ids], "modes"?: ["walk", "transit"], "start_date"?: "YYYY-MM-DD", "weather_aware"?: bool, "day_start"?: "HH:MM", "day_end"?: "HH:MM", "first_day_start"?: "HH:MM", "day_count"?: 1-7, "day_hours"?: [{"start", "end"}]}` → dated days with their hours, ordered, timed stops (photo, description, personal note, opening hours, free time before them, forecast), when a free evening begins (`free_from`) and map geometry. Saved; returns `id` |
+| `POST /plan` | **Plan a trip from text**: `{"text", "city"?: slug, "start"?: {"lat", "lon", "round_trip"}, "must_visit"?: [place ids], "modes"?: ["walk", "transit"], "start_date"?: "YYYY-MM-DD", "weather_aware"?: bool, "day_start"?: "HH:MM", "day_end"?: "HH:MM", "first_day_start"?: "HH:MM", "day_count"?: 1-7, "day_hours"?: [{"start", "end"}]}` → dated days with their hours, ordered, timed stops (photo, description, personal note, opening hours, free time before them, forecast), when a free evening begins (`free_from`), how a round trip gets back to the start (`return_mode`) and map geometry. Saved; returns `id` |
 | `GET /plans/{id}` | A saved plan |
+| `GET /plans/{id}/gpx` | **The plan as a GPX file** (`?day=` for one day): see [Export](#export) |
 | `POST /plans/{id}/replace` | **Replace stops of a day**: `{"day", "place_ids"}` → a new saved version (`parent_id` = this plan), with an `edit` listing what was replaced, added, adjusted and dropped |
 | `POST /auth/signup` | Create an account and log in: `{"email", "password", "display_name"}` (password 8+ characters); 409 if the email has an account |
 | `POST /auth/login` | Log in: `{"email", "password"}`; 401 on a wrong email or password, 429 after 5 failed log-ins in 15 minutes |
@@ -134,6 +135,13 @@ Error statuses:
 - **429:** too many requests to the AI planner from this client (see [Rate limits](#rate-limits-and-llm-abuse)).
 - **503:** the LLM is not configured. When it fails, plans are [made without it](#when-the-llm-is-down).
 - **504:** planning timed out.
+
+## Export
+
+A plan leaves the app two ways, from the Export button next to the share link:
+
+- **GPX** (`GET /plans/{id}/gpx`, `?day=N` for one day): a GPX 1.1 file for Organic Maps, OsmAnd, Komoot and GPS devices, checked against the official schema. Every stop is a waypoint named by day and stop ("2.3 Torre de Belém"), with its arrival time (UTC, as GPX keeps it; past midnight on the next date), the visit, the AI's note, the description, the website and the category; the start point is one too. Every day is a track, one segment per walk or ride, along the same street-following and transit geometry the map draws. Plans are public, so their files are too.
+- **Google Maps** (the selected day, built in the browser): directions through the day's stops in their order, from the start point and back to it on round trips. Google Maps takes one way of travelling per route and at most 9 waypoints, and cannot ride through stops, so walks in a row are one route (longer ones in parts of about the same length) and each ride is a route of its own (`travelmode=transit`, `return_mode` for the way back). On a saved trip with visited stops, it goes from where the traveller is (Google Maps' own location) through the stops left.
 
 ## Accounts and saved trips
 
