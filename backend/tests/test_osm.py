@@ -51,6 +51,22 @@ class TestCategorize:
         # Pastéis de Belém: a pastry shop, even though it is an attraction.
         assert categorize({"shop": "pastry", "tourism": "attraction"}) == "cafe"
 
+    def test_buildings_mapped_as_artworks(self) -> None:
+        # Casa Batlló opens to visitors: a landmark. Casa Calvet is flats: a façade to see.
+        batllo = {
+            "tourism": "artwork",
+            "artwork_type": "architecture",
+            "building": "apartments",
+            "historic": "heritage",
+            "opening_hours": "Mo-Su 09:00-21:00",
+        }
+        assert categorize(batllo) == "landmark"
+        calvet = {k: v for k, v in batllo.items() if k != "opening_hours"}
+        assert categorize(calvet) == "monument"
+        assert categorize({**batllo, "tourism": "museum"}) == "museum"
+        # A memorial is a memorial, whatever it is mapped as too.
+        assert categorize({**batllo, "historic": "memorial"}) == "monument"
+
     def test_squares_are_landmarks_unless_something_else(self) -> None:
         assert categorize({"place": "square"}) == "landmark"
         assert categorize({"place": "square", "amenity": "marketplace"}) == "market"

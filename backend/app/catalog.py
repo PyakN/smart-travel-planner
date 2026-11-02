@@ -43,6 +43,17 @@ LATE_CLOSING_MIN = 22 * 60
 _CLOSING_TIME = re.compile(r"-\s*(\d{1,2}):(\d{2})")
 
 
+def open_building(tags: Mapping[str, str]) -> bool:
+    """A building mapped as a work of art that opens to visitors, such as Gaudí's Casa Batlló
+    and Casa Milà (`artwork_type=architecture` with opening hours): a landmark to go into,
+    not a façade to see from the street, as one without opening hours is."""
+    return (
+        tags.get("artwork_type") == "architecture"
+        and "building" in tags
+        and "opening_hours" in tags
+    )
+
+
 def is_outdoor(category: str, tags: Mapping[str, str]) -> bool:
     """Whether a visit happens in the open air, so rain, fog and darkness spoil it."""
     if tags.get("indoor") == "yes" or tags.get("covered") == "yes":
@@ -52,6 +63,8 @@ def is_outdoor(category: str, tags: Mapping[str, str]) -> bool:
     if category == "market":
         return "building" not in tags  # market halls are mapped as buildings
     if category == "landmark":
+        if open_building(tags):
+            return False
         historic = tags.get("historic")
         palace = historic == "castle" and tags.get("castle_type") in INDOOR_CASTLE_TYPES
         return not (palace or historic in INDOOR_HISTORIC)

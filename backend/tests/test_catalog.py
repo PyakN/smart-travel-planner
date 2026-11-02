@@ -31,6 +31,22 @@ from app.catalog import VisitHours, closes_late, is_outdoor, visit_hours
         ("restaurant", {"amenity": "restaurant"}, False),
         ("cafe", {"amenity": "cafe", "outdoor_seating": "yes"}, False),
         ("landmark", {"place": "square"}, True),
+        # Casa Batlló, a building mapped as an artwork that opens to visitors.
+        (
+            "landmark",
+            {
+                "tourism": "artwork",
+                "artwork_type": "architecture",
+                "building": "yes",
+                "opening_hours": "Mo-Su 09:00-21:00",
+            },
+            False,
+        ),
+        (
+            "monument",
+            {"tourism": "artwork", "artwork_type": "architecture", "building": "yes"},
+            True,
+        ),
     ],
 )
 def test_is_outdoor(category: str, tags: dict[str, str], outdoor: bool) -> None:
