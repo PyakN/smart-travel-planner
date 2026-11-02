@@ -108,6 +108,9 @@ test("moves stops of a saved day by dragging and with the keyboard", async ({ pa
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Space");
   await expect(stopNames(plan)).toHaveText([a, c, b, ...rest]);
+  // The new list keeps the focus on the stop moved.
+  await expect(handle(b)).toBeFocused();
+  await expect(handle(b)).toHaveAccessibleName(`Move ${b}, stop 3 of ${count}`);
 
   // Saved, the trip keeps the order.
   await page.getByRole("button", { name: "Save changes" }).click();
