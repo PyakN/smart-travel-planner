@@ -195,11 +195,13 @@ def parse_imageinfo(payload: Mapping[str, Any]) -> dict[str, Photo]:
 async def fetch_photos(client: httpx.AsyncClient, files: Sequence[str]) -> dict[str, Photo]:
     found: dict[str, Photo] = {}
     for batch in _batches(sorted({_file_name(f) for f in files}), COMMONS_BATCH):
+        # A form, not the URL: 50 titles in Thai or Japanese, percent-encoded, are too long
+        # for a URL (414).
         payload = await _get_json(
             client,
-            "GET",
+            "POST",
             COMMONS_API_URL,
-            params={
+            data={
                 "action": "query",
                 "format": "json",
                 "formatversion": "2",
@@ -252,9 +254,9 @@ async def fetch_extracts(client: httpx.AsyncClient, titles: Sequence[str]) -> di
     for batch in _batches(sorted({_title(t) for t in titles}), WIKIPEDIA_BATCH):
         payload = await _get_json(
             client,
-            "GET",
+            "POST",
             WIKIPEDIA_API_URL,
-            params={
+            data={
                 "action": "query",
                 "format": "json",
                 "formatversion": "2",
