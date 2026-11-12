@@ -48,11 +48,12 @@ pip install -e ".[dev]" pre-commit
 # 4. Schema + data (from backend/)
 alembic upgrade head
 python -m app.ingest lisbon        # ~7.2k places from OpenStreetMap (5k to eat and drink), ~1 min
-python -m app.ingest.enrich lisbon # photos + descriptions from Wikimedia, ~1 min
-python -m app.ingest berlin        # ~19.7k places (13k to eat and drink)
-python -m app.ingest.enrich berlin
-python -m app.ingest barcelona     # ~11.3k places (8.5k to eat and drink)
-python -m app.ingest.enrich barcelona
+python -m app.ingest.enrich lisbon # photos, descriptions, fame and English names from Wikimedia, ~1 min
+# Any other city the same way, by its slug (GET /cities lists them), or all 47 (~520k places;
+# about an hour and a half the first time, a quarter of an hour from the caches):
+for city in $(python -c "from app.ingest.cities import CITIES; print(*CITIES)"); do
+  python -m app.ingest "$city" && python -m app.ingest.enrich "$city"
+done
 
 # 5. Frontend
 cd ../frontend
@@ -65,11 +66,28 @@ pre-commit install
 
 Run it: start the API (`cd backend && uvicorn app.main:app --reload`) and the UI (`cd frontend && npm run dev`), then open http://localhost:3000. The UI proxies `/api/*` to the backend; see [frontend/README.md](frontend/README.md).
 
-The importer caches the raw Overpass response in `backend/data/raw/`. Re-runs use the cache and upsert by OSM id; pass `--refresh` to fetch fresh data. An answer Overpass cut short (it ran out of time or memory) counts as a failure, so it is never cached.
+The importer caches the raw Overpass response in `backend/data/raw/`. Re-runs use the cache and upsert by OSM id; pass `--refresh` to fetch fresh data. An answer Overpass cut short (it ran out of time or memory) counts as a failure, so it is never cached. Three public Overpass servers are tried in turn (overpass-api.de, overpass.kumi.systems, maps.mail.ru): while the cities were imported, the first answered 502 for hours and the second not at all, and the third failed now and then, so a city may need a second run. Only the tags the app reads are stored (`KEPT_TAGS` in `app/ingest/osm.py`: about half of a place's tags, which keeps the cities within the free database plan, see [Render and Vercel](#render-and-vercel)); the cache keeps them all, so a re-import brings back any tag the app starts to read, and a test fails when the app reads one that is not kept.
 
-**Cities:** Lisbon, Berlin and Barcelona, each with its bounding box, time zone and country (for public holidays in opening hours) in `app/ingest/cities.py`; `GET /cities` lists them. A plan is for the city its text names, or the one in `city` (`POST /plan`). Holidays are national only: Berlin's and Catalonia's own are not known. Places that OSM marks as closed in their name or hours ("(geschlossen)", "Cerrado permanentemente") are skipped in English, Portuguese, German, Spanish and Catalan. In the frontend the traveller chooses the city (each with its local time); the map, the clock and dates, the place search and the example requests follow it, and the plan request sends it as `city`. A request text that names another city gets a warning with a one-click switch before planning (the backend would refuse it with a 422). Changing the city clears the start point and must-visit places, which belong to the old city, with an Undo. Shared plans and saved trips open in their own city; `?city=<slug>` links to a city, and the last city chosen is remembered on the device.
+**Cities:** 47 in `app/ingest/cities.py`, each with its bounding box, time zone and country (for public holidays in opening hours); `GET /cities` lists them, Lisbon (the default) first.
 
-`app.ingest.enrich` adds what the stop cards show: a photo from Wikimedia Commons (thumbnail, author and licence), and a short description from English Wikipedia or Wikidata. Opening hours and websites come from the OSM tags. It also counts how many Wikipedia languages cover each place (`wikipedia_languages`), the fame that ranks candidates (see [LLM layer](#llm-layer)). Its answers are cached in `backend/data/raw/<city>-wiki.json` (`--refresh` asks again; answers cached before the count existed are asked again by themselves). Places with a photo, with a description and in some Wikipedia: Lisbon 644, 451 and 422; Berlin 3,070, 2,943 and 1,399; Barcelona 859, 561 and 686.
+| | |
+|---|---|
+| Europe | Amsterdam, Athens, Barcelona, Berlin, Brussels, Budapest, Copenhagen, Dublin, Edinburgh, Florence, Istanbul, Kraków, Lisbon, London, Madrid, Milan, Munich, Naples, Oslo, Paris, Porto, Prague, Rome, Seville, Stockholm, Valencia, Venice, Vienna, Warsaw |
+| The Americas | Buenos Aires, Mexico City, Montreal, New York, Rio de Janeiro, San Francisco, Washington, D.C. |
+| Asia | Bangkok, Dubai, Hong Kong, Kyoto, Seoul, Singapore, Taipei, Tokyo |
+| Africa and Oceania | Cape Town, Marrakesh, Sydney |
+
+- **Area:** the bbox of the city's administrative boundary (as Nominatim has it), unless that is far too big or wrong: Tokyo is its 23 wards (the metropolis reaches Pacific islands), Istanbul its central districts on both shores, Dubai, Sydney, Cape Town and Oslo their built-up centres, Singapore its main island and Sentosa, San Francisco the city without the Farallon Islands. Places come from the whole bbox, so New York's takes in Jersey City and Hoboken, except where it crosses a border a walk should not: Hong Kong's places come only from inside Hong Kong (its bbox takes in Shenzhen) and Singapore's from inside Singapore (Johor Bahru), each city's OSM boundary filtering the Overpass query (`boundary` in `cities.py`).
+- **Names:** a plan is for the city its text names, or the one in `city` (`POST /plan`). Names match without accents, in local spellings too ("Wien", "München", "Praha", "CDMX"). Washington is "Washington, D.C.": "Washington Square" in a New York request names no city, while "washington" from the LLM still means it. Nice is left out for now: "a nice day" would name it.
+- **Holidays** are national only (Berlin's and Catalonia's own are not known), and Bangkok, Dubai and Taipei have none: the opening hours parser knows no Thai, Emirati or Taiwanese holidays, so their "PH" rules read as unknown.
+- **Closed places** that OSM still maps, by their name or hours, are skipped in the cities' languages: "(geschlossen)", "Cerrado permanentemente", "(chiuso)", "tijdelijk gesloten", "（閉店）" and more (`app/ingest/osm.py`).
+- **Names in other scripts:** a place whose OSM name is not in Latin letters (Tokyo, Seoul, Taipei, Athens, Bangkok, Hong Kong, Dubai) goes by its English name or a romanization when OSM has one ("浅草寺" is "Sensō-ji"), else by the English label of its Wikidata item (`app.ingest.enrich`); the OSM name stays in the tags, and the place search finds it ("金閣寺"). A place with neither keeps its OSM name: 102,167 places do, 86% of them in Seoul, Tokyo and Taipei, mostly small venues, shrines and churches: of the sights in some Wikipedia, which lead the candidates, 81 of Tokyo's 2,248 and none of Seoul's 183 places do, most of them small venues in Seoul, Taipei and Tokyo.
+
+In the frontend the traveller chooses the city (each with its local time); the map, the clock and dates, the place search and the example requests follow it, and the plan request sends it as `city`. A request text that names another city gets a warning with a one-click switch before planning (the backend would refuse it with a 422). Changing the city clears the start point and must-visit places, which belong to the old city, with an Undo. Shared plans and saved trips open in their own city; `?city=<slug>` links to a city, and the last city chosen is remembered on the device.
+
+`app.ingest.enrich` adds what the stop cards show: a photo from Wikimedia Commons (thumbnail, author and licence), and a short description from English Wikipedia or Wikidata. Opening hours and websites come from the OSM tags. It also counts how many Wikipedia languages cover each place (`wikipedia_languages`), the fame that ranks candidates (see [LLM layer](#llm-layer)). Its answers are cached in `backend/data/raw/<city>-wiki.json` (`--refresh` asks again; answers cached before something new was asked for, such as the count, are asked again by themselves). Commons and Wikipedia are asked with POST: 50 Thai file names, percent-encoded, made a URL too long for Commons (414).
+
+A Wikidata item counts for a place only when Wikidata locates it in the city (its bbox and 0.05° around). OSM often links what a place is about instead of the place: the person a statue or a grave is of (Franklin D. Roosevelt in Buenos Aires, Ulysses Grant in Tokyo, Edvard Munch in Oslo), a zoo enclosure's species, the metre for a standard-metre plaque in Paris, an organisation, another cast of a sculpture. Their fame put them first among their cities' candidates (the plaque ahead of the Eiffel Tower, the Grant memorial ahead of the Tokyo Skytree), and their portrait, description and English name would be the place's. Such an item and the Wikipedia article OSM links with it are left out: 1,488 links in all. Places with a photo, with a description and in some Wikipedia: 35,474, 34,883 and 28,693 of the 47 cities' places (Lisbon 635, 441 and 409).
 
 ## API
 
@@ -205,7 +223,7 @@ python evals/selection_eval.py     # live eval against the real LLM + DB (costs 
 
 `app/optimizer/` turns the selected places into days and walking order:
 
-- **Distances:** an OSRM foot routing matrix, falling back to haversine × 1.3. Set `ROUTING_PROVIDER` to choose. `OSRM_BASE_URL` is the public FOSSGIS server by default, which took about 10 s for most 25-point tables when measured (its 10 s timeout then falls back to straight lines). The self-hosted one in `osrm/` answers them in 50–300 ms: `docker compose --profile osrm up -d` (the first build downloads ~900 MB from Geofabrik and takes ~15 min), then `OSRM_BASE_URL=http://localhost:5000`. It knows only the areas in `osrm/areas.txt` (each city's bbox plus 3–5 km; a test keeps them in step with the cities), and a point that OSRM moves more than 1 km to reach a street falls back to haversine, rather than being measured from somewhere else.
+- **Distances:** an OSRM foot routing matrix, falling back to haversine × 1.3. Set `ROUTING_PROVIDER` to choose. `OSRM_BASE_URL` is the public FOSSGIS server by default, which took about 10 s for most 25-point tables when measured (its 10 s timeout then falls back to straight lines). The self-hosted one in `osrm/` answers them in 50–300 ms: `docker compose --profile osrm up -d` (the first build downloads ~20 GB from Geofabrik, 59 regions for the 47 cities; with 3 cities it was ~900 MB and ~15 min, and the time and memory it takes with all of them have not been measured), then `OSRM_BASE_URL=http://localhost:5000`. It knows only the areas in `osrm/areas.txt` (each city's bbox plus 3–5 km; a test keeps them in step with the cities), and a point that OSRM moves more than 1 km to reach a street falls back to haversine, rather than being measured from somewhere else.
 - **Order within a day:** a TSP solver (nearest neighbour + 2-opt + Or-opt).
 - **Split into days:** several strategies are tried and the shortest wins, with every day kept within the pace's time budget.
 - **Schedule:** arrival and departure times for each stop.
@@ -368,7 +386,7 @@ browser -> edge (Caddy: TLS, X-Forwarded-For) -> /api/*: backend (uvicorn) -> db
 
 ```bash
 cp .env.example .env    # POSTGRES_PASSWORD (letters and digits: it goes into a URL), API keys, MAPBOX_MAP_KEY
-docker compose -f docker-compose.prod.yml up -d --build   # the first build takes ~15 min (OSRM data)
+docker compose -f docker-compose.prod.yml up -d --build   # the first build downloads ~20 GB of OSRM data
 
 # Places: import them in the stack...
 docker compose -f docker-compose.prod.yml run --rm backend python -m app.ingest lisbon
@@ -400,13 +418,18 @@ browser -> Vercel (Next.js; /api/* proxied with X-Forwarded-For and X-Origin-Sec
    docker exec travel-planner-db pg_dump -U planner -d travel_planner --data-only -Fc -t places > places.dump
    docker exec -i travel-planner-db pg_restore --data-only --no-owner -d "postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require" < places.dump
    ```
+   **A city added later:** the database already has places that saved plans and trips refer to, so run the importers against it instead of restoring the table. From the caches the local import left in `backend/data/raw/`, they only write: the new city's places, and nothing else changes. Import the city before deploying the code that lists it, or the city picker offers a city without places.
+   ```bash
+   export DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@HOST/DBNAME?ssl=require"
+   python -m app.ingest tokyo && python -m app.ingest.enrich tokyo
+   ```
 2. **API on Render:** New > Blueprint with this repository. `render.yaml` sets up a Docker service on the free plan in Frankfurt (next to Neon's `eu-central-1`), checked at `/health`, deployed once a commit's CI passes. It asks for `DATABASE_URL`, the API keys and `ORIGIN_SECRET` (`python -c "import secrets; print(secrets.token_hex(32))"`). The image runs the migrations as it starts (`MIGRATE_ON_START`) and listens on Render's `PORT`. By hand instead: a Docker web service with Dockerfile Path `backend/Dockerfile`, Docker Build Context Directory `backend` and no Root Directory (with one, Render takes both paths from it), region Frankfurt, health check `/health`, and the environment `render.yaml` lists. A deploy that ran before those settings were saved fails with `open Dockerfile: no such file or directory`: deploy again from Manual Deploy.
 3. **Frontend on Vercel** (root directory `frontend`): `BACKEND_URL` (the API's URL as Render shows it), `ORIGIN_SECRET` (the same value) and `NEXT_PUBLIC_MAPBOX_TOKEN`. Redeploy after changing them: `BACKEND_URL` and `NEXT_PUBLIC_*` are fixed at build time.
 4. **Check:** the API's `/health` answers `ok`, its `/cities` answers 403 (it only answers the website), and the site plans a trip.
 
 - **Client addresses:** Vercel sets `X-Forwarded-For` to the visitor's address and Render's proxy adds its own after it, so the API takes the first one (`FORWARDED_ALLOW_IPS=*`). A caller who skips Vercel could claim any address there, so with `ORIGIN_SECRET` set the API answers only requests that carry it in `X-Origin-Secret`, which `frontend/src/proxy.ts` adds (403 otherwise; `/health` stays open for Render's checks).
 - **Neon suspends** after a few idle minutes and closes the API's connections: each one is checked before use (`pool_pre_ping`), so the next request does not fail.
-- **Free plans:** Render stops the API after 15 idle minutes and takes about a minute to start it (Vercel waits up to 120 s); the limits, the daily token budget and the caches live in memory and start afresh then. Walking distances come from the public OSRM server unless `OSRM_BASE_URL` points at a self-hosted one; a free Render instance cannot build it (it needs ~1.2 GB of RAM).
+- **Free plans:** Render stops the API after 15 idle minutes and takes about a minute to start it (Vercel waits up to 120 s); the limits, the daily token budget and the caches live in memory and start afresh then. Walking distances come from the public OSRM server unless `OSRM_BASE_URL` points at a self-hosted one; a free Render instance cannot build it (it needed ~1.2 GB of RAM for 3 cities). Neon's free plan holds 0.5 GiB: with the 47 cities the database measured 315 MiB (places 298 MiB: 171 MiB of rows, 127 MiB of indexes, the location index the largest), which leaves ~190 MiB for saved plans and trips; storing every OSM tag would have taken an estimated ~80 MB more. Enrichment rewrites every row of a city, so after importing several cities in a row, `VACUUM places` lets the next one reuse that space (autovacuum had not run since the first cities). Adding cities costs no more on any of the other services: their free tiers are used per plan (Gemini, HERE, OpenWeatherMap, Mapbox) or not at all (OSRM, Overpass, Wikidata).
 
 ## Secrets
 

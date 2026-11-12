@@ -76,6 +76,11 @@ def test_name_search(client: TestClient, q: str, expected: list[str]) -> None:
     assert names(search(client, city="lisbon", q=q)) == expected
 
 
+@pytest.mark.parametrize("q", ["Kinkaku", "金閣寺"])
+def test_name_search_finds_names_in_another_script(client: TestClient, q: str) -> None:
+    assert names(search(client, city="kyoto", q=q)) == ["Kinkaku-ji"]
+
+
 def test_name_search_puts_prefix_matches_first(client: TestClient) -> None:
     # Without the prefix rule the City Museum (with Wikidata) would come first.
     assert names(search(client, q="museum", city="testville")) == ["Museum of Toys", "City Museum"]

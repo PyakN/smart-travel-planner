@@ -310,10 +310,10 @@ def test_unknown_must_visit_is_422(client: TestClient, llm: FakeProvider) -> Non
 
 
 def test_unsupported_city_is_a_clear_422(client: TestClient, llm: FakeProvider) -> None:
-    llm.queue(trip(city="tokyo"))
+    llm.queue(trip(city="ulaanbaatar"))
     response = post_plan(client)
     assert response.status_code == 422
-    assert response.json()["detail"].startswith("'tokyo' is not supported yet")
+    assert response.json()["detail"].startswith("'ulaanbaatar' is not supported yet")
 
 
 def assert_planned_without_llm(response: Any) -> dict[str, Any]:

@@ -7,6 +7,7 @@ import pytest
 
 from app.ingest import wiki
 from app.ingest.wiki import (
+    COMMONS_BATCH,
     DESCRIPTION_MAX_CHARS,
     SPARQL_BATCH,
     Photo,
@@ -50,6 +51,11 @@ def imageinfo_page(title: str, *, artist: str = "<a href='x'>Jane</a>") -> dict[
 
 
 class TestSparql:
+    def test_coordinates_on_another_globe_are_none(self) -> None:
+        mars = "<http://www.wikidata.org/entity/Q111> Point(137.4 -4.6)"
+        payload = {"results": {"bindings": [binding("Q1", coord=mars)]}}
+        assert parse_sparql(payload)["Q1"].coords is None
+
     def test_query_skips_invalid_ids(self) -> None:
         query = sparql_query(["Q1", "Q2'}", "X3"])
         assert "VALUES ?item { wd:Q1 }" in query
@@ -64,6 +70,8 @@ class TestSparql:
                         description="theatre in Lisbon",
                         article="https://en.wikipedia.org/wiki/Teatro_da_Trindade",
                         wikipedias="7",
+                        label="Teatro da Trindade",
+                        coord="Point(-9.1426 38.7114)",
                     ),
                     binding(
                         "Q1", image="https://commons.wikimedia.org/wiki/Special:FilePath/B.jpg"
@@ -74,7 +82,12 @@ class TestSparql:
         }
         assert parse_sparql(payload) == {
             "Q1": WikidataInfo(
-                "Teatro da Trindade 2017.jpg", "theatre in Lisbon", "Teatro_da_Trindade", 7
+                "Teatro da Trindade 2017.jpg",
+                "theatre in Lisbon",
+                "Teatro_da_Trindade",
+                7,
+                "Teatro da Trindade",
+                (38.7114, -9.1426),
             ),
             "Q2": WikidataInfo(None, None, None, 0),  # in no Wikipedia
         }
@@ -205,7 +218,8 @@ def test_photo_requests_name_files_once() -> None:
     titles: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        titles.extend(request.url.params["titles"].split("|"))
+        assert request.method == "POST"
+        titles.extend(parse_qs(request.content.decode())["titles"][0].split("|"))
         return httpx.Response(200, json={"query": {"pages": [imageinfo_page("File:A b.jpg")]}})
 
     async def run() -> dict[str, Photo]:
@@ -214,6 +228,22 @@ def test_photo_requests_name_files_once() -> None:
 
     assert set(asyncio.run(run())) == {"A b.jpg"}
     assert titles == ["File:A b.jpg"]
+
+
+def test_photo_requests_fit_any_title_length() -> None:
+    # 50 Thai file names, percent-encoded, made a URL Commons refused (414).
+    files = [f"วัดพระเชตุพนวิมลมังคลาราม ราชวรมหาวิหาร {i}.jpg" for i in range(COMMONS_BATCH)]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if len(str(request.url)) > 2000:
+            return httpx.Response(414)
+        return httpx.Response(200, json={"query": {"pages": [imageinfo_page(f"File:{files[0]}")]}})
+
+    async def run() -> dict[str, Photo]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await fetch_photos(client, files)
+
+    assert set(asyncio.run(run())) == {files[0]}
 
 
 @pytest.fixture

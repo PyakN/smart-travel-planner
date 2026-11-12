@@ -5,15 +5,18 @@ import json
 from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 from sqlalchemy import select, update
 
 from app.db.models import Place
+from app.ingest.cities import CITIES
 from app.ingest.enrich import EnrichStats, WikiCache, enrich_city
 from app.ingest.wiki import WikidataInfo
 from tests.integration.conftest import SEED_FAME, SessionFactory
+from tests.integration.test_replace_api import TESTVILLE
 from tests.test_wiki import binding, imageinfo_page
 
 CATHEDRAL_IMAGE = "https://commons.wikimedia.org/wiki/Special:FilePath/Cathedral.jpg"
@@ -29,8 +32,9 @@ def wikimedia(calls: Counter[str]) -> httpx.MockTransport:
                     image=CATHEDRAL_IMAGE,
                     article="https://en.wikipedia.org/wiki/Testville_Cathedral",
                     wikipedias="12",
+                    coord="Point(7.0 45.0)",
                 ),
-                binding("Q900002", description="square in Testville"),
+                binding("Q900002", description="square in Testville", coord="Point(7.002 45.001)"),
             ]
             return httpx.Response(200, json={"results": {"bindings": bindings}})
         if request.url.host == "commons.wikimedia.org":
@@ -48,7 +52,7 @@ def wikimedia(calls: Counter[str]) -> httpx.MockTransport:
 def enrich(db_session: SessionFactory, cache: WikiCache, calls: Counter[str]) -> EnrichStats:
     async def run() -> EnrichStats:
         async with db_session() as session, httpx.AsyncClient(transport=wikimedia(calls)) as client:
-            return await enrich_city(session, client, "testville", cache)
+            return await enrich_city(session, client, TESTVILLE, cache)
 
     return asyncio.run(run())
 
@@ -105,12 +109,89 @@ def test_enrich_city(db_session: SessionFactory) -> None:
     assert not calls
 
 
-def test_cache_asks_again_for_items_saved_without_a_count(tmp_path: Path) -> None:
+def test_cache_asks_again_for_items_saved_before_counts_labels_or_coordinates(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "testville-wiki.json"
-    counted = {"image": None, "description": None, "article": None, "wikipedias": 3}
     old = {"image": "Old.jpg", "description": None, "article": None}
-    raw = {"wikidata": {"Q1": counted, "Q2": old, "Q3": None}, "photos": {}, "extracts": {}}
+    counted = old | {"wikipedias": 3}
+    labelled = counted | {"label": "X"}
+    current = labelled | {"coords": [45.0, 7.0]}
+    raw = {
+        "wikidata": {"Q1": current, "Q2": old, "Q3": None, "Q4": counted, "Q5": labelled},
+        "photos": {},
+        "extracts": {},
+    }
     path.write_text(json.dumps(raw), encoding="utf-8")
 
     cache = WikiCache.load(path)
-    assert cache.wikidata == {"Q1": WikidataInfo(None, None, None, 3), "Q3": None}
+    expected = WikidataInfo("Old.jpg", None, None, 3, "X", (45.0, 7.0))
+    assert cache.wikidata == {"Q1": expected, "Q3": None}
+
+
+@pytest.fixture
+def kyoto_names_afterwards(db_session: SessionFactory) -> Iterator[None]:
+    yield
+
+    async def restore() -> None:
+        async with db_session() as session:
+            await session.execute(update(Place).where(Place.osm_id == 10).values(name="清水寺"))
+            await session.execute(
+                update(Place).where(Place.city == "kyoto").values(wikipedia_languages=0)
+            )
+            await session.commit()
+
+    asyncio.run(restore())
+
+
+@pytest.mark.usefixtures("kyoto_names_afterwards")
+def test_names_in_another_script_take_the_english_label(db_session: SessionFactory) -> None:
+    bindings = [
+        binding("Q900301", label="Golden Pavilion", coord="Point(135.7292 35.0394)"),
+        binding("Q900302", label="Kiyomizu-dera", coord="Point(135.7850 34.9949)"),
+    ]
+    stats, places = enrich_kyoto(db_session, bindings)
+    # Kinkaku-ji keeps the English name OSM gave it.
+    assert set(places) == {"Kinkaku-ji", "Kiyomizu-dera"}
+    assert stats.english_names == 1
+
+
+def enrich_kyoto(
+    db_session: SessionFactory, bindings: list[dict[str, Any]]
+) -> tuple[EnrichStats, dict[str, int]]:
+    """Enrich Kyoto with Wikidata answering `bindings`: the stats, and each place's fame."""
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": {"bindings": bindings}})
+
+    async def run() -> tuple[EnrichStats, dict[str, int]]:
+        transport = httpx.MockTransport(answer)
+        async with db_session() as session, httpx.AsyncClient(transport=transport) as client:
+            stats = await enrich_city(session, client, CITIES["kyoto"], WikiCache())
+            rows = await session.execute(
+                select(Place.name, Place.wikipedia_languages).where(Place.city == "kyoto")
+            )
+            return stats, {name: fame for name, fame in rows}
+
+    return asyncio.run(run())
+
+
+@pytest.mark.usefixtures("kyoto_names_afterwards")
+def test_items_that_are_not_the_place_are_left_out(db_session: SessionFactory) -> None:
+    # OSM links the temple to its founder, a person Wikidata gives no location: his fame,
+    # portrait and name are not the temple's.
+    founder = "https://commons.wikimedia.org/wiki/Special:FilePath/Founder.jpg"
+    bindings = [
+        binding("Q900301", wikipedias="57", coord="Point(135.7292 35.0394)"),
+        binding("Q900302", label="Sakanoue no Tamuramaro", wikipedias="80", image=founder),
+    ]
+    # An earlier run took the founder for the temple and named it after him: undone.
+    enrich_kyoto(db_session, [binding("Q900302", label="Tamuramaro", coord="Point(135.78 34.99)")])
+    stats, places = enrich_kyoto(db_session, bindings)
+    assert places == {"Kinkaku-ji": 57, "清水寺": 0}
+    assert stats.not_the_place == 1
+    assert stats.photos == 0
+
+    # Nor is an item Wikidata places in another city (another cast of a sculpture).
+    bindings[0]["coord"] = {"value": "Point(-75.7 45.4)"}
+    assert enrich_kyoto(db_session, bindings)[1]["Kinkaku-ji"] == 0

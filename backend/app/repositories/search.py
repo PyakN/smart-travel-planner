@@ -14,10 +14,11 @@ def like_pattern(text: str, *, prefix: bool = False) -> str:
 
 
 def name_matches(terms: Sequence[str]) -> ColumnElement[bool]:
-    """Place name or English name contains any of the terms."""
+    """Place name, English name or OSM name (in its own script: "浅草寺" for Sensō-ji)
+    contains any of the terms."""
     if not terms:
         return false()
-    haystacks = [Place.name, Place.tags["name:en"].astext]
+    haystacks = [Place.name, Place.tags["name:en"].astext, Place.tags["name"].astext]
     return or_(
         *(
             func.unaccent(haystack).ilike(func.unaccent(like_pattern(term)), escape="\\")

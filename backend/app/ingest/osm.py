@@ -14,6 +14,9 @@ from app.geo import BBox, haversine_m
 OVERPASS_URLS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    # VK Maps' public instance: it answered most cities while the other two were down or
+    # overloaded (it failed now and then too).
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 )
 USER_AGENT = "smart-travel-planner/0.1 (pet project; POI import)"
 
@@ -61,17 +64,91 @@ CATEGORY_RULES: list[tuple[str, frozenset[str], str]] = [
 # Small memorials that are not worth a walk.
 SKIP_MEMORIAL_TYPES = frozenset({"plaque", "blue_plaque", "stolperstein"})
 SKIP_ACCESS = frozenset({"private", "no"})
-# Closed, in English, Portuguese, German, Spanish and Catalan.
-_CLOSED = r"closed|fechad[ao]s?|encerrad[ao]s?|geschlossen|cerrad[ao]s?|tancats?|tancad[ae]s?"
+# Closed, as a word: English, Portuguese, German, Spanish, Catalan, French, Italian, Dutch,
+# Czech, Polish, Hungarian, Swedish, Danish, Norwegian, Turkish and Greek.
+_CLOSED = (
+    r"closed|fechad[ao]s?|encerrad[ao]s?|geschlossen|cerrad[ao]s?|tancats?|tancad[ae]s?"
+    r"|fermée?s?|chius[oaie]|gesloten|zavřen[oaáéý]|zamknięt[aey]|nieczynn[aey]|zárva|bezárt"
+    r"|stängt|stängda?|lukket|stengt|kapal[ıi]|kapand[ıi]|κλειστ(?:ό|ή|ά|ός|ο|η|α|ος)"
+)
+# ...and in the scripts written without spaces between words: Japanese, Chinese, Korean
+# and Thai ("（閉店）", "(2023年閉店)").
+_CLOSED_UNSPACED = r"閉店|閉業|休業中|歇業|結業|已關閉|已关闭|폐업|폐점|ปิดกิจการ|ปิดถาวร"
 # Places OSM still maps after they closed, named like "Alma (closed)", "Solmar (Fechada)",
 # "Kantine (bis vsl 2027 geschlossen)".
-CLOSED_NAME = re.compile(rf"\((?:[^()]*\s)?({_CLOSED})\)", re.IGNORECASE)
-# ...or venues with opening hours that say so ("Fechado permanentemente", "Cerrado
-# temporalmente", "vorübergehend geschlossen"), unlike "Su off" or "Mo geschlossen".
-CLOSED_HOURS = re.compile(
-    rf"\s*((vorübergehend|temporär|zurzeit|dauerhaft|bis auf weiteres)\s+)?(off|{_CLOSED})\b",
+CLOSED_NAME = re.compile(
+    rf"[(（](?:(?:[^()（）]*\s)?(?:{_CLOSED})|[^()（）]*(?:{_CLOSED_UNSPACED}))[)）]",
     re.IGNORECASE,
 )
+# ...or venues with opening hours that say so ("Fechado permanentemente", "Cerrado
+# temporalmente", "vorübergehend geschlossen"), unlike "Su off" or "Mo geschlossen".
+_TEMPORARILY = (
+    r"vorübergehend|temporär|zurzeit|dauerhaft|bis auf weiteres|permanent|permanentemente"
+    r"|definitivamente|temporaneamente|temporairement|définitivement|tijdelijk|dočasně"
+    r"|tymczasowo|czasowo|ideiglenesen|tillfälligt|midlertidig|midlertidigt|geçici olarak"
+    r"|προσωρινά"
+)
+CLOSED_HOURS = re.compile(
+    rf"\s*(?:(?:{_TEMPORARILY})\s+)?(?:(?:off|{_CLOSED})\b|{_CLOSED_UNSPACED})",
+    re.IGNORECASE,
+)
+
+
+# The OSM tags a place keeps in the database: those the app reads (category, indoor or
+# outdoor, hours, venue details, Wikimedia links, names to search by and to go by, which
+# app.ingest.enrich reads again: display_name). The rest (addresses,
+# survey dates, names in other languages) is half the size of a place's tags, which the free
+# database plan has little room for. The Overpass cache (data/raw) keeps every tag: a
+# re-import brings back any the app starts to read. test_osm checks that it reads no other.
+KEPT_TAGS = frozenset(
+    {
+        "name",
+        "name:en",
+        "int_name",
+        "tourism",
+        "amenity",
+        "historic",
+        "leisure",
+        "shop",
+        "place",
+        "building",
+        "memorial",
+        "artwork_type",
+        "castle_type",
+        "indoor",
+        "covered",
+        "lit",
+        "access",
+        "opening_hours",
+        "website",
+        "contact:website",
+        "phone",
+        "contact:phone",
+        "cuisine",
+        "outdoor_seating",
+        "wikidata",
+        "wikipedia",
+        "wikimedia_commons",
+        "image",
+        "description",
+        "description:en",
+    }
+)
+KEPT_TAG_PREFIXES = ("diet:",)
+
+
+def kept_tags(tags: dict[str, str]) -> dict[str, str]:
+    """The tags a place keeps in the database (KEPT_TAGS, and romanized names)."""
+    return {
+        k: v
+        for k, v in tags.items()
+        if k in KEPT_TAGS or k.startswith(KEPT_TAG_PREFIXES) or romanized_name(k)
+    }
+
+
+def romanized_name(key: str) -> bool:
+    """A tag with a name in Latin letters: name:ja-Latn, name:ko-Latn, name:ja_rm."""
+    return key.startswith("name:") and key.endswith(("-Latn", "_rm"))
 
 
 @dataclass(frozen=True)
@@ -97,14 +174,21 @@ class PlaceRecord:
         return self.tags.get("website") or self.tags.get("contact:website")
 
 
-def build_query(bbox: BBox, timeout_s: int = 180) -> str:
+# Overpass numbers the area of OSM relation N as this plus N.
+OVERPASS_AREA_BASE = 3_600_000_000
+
+
+def build_query(bbox: BBox, timeout_s: int = 180, boundary: int | None = None) -> str:
+    """Places in `bbox`, and inside the OSM relation `boundary` too when there is one."""
     values_by_key: dict[str, set[str]] = defaultdict(set)
     for key, values, _ in CATEGORY_RULES:
         values_by_key[key] |= values
 
-    box = f"{bbox.south},{bbox.west},{bbox.north},{bbox.east}"
+    area = f"({bbox.south},{bbox.west},{bbox.north},{bbox.east})"
+    if boundary is not None:
+        area += f"(area:{OVERPASS_AREA_BASE + boundary})"
     selectors = "\n".join(
-        f'  nwr["{key}"~"^({"|".join(sorted(values))})$"]["name"]({box});'
+        f'  nwr["{key}"~"^({"|".join(sorted(values))})$"]["name"]{area};'
         for key, values in sorted(values_by_key.items())
     )
     # "out center" gives ways and relations a single representative point.
@@ -141,8 +225,32 @@ def categorize(tags: dict[str, str]) -> str | None:
     return None
 
 
+def in_latin_script(text: str) -> bool:
+    """Whether every letter of `text` is a Latin one (accented or not, ª and º too)."""
+    return all(
+        not ch.isalpha() or ord(ch) <= 0x24F or unicodedata.name(ch, "").startswith("LATIN")
+        for ch in text
+    )
+
+
+def display_name(tags: dict[str, str]) -> str:
+    """The name a place goes by: its OSM name, or for a name in another script ("浅草寺",
+    "Ακρόπολη", "香港文化中心 Hong Kong Cultural Centre") its English name or a
+    romanization when OSM has one ("Sensō-ji"). The OSM name stays in the tags."""
+    name = tags.get("name", "").strip()
+    if in_latin_script(name):
+        return name
+    for key in ("name:en", "int_name", *sorted(filter(romanized_name, tags))):
+        other = tags.get(key, "").strip()
+        if other and in_latin_script(other) and any(ch.isalpha() for ch in other):
+            return other
+    return name
+
+
 def _is_worth_visiting(name: str, category: str, tags: dict[str, str]) -> bool:
-    if tags.get("access") in SKIP_ACCESS or CLOSED_NAME.search(name):
+    # The OSM name tells a closed place too when it goes by another one ("喫茶（閉店）").
+    names = (name, tags.get("name", ""))
+    if tags.get("access") in SKIP_ACCESS or any(CLOSED_NAME.search(n) for n in names):
         return False
     if category in VENUE_CATEGORIES:
         return not CLOSED_HOURS.match(tags.get("opening_hours", ""))
@@ -153,7 +261,7 @@ def parse_elements(elements: list[dict[str, Any]]) -> list[PlaceRecord]:
     records: list[PlaceRecord] = []
     for element in elements:
         tags: dict[str, str] = element.get("tags", {})
-        name = tags.get("name", "").strip()
+        name = display_name(tags)
         category = categorize(tags)
         if not name or category is None or not _is_worth_visiting(name, category, tags):
             continue

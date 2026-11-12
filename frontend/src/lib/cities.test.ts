@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   cityBounds,
+  cityGroups,
   cityName,
   citiesNamedIn,
   conflictingCity,
@@ -84,6 +85,26 @@ describe("city names and areas", () => {
       [52.6756, 13.7612],
     ]);
   });
+
+  it("groups cities by part of the world, Europe first, each in alphabetical order", () => {
+    const at = (slug: string, name: string, timezone: string): City => ({
+      ...LISBON,
+      slug,
+      name,
+      timezone,
+    });
+    const tokyo = at("tokyo", "Tokyo", "Asia/Tokyo");
+    const sydney = at("sydney", "Sydney", "Australia/Sydney");
+    const utc = at("utc", "Nowhere", "UTC");
+    const groups = cityGroups([tokyo, LISBON, SAO_PAULO, utc, sydney, BERLIN]);
+    expect(groups).toEqual([
+      { label: "Europe", cities: [BERLIN, LISBON] },
+      { label: "The Americas", cities: [SAO_PAULO] },
+      { label: "Asia", cities: [tokyo] },
+      { label: "Oceania", cities: [sydney] },
+      { label: "Elsewhere", cities: [utc] },
+    ]);
+  });
 });
 
 describe("examples", () => {
@@ -97,6 +118,7 @@ describe("examples", () => {
 
   it("hints at places to search for in the city", () => {
     expect(placeSearchHint("lisbon")).toBe("Search, e.g. Jerónimos or castelo");
+    expect(placeSearchHint("tokyo")).toBe("Search, e.g. Senso-ji or Skytree");
     expect(placeSearchHint("sao-paulo")).toBe("Search by name");
     expect(placeSearchHint(null)).toBe("Search by name");
   });

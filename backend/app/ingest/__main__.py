@@ -18,7 +18,14 @@ from sqlalchemy.dialects.postgresql import insert
 from app.db.models import Category, Place
 from app.db.session import create_engine, create_sessionmaker
 from app.ingest.cities import CITIES, City
-from app.ingest.osm import PlaceRecord, build_query, deduplicate, fetch_elements, parse_elements
+from app.ingest.osm import (
+    PlaceRecord,
+    build_query,
+    deduplicate,
+    fetch_elements,
+    kept_tags,
+    parse_elements,
+)
 
 # Raw Overpass responses are cached so re-runs don't hit the public API.
 CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
@@ -44,7 +51,7 @@ async def load_elements(city: City, refresh: bool) -> list[dict[str, Any]]:
 
     print(f"Querying Overpass for {city.name}...")
     async with httpx.AsyncClient() as client:
-        elements = await fetch_elements(build_query(city.bbox), client)
+        elements = await fetch_elements(build_query(city.bbox, boundary=city.boundary), client)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_file.write_text(json.dumps(elements, ensure_ascii=False), encoding="utf-8")
     return elements
@@ -58,7 +65,7 @@ def to_row(record: PlaceRecord, city: City, category_ids: dict[str, int]) -> dic
         "name": record.name,
         "category_id": category_ids[record.category],
         "geom": WKTElement(f"POINT({record.lon} {record.lat})", srid=4326),
-        "tags": record.tags,
+        "tags": kept_tags(record.tags),
         "wikidata": record.wikidata,
         "opening_hours": record.opening_hours,
         "website": record.website,

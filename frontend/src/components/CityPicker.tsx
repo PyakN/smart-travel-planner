@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { SELECT } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { cityGroups } from "@/lib/cities";
 import { cityNow, clockTime } from "@/lib/format";
 import type { City } from "@/lib/types";
 
@@ -82,10 +83,14 @@ export default function CityPicker({
           onChange={(event) => onChange(event.target.value)}
           className={cn(SELECT, "h-11 w-full")}
         >
-          {cities.map((city) => (
-            <option key={city.slug} value={city.slug}>
-              {city.name}, {localTime(city)} local time
-            </option>
+          {cityGroups(cities).map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.cities.map((city) => (
+                <option key={city.slug} value={city.slug}>
+                  {city.name}, {localTime(city)} local time
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </div>

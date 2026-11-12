@@ -1,4 +1,5 @@
-"""Add photos, short descriptions and fame to a city's places (run after the OSM import).
+"""Add photos, short descriptions and fame to a city's places, and English names to those
+OSM names in another script only (run after the OSM import, which sets the names again).
 
 Usage (from backend/):  python -m app.ingest.enrich lisbon [--refresh]
 
@@ -19,7 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Place
 from app.db.session import create_engine, create_sessionmaker
-from app.ingest.cities import CITIES
+from app.geo import BBox
+from app.ingest.cities import CITIES, City
+from app.ingest.osm import display_name, in_latin_script
 from app.ingest.wiki import (
     Photo,
     WikidataInfo,
@@ -33,6 +36,8 @@ from app.ingest.wiki import (
 )
 
 CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
+# Wikidata may place an item a little off its city's bbox (a fort on the shore).
+AREA_MARGIN_DEG = 0.05
 
 
 @dataclass
@@ -49,11 +54,14 @@ class WikiCache:
             return cls()
         raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
         return cls(
-            # Items cached before Wikipedias were counted are asked again.
+            # Items cached before Wikipedias were counted, or labels and coordinates asked
+            # for, are asked again.
             wikidata={
-                k: WikidataInfo(**v) if v else None
+                k: WikidataInfo(**v | {"coords": tuple(v["coords"]) if v["coords"] else None})
+                if v
+                else None
                 for k, v in raw["wikidata"].items()
-                if not v or "wikipedias" in v
+                if not v or {"wikipedias", "label", "coords"} <= v.keys()
             },
             photos={k: Photo(**v) if v else None for k, v in raw["photos"].items()},
             extracts=raw["extracts"],
@@ -75,40 +83,80 @@ class EnrichStats:
     photos: int
     descriptions: int
     in_wikipedia: int
+    english_names: int = 0
+    not_the_place: int = 0
+
+
+def about_the_place(info: WikidataInfo | None, area: BBox) -> bool:
+    """Whether the Wikidata item OSM links is the place itself: Wikidata places it in the
+    city. OSM often links what a place is about instead: the person a statue or a grave is
+    of, a zoo's animals, an event, an organisation, another cast of a sculpture. Their fame,
+    photo, description and name are not the place's."""
+    if info is None or info.coords is None:
+        return False
+    lat, lon = info.coords
+    margin = AREA_MARGIN_DEG
+    return (
+        area.south - margin <= lat <= area.north + margin
+        and area.west - margin <= lon <= area.east + margin
+    )
+
+
+def english_name(name: str, info: WikidataInfo | None) -> str:
+    """The place's name, or Wikidata's English label for a name in another script that the
+    OSM import found no English or romanized name for ("清水寺": "Kiyomizu-dera")."""
+    label = info.label.strip() if info and info.label else ""
+    if in_latin_script(name) or not label or not in_latin_script(label):
+        return name
+    return label
 
 
 async def enrich_city(
-    session: AsyncSession, client: httpx.AsyncClient, city: str, cache: WikiCache
+    session: AsyncSession, client: httpx.AsyncClient, city: City, cache: WikiCache
 ) -> EnrichStats:
     rows = (
         await session.execute(
-            select(Place.id, Place.wikidata, Place.tags).where(Place.city == city)
+            select(Place.id, Place.wikidata, Place.tags).where(Place.city == city.slug)
         )
     ).all()
 
     qids = sorted({qid for _, qid, _ in rows if qid and qid not in cache.wikidata})
     found = await fetch_wikidata(client, qids)
     cache.wikidata |= {qid: found.get(qid) for qid in qids}
-    info = {place_id: cache.wikidata.get(qid) if qid else None for place_id, qid, _ in rows}
+    linked = {place_id: cache.wikidata.get(qid) if qid else None for place_id, qid, _ in rows}
+    info = {pid: i if about_the_place(i, city.bbox) else None for pid, i in linked.items()}
+    not_the_place = {pid for pid, i in linked.items() if i is not None and info[pid] is None}
+    # The Wikipedia article OSM links for such a place is about the same thing. Names start
+    # from the one the OSM import gave, so a run undoes what an earlier one got wrong.
+    places: list[tuple[int, dict[str, str], str]] = [
+        (pid, {k: v for k, v in tags.items() if k != "wikipedia"}, display_name(tags))
+        if pid in not_the_place
+        else (pid, tags, display_name(tags))
+        for pid, _, tags in rows
+    ]
 
-    files = {pid: photo_file(tags, info[pid]) for pid, _, tags in rows}
+    files = {pid: photo_file(tags, info[pid]) for pid, tags, _ in places}
     new_files = sorted({f for f in files.values() if f and f not in cache.photos})
     photos = await fetch_photos(client, new_files)
     cache.photos |= {f: photos.get(f) for f in new_files}
 
-    titles = {t for pid, _, tags in rows if (t := article_title(tags, info[pid]))}
+    titles = {t for pid, tags, _ in places if (t := article_title(tags, info[pid]))}
     new_titles = sorted(t for t in titles if t not in cache.extracts)
     extracts = await fetch_extracts(client, new_titles)
     cache.extracts |= {t: extracts.get(t) for t in new_titles}
     known_extracts = {t: e for t, e in cache.extracts.items() if e}
 
     updates: list[dict[str, Any]] = []
-    for place_id, _, tags in rows:
+    english_names = 0
+    for place_id, tags, name in places:
         file = files[place_id]
         photo = cache.photos.get(file) if file else None
+        english = english_name(name, info[place_id])
+        english_names += english != name
         updates.append(
             {
                 "id": place_id,
+                "name": english,
                 "description": description(tags, info[place_id], known_extracts),
                 "image_url": photo.url if photo else None,
                 "image_page_url": photo.page_url if photo else None,
@@ -124,6 +172,8 @@ async def enrich_city(
         photos=sum(u["image_url"] is not None for u in updates),
         descriptions=sum(u["description"] is not None for u in updates),
         in_wikipedia=sum(u["wikipedia_languages"] > 0 for u in updates),
+        english_names=english_names,
+        not_the_place=len(not_the_place),
     )
 
 
@@ -133,13 +183,15 @@ async def run(city: str, refresh: bool) -> None:
     engine = create_engine()
     try:
         async with httpx.AsyncClient() as client, create_sessionmaker(engine)() as session:
-            stats = await enrich_city(session, client, city, cache)
+            stats = await enrich_city(session, client, CITIES[city], cache)
     finally:
         cache.save(cache_file)
         await engine.dispose()
     print(
         f"{stats.places} places: {stats.photos} with a photo, "
-        f"{stats.descriptions} with a description, {stats.in_wikipedia} in Wikipedia "
+        f"{stats.descriptions} with a description, {stats.in_wikipedia} in Wikipedia, "
+        f"{stats.english_names} named in English by Wikidata; {stats.not_the_place} linked to "
+        "a Wikidata item that is not the place "
         f"(cache: {cache_file})"
     )
 

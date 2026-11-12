@@ -26,7 +26,9 @@ def test_areas_are_supported_cities() -> None:
     areas = read_areas()
     assert areas
     assert {city for city, _, _ in areas} == set(CITIES)
-    assert len({region for _, region, _ in areas}) == len(areas)
+    # A region may serve several cities (prepare.sh downloads it once), but a city's
+    # lines are cut out of different regions.
+    assert len({(city, region) for city, region, _ in areas}) == len(areas)
 
 
 @pytest.mark.parametrize("slug", sorted(CITIES))
