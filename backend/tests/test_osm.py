@@ -1,16 +1,21 @@
 import asyncio
+import re
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 from app.ingest.cities import CITIES
 from app.ingest.osm import (
+    KEPT_TAG_PREFIXES,
+    KEPT_TAGS,
     OVERPASS_URLS,
     PlaceRecord,
     build_query,
     categorize,
     deduplicate,
     fetch_elements,
+    kept_tags,
     normalize_name,
     parse_elements,
 )
@@ -328,3 +333,48 @@ def test_fetch_elements_tries_every_mirror_in_turn() -> None:
 
     assert asyncio.run(fetch()) == [{"id": 1}]
     assert tried == list(OVERPASS_URLS)
+
+
+def test_kept_tags_leave_out_what_the_app_does_not_read() -> None:
+    tags = {
+        "name": "Café A Brasileira",
+        "amenity": "cafe",
+        "diet:vegan": "limited",
+        "opening_hours": "Mo-Su 08:00-02:00",
+        "addr:street": "Rua Garrett",
+        "check_date": "2025-06-01",
+        "name:de": "Café Brasileira",
+        # Names to go by (display_name) stay.
+        "int_name": "A Brasileira",
+        "name:pt-Latn": "A Brasileira",
+    }
+    assert kept_tags(tags) == {
+        "name": "Café A Brasileira",
+        "amenity": "cafe",
+        "diet:vegan": "limited",
+        "opening_hours": "Mo-Su 08:00-02:00",
+        "int_name": "A Brasileira",
+        "name:pt-Latn": "A Brasileira",
+    }
+
+
+APP_DIR = Path(__file__).resolve().parents[1] / "app"
+# A tag read by name: tags.get("lit"), tags["name:en"], "building" in tags, has_key("...").
+TAG_READ = re.compile(
+    r"""tags(?:\.get\(|\[|\.has_key\()\s*"([^"]+)"|"([^"]+)"\s+(?:not\s+)?in\s+(?:\w+\.)?tags\b"""
+)
+
+
+def test_the_app_reads_only_kept_tags() -> None:
+    # The importer reads every tag (names to go by, closed places) before it keeps some.
+    importer = APP_DIR / "ingest" / "osm.py"
+    read = {
+        key
+        for path in APP_DIR.rglob("*.py")
+        if path != importer
+        for match in TAG_READ.finditer(path.read_text(encoding="utf-8"))
+        for key in match.groups()
+        if key
+    }
+    assert read, "the pattern finds no tag reads"
+    assert {k for k in read if k not in KEPT_TAGS and not k.startswith(KEPT_TAG_PREFIXES)} == set()

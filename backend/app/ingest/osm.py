@@ -94,6 +94,63 @@ CLOSED_HOURS = re.compile(
 )
 
 
+# The OSM tags a place keeps in the database: those the app reads (category, indoor or
+# outdoor, hours, venue details, Wikimedia links, names to search by and to go by, which
+# app.ingest.enrich reads again: display_name). The rest (addresses,
+# survey dates, names in other languages) is half the size of a place's tags, which the free
+# database plan has little room for. The Overpass cache (data/raw) keeps every tag: a
+# re-import brings back any the app starts to read. test_osm checks that it reads no other.
+KEPT_TAGS = frozenset(
+    {
+        "name",
+        "name:en",
+        "int_name",
+        "tourism",
+        "amenity",
+        "historic",
+        "leisure",
+        "shop",
+        "place",
+        "building",
+        "memorial",
+        "artwork_type",
+        "castle_type",
+        "indoor",
+        "covered",
+        "lit",
+        "access",
+        "opening_hours",
+        "website",
+        "contact:website",
+        "phone",
+        "contact:phone",
+        "cuisine",
+        "outdoor_seating",
+        "wikidata",
+        "wikipedia",
+        "wikimedia_commons",
+        "image",
+        "description",
+        "description:en",
+    }
+)
+KEPT_TAG_PREFIXES = ("diet:",)
+
+
+def kept_tags(tags: dict[str, str]) -> dict[str, str]:
+    """The tags a place keeps in the database (KEPT_TAGS, and romanized names)."""
+    return {
+        k: v
+        for k, v in tags.items()
+        if k in KEPT_TAGS or k.startswith(KEPT_TAG_PREFIXES) or romanized_name(k)
+    }
+
+
+def romanized_name(key: str) -> bool:
+    """A tag with a name in Latin letters: name:ja-Latn, name:ko-Latn, name:ja_rm."""
+    return key.startswith("name:") and key.endswith(("-Latn", "_rm"))
+
+
 @dataclass(frozen=True)
 class PlaceRecord:
     osm_type: str
@@ -176,12 +233,7 @@ def display_name(tags: dict[str, str]) -> str:
     name = tags.get("name", "").strip()
     if _in_latin_script(name):
         return name
-    romanized = sorted(
-        key
-        for key in tags
-        if key.startswith("name:") and (key.endswith("-Latn") or key.endswith("_rm"))
-    )
-    for key in ("name:en", "int_name", *romanized):
+    for key in ("name:en", "int_name", *sorted(filter(romanized_name, tags))):
         other = tags.get(key, "").strip()
         if other and _in_latin_script(other) and any(ch.isalpha() for ch in other):
             return other

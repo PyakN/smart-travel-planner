@@ -18,7 +18,14 @@ from sqlalchemy.dialects.postgresql import insert
 from app.db.models import Category, Place
 from app.db.session import create_engine, create_sessionmaker
 from app.ingest.cities import CITIES, City
-from app.ingest.osm import PlaceRecord, build_query, deduplicate, fetch_elements, parse_elements
+from app.ingest.osm import (
+    PlaceRecord,
+    build_query,
+    deduplicate,
+    fetch_elements,
+    kept_tags,
+    parse_elements,
+)
 
 # Raw Overpass responses are cached so re-runs don't hit the public API.
 CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
@@ -58,7 +65,7 @@ def to_row(record: PlaceRecord, city: City, category_ids: dict[str, int]) -> dic
         "name": record.name,
         "category_id": category_ids[record.category],
         "geom": WKTElement(f"POINT({record.lon} {record.lat})", srid=4326),
-        "tags": record.tags,
+        "tags": kept_tags(record.tags),
         "wikidata": record.wikidata,
         "opening_hours": record.opening_hours,
         "website": record.website,
