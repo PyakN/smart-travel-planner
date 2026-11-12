@@ -134,11 +134,28 @@ class TestFactory:
         with pytest.raises(LLMError, match="GEMINI_API_KEY"):
             create_llm_service(settings)
 
-    def test_default_and_fallback_models(self) -> None:
+    def test_default_models(self) -> None:
+        settings = isolated_settings(llm_provider="gemini", gemini_api_key=SecretStr("test-key"))
+        service = create_llm_service(settings)
+        assert service.models == ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+
+    def test_fallback_model_from_settings(self) -> None:
         settings = isolated_settings(
             llm_provider="gemini",
             gemini_api_key=SecretStr("test-key"),
-            llm_fallback_model="gemini-2.5-flash",
+            llm_fallback_model="gemini-3.6-flash",
         )
         service = create_llm_service(settings)
-        assert service.models == ["gemini-3.5-flash-lite", "gemini-2.5-flash"]
+        assert service.models == ["gemini-3.5-flash-lite", "gemini-3.6-flash"]
+
+    def test_no_fallback_to_the_model_itself(self) -> None:
+        settings = isolated_settings(
+            llm_provider="gemini",
+            gemini_api_key=SecretStr("test-key"),
+            llm_model="gemini-3.1-flash-lite",
+        )
+        assert create_llm_service(settings).models == ["gemini-3.1-flash-lite"]
+
+    def test_no_default_fallback_for_openai(self) -> None:
+        settings = isolated_settings(llm_provider="openai", openai_api_key=SecretStr("test-key"))
+        assert create_llm_service(settings).models == ["gpt-5-mini"]

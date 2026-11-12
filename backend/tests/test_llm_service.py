@@ -41,12 +41,30 @@ def test_retries_transient_errors() -> None:
     assert len(provider.calls) == 3
 
 
-def test_falls_back_to_second_model() -> None:
-    provider = FakeProvider().queue(TransientLLMError("503"), TransientLLMError("503"))
-    provider.queue(Answer(value=3))
-    service = make_service(provider, max_retries=1, fallback_model="backup")
+def test_falls_back_to_second_model_at_once() -> None:
+    provider = FakeProvider().queue(TransientLLMError("503"), Answer(value=3))
+    pauses: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        pauses.append(seconds)
+
+    service = LLMService(provider, model="main", fallback_model="backup", sleep=sleep)
     assert generate(service).value == 3
-    assert [c["model"] for c in provider.calls] == ["main", "main", "backup"]
+    assert [c["model"] for c in provider.calls] == ["main", "backup"]
+    assert pauses == []
+
+
+def test_retries_alternate_between_the_models() -> None:
+    provider = FakeProvider().queue(*[TransientLLMError("503")] * 3, Answer(value=3))
+    pauses: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        pauses.append(seconds)
+
+    service = LLMService(provider, model="main", fallback_model="backup", sleep=sleep)
+    assert generate(service).value == 3
+    assert [c["model"] for c in provider.calls] == ["main", "backup", "main", "backup"]
+    assert pauses == [1]  # one pause, between the rounds
 
 
 def test_gives_up_after_all_attempts() -> None:
@@ -186,8 +204,8 @@ def test_a_call_ends_by_its_deadline_retries_included() -> None:
 
 
 def test_no_retry_when_the_pause_before_it_passes_the_deadline() -> None:
-    provider = FakeProvider().queue(TransientLLMError("503"), Answer(value=8))
+    provider = FakeProvider().queue(*[TransientLLMError("503")] * 2, Answer(value=8))
     service = make_service(provider, deadline_s=0.5, max_retries=2, fallback_model="backup")
     with pytest.raises(LLMUnavailableError):
-        generate(service)  # the pause before the retry is 1 s
-    assert len(provider.calls) == 1
+        generate(service)  # the pause before the second round is 1 s
+    assert [c["model"] for c in provider.calls] == ["main", "backup"]
