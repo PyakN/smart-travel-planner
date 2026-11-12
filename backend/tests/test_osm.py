@@ -311,3 +311,20 @@ def test_fetch_elements_skips_a_mirror_whose_query_ran_out_of_time() -> None:
             return await fetch_elements("[out:json];", client)
 
     assert asyncio.run(fetch()) == [{"id": 1}, {"id": 2}]
+
+
+def test_fetch_elements_tries_every_mirror_in_turn() -> None:
+    tried: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        tried.append(str(request.url))
+        if str(request.url) == OVERPASS_URLS[-1]:
+            return httpx.Response(200, json={"elements": [{"id": 1}]})
+        return httpx.Response(502)
+
+    async def fetch() -> list[dict[str, Any]]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as client:
+            return await fetch_elements("[out:json];", client)
+
+    assert asyncio.run(fetch()) == [{"id": 1}]
+    assert tried == list(OVERPASS_URLS)

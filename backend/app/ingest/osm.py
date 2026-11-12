@@ -14,6 +14,9 @@ from app.geo import BBox, haversine_m
 OVERPASS_URLS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    # VK Maps' public instance: it answered most cities while the other two were down or
+    # overloaded (it failed now and then too).
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 )
 USER_AGENT = "smart-travel-planner/0.1 (pet project; POI import)"
 
