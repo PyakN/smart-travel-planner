@@ -64,6 +64,31 @@ export function cityName(cities: City[] | null, slug: string): string {
   );
 }
 
+// Parts of the world, from the first part of a city's IANA time zone.
+const REGIONS: [prefix: string, label: string][] = [
+  ["Europe/", "Europe"],
+  ["America/", "The Americas"],
+  ["Asia/", "Asia"],
+  ["Africa/", "Africa"],
+  ["Australia/", "Oceania"],
+  ["Pacific/", "Oceania"],
+];
+
+/** The cities by part of the world (Europe first), each part in alphabetical order. */
+export function cityGroups(cities: City[]): { label: string; cities: City[] }[] {
+  const labels = [...new Set(REGIONS.map(([, label]) => label)), "Elsewhere"];
+  const regionOf = (city: City) =>
+    REGIONS.find(([prefix]) => city.timezone.startsWith(prefix))?.[1] ?? "Elsewhere";
+  return labels
+    .map((label) => ({
+      label,
+      cities: cities
+        .filter((city) => regionOf(city) === label)
+        .sort((a, b) => a.name.localeCompare(b.name, "en")),
+    }))
+    .filter((group) => group.cities.length > 0);
+}
+
 /** A city's bounding box as Leaflet bounds: [[south, west], [north, east]]. */
 export function cityBounds({ bbox }: Pick<City, "bbox">): [[number, number], [number, number]] {
   const [west, south, east, north] = bbox;
