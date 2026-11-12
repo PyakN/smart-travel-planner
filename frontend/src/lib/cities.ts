@@ -128,11 +128,56 @@ export function examplesFor(city: Pick<City, "slug" | "name">): string[] {
   );
 }
 
-// Two well-known places of each city, as they are named in its data.
+// Two well-known places of each city, as the place search finds them (by the name in its
+// data, its English name or its name in OSM).
 const SEARCH_EXAMPLES: Record<string, string> = {
   lisbon: "Jerónimos or castelo",
   berlin: "Reichstag or Brandenburger Tor",
   barcelona: "Sagrada Família or Park Güell",
+  amsterdam: "Rijksmuseum or Anne Frank Huis",
+  athens: "Parthenon or Acropolis",
+  bangkok: "Grand Palace or Wat Arun",
+  brussels: "Atomium or Manneken Pis",
+  budapest: "Parliament or Széchenyi",
+  "buenos-aires": "Teatro Colón or Recoleta",
+  "cape-town": "Kirstenbosch or Castle of Good Hope",
+  copenhagen: "Den lille Havfrue or Rosenborg",
+  dubai: "Burj Khalifa or Dubai Frame",
+  dublin: "Guinness or Dublin Castle",
+  edinburgh: "Edinburgh Castle or Holyrood",
+  florence: "Uffizi or Ponte Vecchio",
+  "hong-kong": "Tian Tan Buddha or The Peak",
+  istanbul: "Ayasofya or Topkapı",
+  krakow: "Wawel or Rynek Główny",
+  kyoto: "Kiyomizu-dera or Kinkaku-ji",
+  london: "British Museum or Tower Bridge",
+  madrid: "Prado or Palacio Real",
+  marrakesh: "Jemaa El-Fna or Majorelle",
+  "mexico-city": "Templo Mayor or Chapultepec",
+  milan: "Duomo or Castello Sforzesco",
+  montreal: "Notre-Dame or Mont-Royal",
+  munich: "Frauenkirche or Nymphenburg",
+  naples: "Castel Nuovo or Capodimonte",
+  "new-york": "Statue of Liberty or Central Park",
+  oslo: "Operahuset or Vigeland",
+  paris: "Tour Eiffel or Louvre",
+  porto: "Livraria Lello or Ribeira",
+  prague: "Karlův most or Pražský hrad",
+  "rio-de-janeiro": "Cristo Redentor or Pão de Açúcar",
+  rome: "Colosseo or Trevi",
+  "san-francisco": "Golden Gate or Alcatraz",
+  seoul: "Gyeongbokgung or N Seoul Tower",
+  seville: "Alcázar or Giralda",
+  singapore: "Gardens by the Bay or Merlion",
+  stockholm: "Vasamuseet or Gamla stan",
+  sydney: "Opera House or Taronga",
+  taipei: "Taipei 101 or Lungshan",
+  tokyo: "Senso-ji or Skytree",
+  valencia: "Llotja or Oceanogràfic",
+  venice: "Rialto or Palazzo Ducale",
+  vienna: "Schönbrunn or Stephansdom",
+  warsaw: "Zamek Królewski or Wilanów",
+  "washington-dc": "Lincoln Memorial or Capitol",
 };
 
 /** The hint in a place search: "Search, e.g. Jerónimos or castelo". */

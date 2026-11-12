@@ -118,6 +118,7 @@ describe("examples", () => {
 
   it("hints at places to search for in the city", () => {
     expect(placeSearchHint("lisbon")).toBe("Search, e.g. Jerónimos or castelo");
+    expect(placeSearchHint("tokyo")).toBe("Search, e.g. Senso-ji or Skytree");
     expect(placeSearchHint("sao-paulo")).toBe("Search by name");
     expect(placeSearchHint(null)).toBe("Search by name");
   });
