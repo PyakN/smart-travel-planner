@@ -43,6 +43,7 @@ class WikidataInfo:
     description: str | None  # Wikidata's one-line English description
     article: str | None  # English Wikipedia title
     wikipedias: int  # Wikipedia languages with an article about it
+    coords: tuple[float, float] | None = None  # (lat, lon): where Wikidata places the item
 
 
 @dataclass(frozen=True)
@@ -89,9 +90,10 @@ def sparql_query(qids: Sequence[str]) -> str:
     """The Wikipedias are counted in a subquery, so several images or descriptions of an
     item do not multiply its count."""
     values = " ".join(f"wd:{q}" for q in qids if QID.match(q))
-    return f"""SELECT ?item ?image ?description ?article ?wikipedias WHERE {{
+    return f"""SELECT ?item ?image ?description ?article ?wikipedias ?coord WHERE {{
   VALUES ?item {{ {values} }}
   OPTIONAL {{ ?item wdt:P18 ?image }}
+  OPTIONAL {{ ?item wdt:P625 ?coord }}
   OPTIONAL {{ ?item schema:description ?description FILTER(LANG(?description) = "en") }}
   OPTIONAL {{ ?article schema:about ?item ; schema:isPartOf <https://en.wikipedia.org/> }}
   OPTIONAL {{
@@ -103,13 +105,22 @@ def sparql_query(qids: Sequence[str]) -> str:
 }}"""
 
 
+POINT = re.compile(r"^Point\(([-+.\deE]+) ([-+.\deE]+)\)$")
+
+
+def _point(wkt: str) -> tuple[float, float] | None:
+    """(lat, lon) of a WKT point on Earth ("Point(-9.13 38.71)"); None on other globes."""
+    match = POINT.match(wkt.strip())
+    return (float(match[2]), float(match[1])) if match else None
+
+
 def parse_sparql(payload: Mapping[str, Any]) -> dict[str, WikidataInfo]:
     """One entry per item; the first image and article win when there are several."""
     found: dict[str, dict[str, str]] = {}
     for binding in payload["results"]["bindings"]:
         qid = binding["item"]["value"].rsplit("/", 1)[-1]
         fields = found.setdefault(qid, {})
-        for key in ("image", "description", "article", "wikipedias"):
+        for key in ("image", "description", "article", "wikipedias", "coord"):
             if key in binding and key not in fields:
                 fields[key] = binding[key]["value"]
     return {
@@ -118,6 +129,7 @@ def parse_sparql(payload: Mapping[str, Any]) -> dict[str, WikidataInfo]:
             description=f.get("description"),
             article=unquote(f["article"].rsplit("/", 1)[-1]) if "article" in f else None,
             wikipedias=int(f.get("wikipedias", 0)),  # unbound: in no Wikipedia
+            coords=_point(f["coord"]) if "coord" in f else None,
         )
         for qid, f in found.items()
     }

@@ -51,6 +51,11 @@ def imageinfo_page(title: str, *, artist: str = "<a href='x'>Jane</a>") -> dict[
 
 
 class TestSparql:
+    def test_coordinates_on_another_globe_are_none(self) -> None:
+        mars = "<http://www.wikidata.org/entity/Q111> Point(137.4 -4.6)"
+        payload = {"results": {"bindings": [binding("Q1", coord=mars)]}}
+        assert parse_sparql(payload)["Q1"].coords is None
+
     def test_query_skips_invalid_ids(self) -> None:
         query = sparql_query(["Q1", "Q2'}", "X3"])
         assert "VALUES ?item { wd:Q1 }" in query
@@ -65,6 +70,7 @@ class TestSparql:
                         description="theatre in Lisbon",
                         article="https://en.wikipedia.org/wiki/Teatro_da_Trindade",
                         wikipedias="7",
+                        coord="Point(-9.1426 38.7114)",
                     ),
                     binding(
                         "Q1", image="https://commons.wikimedia.org/wiki/Special:FilePath/B.jpg"
@@ -75,7 +81,11 @@ class TestSparql:
         }
         assert parse_sparql(payload) == {
             "Q1": WikidataInfo(
-                "Teatro da Trindade 2017.jpg", "theatre in Lisbon", "Teatro_da_Trindade", 7
+                "Teatro da Trindade 2017.jpg",
+                "theatre in Lisbon",
+                "Teatro_da_Trindade",
+                7,
+                (38.7114, -9.1426),
             ),
             "Q2": WikidataInfo(None, None, None, 0),  # in no Wikipedia
         }
