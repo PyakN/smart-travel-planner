@@ -61,15 +61,32 @@ CATEGORY_RULES: list[tuple[str, frozenset[str], str]] = [
 # Small memorials that are not worth a walk.
 SKIP_MEMORIAL_TYPES = frozenset({"plaque", "blue_plaque", "stolperstein"})
 SKIP_ACCESS = frozenset({"private", "no"})
-# Closed, in English, Portuguese, German, Spanish and Catalan.
-_CLOSED = r"closed|fechad[ao]s?|encerrad[ao]s?|geschlossen|cerrad[ao]s?|tancats?|tancad[ae]s?"
+# Closed, as a word: English, Portuguese, German, Spanish, Catalan, French, Italian, Dutch,
+# Czech, Polish, Hungarian, Swedish, Danish, Norwegian, Turkish and Greek.
+_CLOSED = (
+    r"closed|fechad[ao]s?|encerrad[ao]s?|geschlossen|cerrad[ao]s?|tancats?|tancad[ae]s?"
+    r"|fermée?s?|chius[oaie]|gesloten|zavřen[oaáéý]|zamknięt[aey]|nieczynn[aey]|zárva|bezárt"
+    r"|stängt|stängda?|lukket|stengt|kapal[ıi]|kapand[ıi]|κλειστ(?:ό|ή|ά|ός|ο|η|α|ος)"
+)
+# ...and in the scripts written without spaces between words: Japanese, Chinese, Korean
+# and Thai ("（閉店）", "(2023年閉店)").
+_CLOSED_UNSPACED = r"閉店|閉業|休業中|歇業|結業|已關閉|已关闭|폐업|폐점|ปิดกิจการ|ปิดถาวร"
 # Places OSM still maps after they closed, named like "Alma (closed)", "Solmar (Fechada)",
 # "Kantine (bis vsl 2027 geschlossen)".
-CLOSED_NAME = re.compile(rf"\((?:[^()]*\s)?({_CLOSED})\)", re.IGNORECASE)
+CLOSED_NAME = re.compile(
+    rf"[(（](?:(?:[^()（）]*\s)?(?:{_CLOSED})|[^()（）]*(?:{_CLOSED_UNSPACED}))[)）]",
+    re.IGNORECASE,
+)
 # ...or venues with opening hours that say so ("Fechado permanentemente", "Cerrado
 # temporalmente", "vorübergehend geschlossen"), unlike "Su off" or "Mo geschlossen".
+_TEMPORARILY = (
+    r"vorübergehend|temporär|zurzeit|dauerhaft|bis auf weiteres|permanent|permanentemente"
+    r"|definitivamente|temporaneamente|temporairement|définitivement|tijdelijk|dočasně"
+    r"|tymczasowo|czasowo|ideiglenesen|tillfälligt|midlertidig|midlertidigt|geçici olarak"
+    r"|προσωρινά"
+)
 CLOSED_HOURS = re.compile(
-    rf"\s*((vorübergehend|temporär|zurzeit|dauerhaft|bis auf weiteres)\s+)?(off|{_CLOSED})\b",
+    rf"\s*(?:(?:{_TEMPORARILY})\s+)?(?:(?:off|{_CLOSED})\b|{_CLOSED_UNSPACED})",
     re.IGNORECASE,
 )
 

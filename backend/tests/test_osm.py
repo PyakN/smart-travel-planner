@@ -142,6 +142,44 @@ class TestParseElements:
         )
         assert [r.name for r in records] == ["Curry 36", "La tancada de dones"]
 
+    def test_skips_closed_places_in_the_other_cities_languages(self) -> None:
+        def cafe(osm_id: int, name: str, **tags: str) -> dict[str, Any]:
+            return node(osm_id, 48.9, 2.3, name=name, amenity="cafe", **tags)
+
+        records = parse_elements(
+            [
+                cafe(1, "Le Petit Café (Fermé)"),
+                cafe(2, "Bar Gino (chiuso)"),
+                cafe(3, "Café Hoppe (gesloten)"),
+                cafe(4, "Kavárna Slavia (zavřeno)"),
+                cafe(5, "Kawiarnia Noworolski (zamknięte)"),
+                cafe(6, "Kávéház (zárva)"),
+                cafe(7, "Kaffebar (stängt)"),
+                cafe(8, "Kahve Dünyası (kapandı)"),
+                cafe(9, "Καφενείο (κλειστό)"),
+                cafe(10, "喫茶ルノアール（閉店）"),
+                cafe(11, "カフェ (2023年閉店)"),
+                cafe(12, "카페 (폐업)"),
+                cafe(13, "Chez Paul", opening_hours="Fermé définitivement"),
+                cafe(14, "Caffè Rosati", opening_hours="temporaneamente chiuso"),
+                cafe(15, "Brownies", opening_hours="tijdelijk gesloten"),
+                cafe(16, "Kafé", opening_hours="midlertidig lukket"),
+                cafe(17, "Lokanta", opening_hours="geçici olarak kapalı"),
+                cafe(18, "喫茶", opening_hours="閉店"),
+                # Closed on Mondays only, and names that only contain a closing word, stay.
+                cafe(19, "Trattoria", opening_hours="Mo chiuso; Tu-Su 12:00-23:00"),
+                node(20, 41.0, 28.97, name="Grand Bazaar (Kapalı Çarşı)", amenity="marketplace"),
+                cafe(21, "La Ferme (Paris)"),
+                cafe(22, "閉店セール"),
+            ]
+        )
+        assert [r.name for r in records] == [
+            "Trattoria",
+            "Grand Bazaar (Kapalı Çarşı)",
+            "La Ferme (Paris)",
+            "閉店セール",
+        ]
+
     def test_every_named_venue(self) -> None:
         records = parse_elements(
             [
