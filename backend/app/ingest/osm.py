@@ -158,8 +158,37 @@ def categorize(tags: dict[str, str]) -> str | None:
     return None
 
 
+def _in_latin_script(text: str) -> bool:
+    """Whether every letter of `text` is a Latin one (accented or not, ª and º too)."""
+    return all(
+        not ch.isalpha() or ord(ch) <= 0x24F or unicodedata.name(ch, "").startswith("LATIN")
+        for ch in text
+    )
+
+
+def display_name(tags: dict[str, str]) -> str:
+    """The name a place goes by: its OSM name, or for a name in another script ("浅草寺",
+    "Ακρόπολη", "香港文化中心 Hong Kong Cultural Centre") its English name or a
+    romanization when OSM has one ("Sensō-ji"). The OSM name stays in the tags."""
+    name = tags.get("name", "").strip()
+    if _in_latin_script(name):
+        return name
+    romanized = sorted(
+        key
+        for key in tags
+        if key.startswith("name:") and (key.endswith("-Latn") or key.endswith("_rm"))
+    )
+    for key in ("name:en", "int_name", *romanized):
+        other = tags.get(key, "").strip()
+        if other and _in_latin_script(other) and any(ch.isalpha() for ch in other):
+            return other
+    return name
+
+
 def _is_worth_visiting(name: str, category: str, tags: dict[str, str]) -> bool:
-    if tags.get("access") in SKIP_ACCESS or CLOSED_NAME.search(name):
+    # The OSM name tells a closed place too when it goes by another one ("喫茶（閉店）").
+    names = (name, tags.get("name", ""))
+    if tags.get("access") in SKIP_ACCESS or any(CLOSED_NAME.search(n) for n in names):
         return False
     if category in VENUE_CATEGORIES:
         return not CLOSED_HOURS.match(tags.get("opening_hours", ""))
@@ -170,7 +199,7 @@ def parse_elements(elements: list[dict[str, Any]]) -> list[PlaceRecord]:
     records: list[PlaceRecord] = []
     for element in elements:
         tags: dict[str, str] = element.get("tags", {})
-        name = tags.get("name", "").strip()
+        name = display_name(tags)
         category = categorize(tags)
         if not name or category is None or not _is_worth_visiting(name, category, tags):
             continue

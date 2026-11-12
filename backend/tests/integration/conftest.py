@@ -48,6 +48,17 @@ SEED_PLACES: list[tuple[int, str, str, str, float, float, str | None, dict[str, 
     # One sight mapped in two pieces that both link it, as OSM does with bridges and walls.
     (7, "porto", "Ponte Luís I", "landmark", 41.1399, -8.6094, "Q900201", {}),
     (8, "porto", "Ponte Luís I, upper deck", "landmark", 41.1402, -8.6092, "Q900201", {}),
+    # A place that goes by its English name, its OSM name in Japanese (app.ingest.osm).
+    (
+        9,
+        "kyoto",
+        "Kinkaku-ji",
+        "religious",
+        35.0394,
+        135.7292,
+        None,
+        {"name": "金閣寺", "name:en": "Kinkaku-ji"},
+    ),
     # A compact fictional town with plenty of places, for tests that need spare candidates
     # (replacing stops). Its city is registered in CITIES only by the tests that use it.
     (101, "testville", "Testville Cathedral", "religious", 45.0000, 7.0000, "Q900001", {}),

@@ -222,6 +222,46 @@ class TestParseElements:
         assert place.opening_hours == "We-Mo 10:00-19:00"
         assert place.website == "https://maat.pt"
 
+    def test_names_in_another_script_go_by_their_english_or_romanized_name(self) -> None:
+        def sight(osm_id: int, **names: str) -> dict[str, Any]:
+            return node(osm_id, 35.7, 139.8, tourism="attraction", **names)
+
+        records = parse_elements(
+            [
+                sight(1, name="浅草寺", **{"name:en": "Sensō-ji", "name:ja-Latn": "Sensōji"}),
+                sight(2, name="Ακρόπολη", int_name="Akropoli"),
+                sight(3, name="東京駅", **{"name:ja-Latn": "Tōkyō-eki", "name:ja_rm": "Tokyo eki"}),
+                sight(4, name="香港文化中心 Hong Kong Cultural Centre", **{"name:en": "HKCC"}),
+                # No Latin name to go by, or one in the same script: the OSM name stays.
+                sight(5, name="ラーメン一蘭", **{"name:en": "一蘭"}),
+                # Latin names stay as OSM has them, ª and º too.
+                sight(6, name="Largo 1º de Dezembro", **{"name:en": "1st December Square"}),
+                sight(7, name="Torre de Belém", **{"name:en": "Belém Tower"}),
+            ]
+        )
+        assert [r.name for r in records] == [
+            "Sensō-ji",
+            "Akropoli",
+            "Tōkyō-eki",
+            "HKCC",
+            "ラーメン一蘭",
+            "Largo 1º de Dezembro",
+            "Torre de Belém",
+        ]
+        # The OSM name stays in the tags (the name search looks there too).
+        assert records[0].tags["name"] == "浅草寺"
+
+    def test_a_place_going_by_its_english_name_closed_by_its_own(self) -> None:
+        renoir = {"name": "喫茶ルノアール（閉店）", "int_name": "Renoir"}
+        kissa = {"name": "喫茶", "name:en": "Kissa (closed)"}
+        records = parse_elements(
+            [
+                node(1, 35.7, 139.8, amenity="cafe", **renoir),
+                node(2, 35.7, 139.8, amenity="cafe", **kissa),
+            ]
+        )
+        assert records == []
+
 
 class TestDeduplicate:
     def test_merges_same_name_nearby_keeping_wikidata(self) -> None:
