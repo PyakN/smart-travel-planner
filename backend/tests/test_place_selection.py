@@ -146,7 +146,12 @@ def test_city_aliases_resolve() -> None:
     assert resolve_city("Lisboa") is resolve_city(" lisbon ") is CITIES["lisbon"]
     assert resolve_city("Berlin") is CITIES["berlin"]
     assert resolve_city("barcelona") is CITIES["barcelona"]
-    assert resolve_city("tokyo") is None
+    # Accents ignored, and the name before a comma ("washington" from the LLM).
+    assert resolve_city("München") is resolve_city("munchen") is CITIES["munich"]
+    assert resolve_city("krakow") is resolve_city("Cracow") is CITIES["krakow"]
+    assert resolve_city("washington") is resolve_city("washington d.c.") is CITIES["washington-dc"]
+    assert resolve_city("new york city") is CITIES["new-york"]
+    assert resolve_city("ulaanbaatar") is None
 
 
 def test_rejects_a_text_about_another_city_than_the_chosen_one() -> None:
@@ -164,6 +169,6 @@ def test_rejects_a_text_about_another_city_than_the_chosen_one() -> None:
 
 
 def test_rejects_unsupported_city() -> None:
-    llm = LLMService(FakeProvider().queue(trip(city="tokyo")), model="m")
-    with pytest.raises(PlanningError, match="'tokyo' is not supported"):
-        asyncio.run(select_places(llm, session=None, text="Tokyo!", default_city="lisbon"))  # type: ignore[arg-type]
+    llm = LLMService(FakeProvider().queue(trip(city="ulaanbaatar")), model="m")
+    with pytest.raises(PlanningError, match="'ulaanbaatar' is not supported"):
+        asyncio.run(select_places(llm, session=None, text="Ulaanbaatar!", default_city="lisbon"))  # type: ignore[arg-type]

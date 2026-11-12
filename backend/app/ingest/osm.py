@@ -174,14 +174,21 @@ class PlaceRecord:
         return self.tags.get("website") or self.tags.get("contact:website")
 
 
-def build_query(bbox: BBox, timeout_s: int = 180) -> str:
+# Overpass numbers the area of OSM relation N as this plus N.
+OVERPASS_AREA_BASE = 3_600_000_000
+
+
+def build_query(bbox: BBox, timeout_s: int = 180, boundary: int | None = None) -> str:
+    """Places in `bbox`, and inside the OSM relation `boundary` too when there is one."""
     values_by_key: dict[str, set[str]] = defaultdict(set)
     for key, values, _ in CATEGORY_RULES:
         values_by_key[key] |= values
 
-    box = f"{bbox.south},{bbox.west},{bbox.north},{bbox.east}"
+    area = f"({bbox.south},{bbox.west},{bbox.north},{bbox.east})"
+    if boundary is not None:
+        area += f"(area:{OVERPASS_AREA_BASE + boundary})"
     selectors = "\n".join(
-        f'  nwr["{key}"~"^({"|".join(sorted(values))})$"]["name"]({box});'
+        f'  nwr["{key}"~"^({"|".join(sorted(values))})$"]["name"]{area};'
         for key, values in sorted(values_by_key.items())
     )
     # "out center" gives ways and relations a single representative point.

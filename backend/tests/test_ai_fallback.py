@@ -109,8 +109,14 @@ def test_reads_the_pace(text: str, pace: str) -> None:
         ("Um dia em LISBOA", "lisbon"),
         ("Barcelona, then Berlin", "barcelona"),
         ("From Berlin to Barcelona", "berlin"),
-        ("A weekend in Tokyo", None),
+        ("A weekend in Ulaanbaatar", None),
         ("Berliner Dom and more", None),
+        ("Two days in NYC, then Washington DC", "new-york"),
+        ("Washington, D.C. for the museums", "washington-dc"),
+        ("Kyoto temples, then a day in Tokyo", "kyoto"),
+        ("Ein Tag in München", "munich"),
+        # Streets and squares named after a city are not the city.
+        ("Washington Square, the High Line and SoHo", None),
     ],
 )
 def test_reads_the_first_supported_city(text: str, city: str | None) -> None:

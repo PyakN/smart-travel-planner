@@ -51,7 +51,7 @@ async def load_elements(city: City, refresh: bool) -> list[dict[str, Any]]:
 
     print(f"Querying Overpass for {city.name}...")
     async with httpx.AsyncClient() as client:
-        elements = await fetch_elements(build_query(city.bbox), client)
+        elements = await fetch_elements(build_query(city.bbox, boundary=city.boundary), client)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_file.write_text(json.dumps(elements, ensure_ascii=False), encoding="utf-8")
     return elements

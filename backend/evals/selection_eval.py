@@ -149,7 +149,7 @@ CASES = [
 
 # Requests that must be refused with a clear message instead of planning something else.
 REJECT_CASES = {
-    "unsupported-city": "A weekend in Tokyo, temples and ramen.",
+    "unsupported-city": "A weekend in Ulaanbaatar, monasteries and markets.",
 }
 
 

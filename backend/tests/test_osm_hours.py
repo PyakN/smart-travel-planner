@@ -62,6 +62,10 @@ def test_public_holidays_of_the_city() -> None:
     [
         ("berlin", (52.5163, 13.3777), date(2026, 10, 3)),  # German Unity Day
         ("barcelona", (41.4036, 2.1744), date(2026, 10, 12)),  # Spain's National Day
+        ("paris", (48.8606, 2.3376), date(2026, 7, 14)),  # Bastille Day
+        ("new-york", (40.7794, -73.9632), date(2026, 7, 3)),  # Independence Day, observed
+        ("tokyo", (35.7148, 139.7967), date(2026, 11, 3)),  # Culture Day
+        ("sydney", (-33.8568, 151.2153), date(2026, 1, 26)),  # Australia Day
     ],
 )
 def test_public_holidays_of_other_countries(

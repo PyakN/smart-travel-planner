@@ -14,7 +14,9 @@ def test_lists_the_supported_cities(client: TestClient) -> None:
     response = client.get("/cities")
     assert response.status_code == 200
     cities = {city["slug"]: city for city in response.json()}
-    assert list(cities) == ["lisbon", "berlin", "barcelona"]
+    # Lisbon first: the default city.
+    assert list(cities) == list(CITIES)
+    assert list(cities)[:3] == ["lisbon", "berlin", "barcelona"]
     assert cities["berlin"] == {
         "slug": "berlin",
         "name": "Berlin",
@@ -22,6 +24,8 @@ def test_lists_the_supported_cities(client: TestClient) -> None:
         "bbox": [13.0883, 52.3382, 13.7612, 52.6756],
     }
     assert cities["barcelona"]["timezone"] == "Europe/Madrid"
+    assert cities["washington-dc"]["name"] == "Washington, D.C."
+    assert cities["tokyo"]["timezone"] == "Asia/Tokyo"
 
 
 def test_plans_the_chosen_city_when_the_text_names_none(
@@ -52,7 +56,7 @@ def test_refuses_a_text_about_another_city_than_the_chosen_one(
 
 
 def test_refuses_an_unknown_city(client: TestClient, llm: FakeProvider) -> None:
-    response = client.post("/plan", json={"text": "A day in Tokyo", "city": "tokyo"})
+    response = client.post("/plan", json={"text": "A day in Ulaanbaatar", "city": "ulaanbaatar"})
     assert response.status_code == 422
-    assert "unknown city; supported: lisbon, berlin, barcelona" in response.text
+    assert "unknown city; supported: lisbon, berlin, barcelona, amsterdam" in response.text
     assert llm.calls == []

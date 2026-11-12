@@ -299,6 +299,18 @@ def test_build_query_covers_every_rule_and_bbox() -> None:
     assert query.endswith("out center tags;")
 
 
+def test_build_query_keeps_places_within_a_boundary() -> None:
+    # Hong Kong's bbox takes in Shenzhen: its places come from inside Hong Kong only.
+    hong_kong = CITIES["hong-kong"]
+    query = build_query(hong_kong.bbox, boundary=hong_kong.boundary)
+    selectors = [line for line in query.splitlines() if line.startswith("  nwr[")]
+    assert selectors
+    assert all(
+        line.endswith("(22.1367,113.8171,22.5683,114.5024)(area:3600913110);") for line in selectors
+    )
+    assert "area:" not in build_query(CITIES["lisbon"].bbox, boundary=CITIES["lisbon"].boundary)
+
+
 def test_fetch_elements_skips_a_mirror_whose_query_ran_out_of_time() -> None:
     answers = {
         OVERPASS_URLS[0]: {

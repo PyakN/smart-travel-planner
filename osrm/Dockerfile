@@ -1,7 +1,9 @@
 # Self-hosted OSRM: walking routes (foot profile) in the areas around the supported cities
-# (areas.txt). The street data is downloaded and processed while the image builds (~900 MB
-# of Geofabrik downloads, then about a minute and 1.2 GB of RAM); the image then routes on
-# its own, on port 5000.
+# (areas.txt). The street data is downloaded and processed while the image builds: ~20 GB of
+# Geofabrik downloads for the 47 cities (59 regions, each deleted once its cities are cut
+# out). With 3 cities that was ~900 MB, then about a minute and 1.2 GB of RAM; with all 47,
+# processing takes longer and more memory, not measured yet. The image then routes on its
+# own, on port 5000.
 #
 #   docker build -t travel-planner-osrm osrm
 #   docker run -p 5000:5000 travel-planner-osrm
