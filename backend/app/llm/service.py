@@ -154,7 +154,9 @@ class LLMService:
         clock = asyncio.get_running_loop().time
         deadline = clock() + self.deadline_s
         last_error: Exception | None = None
-        attempts = [(m, a) for m in self.models for a in range(self.max_retries + 1)]
+        # Rounds of one try per model, with a pause between rounds: an overloaded model
+        # (503s for minutes at a time) hands over to the next one at once.
+        attempts = [(m, a) for a in range(self.max_retries + 1) for m in self.models]
         for model, attempt in attempts:
             if (left := deadline - clock()) <= 0:
                 break
@@ -173,7 +175,7 @@ class LLMService:
             except (TransientLLMError, TimeoutError) as exc:
                 last_error = exc
                 logger.warning("LLM %s attempt %d failed: %r", model, attempt + 1, exc)
-                if attempt < self.max_retries:
+                if model == self.models[-1] and attempt < self.max_retries:
                     if clock() + 2**attempt >= deadline:  # no time left to try again
                         break
                     await self._sleep(2**attempt)
