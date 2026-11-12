@@ -70,6 +70,7 @@ class TestSparql:
                         description="theatre in Lisbon",
                         article="https://en.wikipedia.org/wiki/Teatro_da_Trindade",
                         wikipedias="7",
+                        label="Teatro da Trindade",
                         coord="Point(-9.1426 38.7114)",
                     ),
                     binding(
@@ -85,6 +86,7 @@ class TestSparql:
                 "theatre in Lisbon",
                 "Teatro_da_Trindade",
                 7,
+                "Teatro da Trindade",
                 (38.7114, -9.1426),
             ),
             "Q2": WikidataInfo(None, None, None, 0),  # in no Wikipedia

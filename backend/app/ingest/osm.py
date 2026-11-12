@@ -225,7 +225,7 @@ def categorize(tags: dict[str, str]) -> str | None:
     return None
 
 
-def _in_latin_script(text: str) -> bool:
+def in_latin_script(text: str) -> bool:
     """Whether every letter of `text` is a Latin one (accented or not, ª and º too)."""
     return all(
         not ch.isalpha() or ord(ch) <= 0x24F or unicodedata.name(ch, "").startswith("LATIN")
@@ -238,11 +238,11 @@ def display_name(tags: dict[str, str]) -> str:
     "Ακρόπολη", "香港文化中心 Hong Kong Cultural Centre") its English name or a
     romanization when OSM has one ("Sensō-ji"). The OSM name stays in the tags."""
     name = tags.get("name", "").strip()
-    if _in_latin_script(name):
+    if in_latin_script(name):
         return name
     for key in ("name:en", "int_name", *sorted(filter(romanized_name, tags))):
         other = tags.get(key, "").strip()
-        if other and _in_latin_script(other) and any(ch.isalpha() for ch in other):
+        if other and in_latin_script(other) and any(ch.isalpha() for ch in other):
             return other
     return name
 

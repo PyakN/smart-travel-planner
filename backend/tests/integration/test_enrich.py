@@ -109,22 +109,23 @@ def test_enrich_city(db_session: SessionFactory) -> None:
     assert not calls
 
 
-def test_cache_asks_again_for_items_saved_before_counts_or_coordinates(
+def test_cache_asks_again_for_items_saved_before_counts_labels_or_coordinates(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "testville-wiki.json"
     old = {"image": "Old.jpg", "description": None, "article": None}
     counted = old | {"wikipedias": 3}
-    current = counted | {"coords": [45.0, 7.0]}
+    labelled = counted | {"label": "X"}
+    current = labelled | {"coords": [45.0, 7.0]}
     raw = {
-        "wikidata": {"Q1": current, "Q2": old, "Q3": None, "Q4": counted},
+        "wikidata": {"Q1": current, "Q2": old, "Q3": None, "Q4": counted, "Q5": labelled},
         "photos": {},
         "extracts": {},
     }
     path.write_text(json.dumps(raw), encoding="utf-8")
 
     cache = WikiCache.load(path)
-    expected = WikidataInfo("Old.jpg", None, None, 3, (45.0, 7.0))
+    expected = WikidataInfo("Old.jpg", None, None, 3, "X", (45.0, 7.0))
     assert cache.wikidata == {"Q1": expected, "Q3": None}
 
 
@@ -141,6 +142,18 @@ def kyoto_names_afterwards(db_session: SessionFactory) -> Iterator[None]:
             await session.commit()
 
     asyncio.run(restore())
+
+
+@pytest.mark.usefixtures("kyoto_names_afterwards")
+def test_names_in_another_script_take_the_english_label(db_session: SessionFactory) -> None:
+    bindings = [
+        binding("Q900301", label="Golden Pavilion", coord="Point(135.7292 35.0394)"),
+        binding("Q900302", label="Kiyomizu-dera", coord="Point(135.7850 34.9949)"),
+    ]
+    stats, places = enrich_kyoto(db_session, bindings)
+    # Kinkaku-ji keeps the English name OSM gave it.
+    assert set(places) == {"Kinkaku-ji", "Kiyomizu-dera"}
+    assert stats.english_names == 1
 
 
 def enrich_kyoto(
@@ -165,13 +178,15 @@ def enrich_kyoto(
 
 @pytest.mark.usefixtures("kyoto_names_afterwards")
 def test_items_that_are_not_the_place_are_left_out(db_session: SessionFactory) -> None:
-    # OSM links the temple to its founder, a person Wikidata gives no location: his fame and
-    # portrait are not the temple's.
+    # OSM links the temple to its founder, a person Wikidata gives no location: his fame,
+    # portrait and name are not the temple's.
     founder = "https://commons.wikimedia.org/wiki/Special:FilePath/Founder.jpg"
     bindings = [
         binding("Q900301", wikipedias="57", coord="Point(135.7292 35.0394)"),
-        binding("Q900302", wikipedias="80", image=founder),
+        binding("Q900302", label="Sakanoue no Tamuramaro", wikipedias="80", image=founder),
     ]
+    # An earlier run took the founder for the temple and named it after him: undone.
+    enrich_kyoto(db_session, [binding("Q900302", label="Tamuramaro", coord="Point(135.78 34.99)")])
     stats, places = enrich_kyoto(db_session, bindings)
     assert places == {"Kinkaku-ji": 57, "清水寺": 0}
     assert stats.not_the_place == 1

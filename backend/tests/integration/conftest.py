@@ -49,7 +49,7 @@ SEED_PLACES: list[tuple[int, str, str, str, float, float, str | None, dict[str, 
     (7, "porto", "Ponte Luís I", "landmark", 41.1399, -8.6094, "Q900201", {}),
     (8, "porto", "Ponte Luís I, upper deck", "landmark", 41.1402, -8.6092, "Q900201", {}),
     # A place that goes by its English name, its OSM name in Japanese (app.ingest.osm), and
-    # one that OSM names in Japanese only.
+    # one that OSM names in Japanese only (Wikidata's English label names it: app.ingest.enrich).
     (
         9,
         "kyoto",
